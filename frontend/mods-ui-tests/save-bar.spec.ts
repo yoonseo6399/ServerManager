@@ -1,13 +1,20 @@
 import {test,expect} from '@playwright/test';
 test('unsaved bars stay visible at scroll positions, preserve failed drafts and guard navigation',async({page})=>{
- let name='원본 이름',fail=true,saves=0;
+ await page.emulateMedia({reducedMotion:'reduce'});
+ let name='원본 이름',domain='',pendingPath='',fail=true,saves=0;
  await page.route('**/api/**',async route=>{
   const p=new URL(route.request().url()).pathname;let body:any={};
   if(p==='/api/auth/session')body={appVersion:'0.4.8',user:{id:'owner',name:'Owner',owner:true,permissions:{}},csrf:'fixture',setupRequired:false};
   else if(p==='/api/instances')body=[{config:{id:'test',name,loader:'Fabric',minecraft:'1.21.1',loaderVersion:'0.16.14',port:25565,memoryMb:1024,javaPath:'java',runnerId:null},state:'STOPPED',pid:null,resources:null,directory:'/fixture',eulaAccepted:true,powerSaving:{config:{enabled:false,minutes:30},status:'OFF'},autoRestart:{config:{enabled:false,includeManual:false},status:'OFF'}}];
   else if(p==='/api/memory')body={totalMb:16000,freeMb:8000,reservedMb:1600,maxHeapMb:14400,startableHeapMb:14400};
-  else if(p==='/api/game-addresses')body={enabled:false,labels:{},hosts:{}};
-  else if(p==='/api/runners'||p.endsWith('/log-files'))body=[];
+  else if(p==='/api/game-addresses')body={enabled:false,labels:domain?{test:domain}:{},hosts:{}};
+  else if(p==='/api/instances/test/game-domain'){domain=route.request().postDataJSON().label;}
+  else if(p==='/api/admin/storage'){if(route.request().method()==='PUT')pendingPath=route.request().postDataJSON().path;body={supported:true,path:'/fixture',pending:pendingPath||null};}
+  else if(p==='/api/admin/updates')body={supported:true,enabled:true,current:'0.4.8',latest:null,message:'',checking:false,repository:''};
+  else if(p==='/api/admin/discord')body={config:{enabled:false,grants:[],alerts:[],superAdmins:[]},revision:0,tokenConfigured:false};
+  else if(p==='/api/admin/discord/status')body={state:'DISABLED',message:'',inviteUrl:null,guilds:[]};
+  else if(p==='/api/admin/webdav')body={config:{enabled:false,url:'',username:''},revision:0,passwordConfigured:false};
+  else if(p==='/api/auth/credentials'||p==='/api/admin/users'||p==='/api/admin/audit'||p==='/api/runners'||p.endsWith('/log-files'))body=[];
   else if(p.endsWith('/event-page'))body={events:[],hasMore:false};
   else if(p==='/api/instances/test'&&route.request().method()==='PUT'){saves++;if(fail){await route.fulfill({status:409,json:{message:'설정 충돌'}});return;}name=route.request().postDataJSON().name;}
   await route.fulfill({json:body});
@@ -25,4 +32,7 @@ test('unsaved bars stay visible at scroll positions, preserve failed drafts and 
  await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  await page.screenshot({path:'test-results/save-bars-mobile.png'});
  page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'콘솔',exact:true}).click();await expect(page.locator('#unsaved-bars .save-bar')).toHaveCount(0);
+ await page.getByRole('button',{name:'서버 설정',exact:true}).click();await page.getByLabel('이 서버의 하위 도메인 이름',{exact:true}).fill(' MyServer ');await page.getByRole('button',{name:'서버 도메인 저장',exact:true}).click();await expect(page.getByRole('region',{name:'서버 도메인 변경 사항'})).toHaveCount(0);expect(domain).toBe('myserver');
+ await page.getByRole('button',{name:'계정과 보안',exact:true}).click();await page.getByLabel('프로필 폴더 절대 경로',{exact:true}).fill('/new/fixture');page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'저장 위치 변경',exact:true}).click();await expect(page.getByRole('region',{name:'프로필 저장 위치 변경 사항'})).toHaveCount(0);expect(pendingPath).toBe('/new/fixture');
+
 });
