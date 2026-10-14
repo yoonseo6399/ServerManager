@@ -27,7 +27,7 @@ test('real HTTPS manager, two signed runner sessions, shared TCP routing, safe f
  const home=process.env.SM_RUNNERS_TEST_HOME||'';expect(home.startsWith('/tmp/servermanager-runners.')).toBe(true);
  const java=process.env.SM_RUNNERS_TEST_JAVA!,jar=process.env.SM_RUNNERS_TEST_JAR!;
  const legacy=process.env.SM_RUNNERS_TEST_LEGACY_JAR;
- if(legacy)expect(legacy.endsWith('/dist/server-manager-0.4.0-beta.8.jar')).toBe(true);
+ if(legacy)expect(/\/dist\/server-manager-(0\.4\.0-beta\.8|0\.4\.8)\.jar$/.test(legacy)).toBe(true);
  const cdp=await context.newCDPSession(page);await cdp.send('WebAuthn.enable');await cdp.send('WebAuthn.addVirtualAuthenticator',{options:{protocol:'ctap2',transport:'internal',hasResidentKey:true,hasUserVerification:true,isUserVerified:true,automaticPresenceSimulation:true}});
  await page.goto('/');await page.getByLabel('등록 코드').fill((await readFile(home+'/profiles/security/setup-code.txt','utf8')).trim());await page.getByRole('button',{name:'패스키 등록',exact:true}).click();await expect(page.getByRole('button',{name:'서버 실행기',exact:true})).toBeVisible();
  const session=await (await page.request.get('/api/auth/session')).json();
@@ -87,7 +87,7 @@ test('real HTTPS manager, two signed runner sessions, shared TCP routing, safe f
   const audit=(await readFile(home+'/profiles/security/audit.jsonl','utf8')).trim().split('\n').map(line=>JSON.parse(line));
   expect(audit.filter((e:any)=>e.action==='POST /api/runners/transfer/'+ids[0]+'/begin').length).toBeGreaterThanOrEqual(2);
   expect(createHash('sha256').update(await readFile(home+'/profiles/'+ids[0]+'/server/resume-proof.bin')).digest('hex')).toBe(createHash('sha256').update(Buffer.alloc(64*1024*1024,37)).digest('hex'));
-  console.log(legacy?'PASS: real beta.8 runners import existing folder through new manager without unknown-field JSON errors.':'PASS: forced signed WSS authentication replacement during live upload preserves transfer ID, received chunks and exact bytes.');
+  console.log(legacy?'PASS: real legacy runners import existing folder through new manager without unknown-field JSON errors.':'PASS: forced signed WSS authentication replacement during live upload preserves transfer ID, received chunks and exact bytes.');
   if(!legacy){
    expect(audit.filter((e:any)=>e.action==='PUT /api/runners/transfer/'+ids[0]+'/batch').length).toBeGreaterThan(0);
    expect(audit.filter((e:any)=>e.action==='PUT /api/runners/transfer/'+ids[0]+'/chunk').length).toBeLessThan(200);
@@ -154,6 +154,7 @@ test('real HTTPS manager, two signed runner sessions, shared TCP routing, safe f
   expect(JSON.stringify((await query(shared,'alpha.server.example.com')).description)).toContain('Fixture-0');
   await access(runnerHomes[1]+'/instances/'+ids[0]+'/server/custom-vanilla.jar');
   await api('/instances/'+ids[0]+'/stop','POST');await waitState(ids[0],'STOPPED');
+  if(process.env.SM_RECOVERY_ONLY==='1'){console.log('PASS: async manifest, signed runners, normal saved handoff and original-folder restart/migration.');return;}
   // Dependency-safe manual mod search executes on the real remote Fabric runner in a separate world.
   const modId=ids[1],modBase='/instances/'+modId+'/mods',central=home+'/profiles/'+modId+'/server',remote=runnerHomes[1]+'/instances/'+modId+'/server';
   const hash=async(path:string)=>createHash('sha256').update(await readFile(path)).digest('hex');

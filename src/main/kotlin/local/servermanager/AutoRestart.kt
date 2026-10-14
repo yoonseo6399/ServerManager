@@ -97,7 +97,7 @@ class AutoRestart(private val manager:ServerManager,private val desktop:DesktopL
                         }
                         pending.remove(id,p)
                         if(!allowed){messages[id]="10분 동안 3회 재시작하여 자동 재시작을 중단했습니다.";return@withStopped}
-                        try {manager.start(id)} catch(_:Exception) {messages[id]="자동 재시작에 실패했습니다. 실행기 연결·메모리·설치 상태를 확인하고 직접 시작하세요.";manager.automaticRestartError(id,messages.getValue(id))}
+                        try {manager.startAs(id,StartActor("AUTO","자동 재시작"))} catch(_:Exception) {messages[id]="자동 재시작에 실패했습니다. 실행기 연결·메모리·설치 상태를 확인하고 직접 시작하세요.";manager.automaticRestartError(id,messages.getValue(id))}
                     }
                 }.onFailure {
                     if(runCatching {manager.runtime(id).activityVersion!=p.activity}.getOrDefault(true))pending.remove(id,p)

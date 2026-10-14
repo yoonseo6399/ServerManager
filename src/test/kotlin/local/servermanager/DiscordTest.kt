@@ -85,20 +85,20 @@ class DiscordTest {
         val bot=DiscordBot(manager,AuditLog(temp.resolve("audit.jsonl")),desktop)
         try {
             assertContains(bot.execute(guild,emptySet(),"u","denied","a","start"),"권한이 없습니다")
-            verify(manager,never()).start(anyString())
+            verify(manager,never()).startAs(anyString(),any(StartActor::class.java) ?: StartActor("SYSTEM","fixture"))
             assertTrue(bot.choices(guild,emptySet(),false,"").isEmpty())
             assertEquals("a",bot.choices(guild,setOf(role),true,"친구").single().second)
             assertContains(bot.execute(guild,setOf(role),"u","one","a","start"),"시작을 요청")
             assertContains(bot.execute(guild,setOf(role),"u","one","a","start"),"이미 처리")
-            verify(manager,times(1)).start("a")
+            verify(manager,times(1)).startAs(eq("a") ?: "a",any(StartActor::class.java) ?: StartActor("SYSTEM","fixture"))
             assertContains(bot.execute(guild,setOf(role),"u","two","a","start"),"10초")
             desktop.stopping=true
             assertContains(bot.execute(guild,setOf(role),"another","maintenance","a","start"),"업데이트 중")
-            verify(manager,times(1)).start("a")
+            verify(manager,times(1)).startAs(eq("a") ?: "a",any(StartActor::class.java) ?: StartActor("SYSTEM","fixture"))
             desktop.stopping=false
             bot.save(DiscordSave(DiscordConfig(),1))
             assertContains(bot.execute(guild,setOf(role),"u","three","a","start"),"권한이 없습니다")
-            verify(manager,times(1)).start("a")
+            verify(manager,times(1)).startAs(eq("a") ?: "a",any(StartActor::class.java) ?: StartActor("SYSTEM","fixture"))
         } finally { bot.close() }
     }
     @Test fun `stop and restart use fresh action permissions and never force stop`() {
@@ -115,7 +115,7 @@ class DiscordTest {
             assertContains(bot.execute(guild,setOf(role),"u","ok-stop","a","stop"),"정상 종료")
             assertContains(bot.execute(guild,setOf(role),"u","ok-restart","a","restart"),"재시작")
             verify(manager,times(1)).stop("a",false)
-            verify(manager,times(1)).restart("a")
+            verify(manager,times(1)).restartAs(eq("a") ?: "a",any(StartActor::class.java) ?: StartActor("SYSTEM","fixture"))
             bot.save(DiscordSave(privileged.copy(enabled=false,grants=emptyList()),1))
             assertContains(bot.execute(guild,setOf(role),"u","revoked","a","restart"),"권한이 없습니다")
         } finally { bot.close() }

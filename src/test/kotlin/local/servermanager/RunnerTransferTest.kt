@@ -14,6 +14,7 @@ class RunnerTransferTest {
     @Test fun `legacy strict runner wire format excludes newly added fields`() {
         val (transfer,_,manager)=fixture();val gateway=mock(RunnerGateway::class.java)
         `when`(gateway.authorized("runner","session")).thenReturn(true)
+        while(transfer.preparedInventory("instance")==null)Thread.sleep(5)
         val reply=RunnerTransferApi(transfer,gateway,manager).begin("instance",RunnerTransferBegin(RunnerFileManifest(emptyMap(),emptySet())),"runner","session")
         val mapper=com.fasterxml.jackson.module.kotlin.jacksonObjectMapper()
         val parsed=mapper.readValue(mapper.writeValueAsBytes(reply),LegacyPlan::class.java)
@@ -29,6 +30,7 @@ class RunnerTransferTest {
         val manager=mock(ServerManager::class.java)
         val registry=mock(RunnerRegistry::class.java)
         `when`(manager.root).thenReturn(temp)
+        `when`(manager.runtime("instance")).thenReturn(RuntimeState())
         `when`(manager.profileDir("instance")).thenReturn(temp.resolve("instance"))
         `when`(manager.serverDir("instance")).thenReturn(base)
         `when`(manager.instance("instance")).thenReturn(Instance("instance","test",loaderVersion="21.1.252",port=25565,memoryMb=512,javaPath="java",runnerId="runner"))
@@ -193,6 +195,32 @@ class RunnerTransferTest {
         assertEquals("COMPLETE",restarted.transferState("runner","instance",plan.transferId))
         verify(manager).remoteCommitted("instance","runner","import")
         assertEquals("new world",base.resolve("world.dat").readText())
+    }
+
+    @Test fun `manifest API responds with retry while background hash holds no transfer lock and denies running or unauthorized access`() {
+        val (transfer,base,manager)=fixture();val gateway=mock(RunnerGateway::class.java)
+        `when`(gateway.authorized("runner","session")).thenReturn(true)
+        val manifest=RunnerFileManifest(mapOf("new" to CloudFile(java.security.MessageDigest.getInstance("SHA-256").digest("new".toByteArray()).joinToString(""){"%02x".format(it)},3)),emptySet())
+        val plan=transfer.begin("runner","instance",manifest)
+        val entered=java.util.concurrent.CountDownLatch(1);val release=java.util.concurrent.CountDownLatch(1)
+        val cache=VerifiedInventory({path->entered.countDown();check(release.await(5,java.util.concurrent.TimeUnit.SECONDS));FileInventory.collect(path).let {(f,d)->RunnerFileManifest(f,d)}})
+        RunnerTransfer::class.java.getDeclaredField("inventories").also {it.isAccessible=true;it.set(transfer,cache)}
+        val api=RunnerTransferApi(transfer,gateway,manager)
+        try {
+            val first=api.manifest("instance","runner","session")
+            assertEquals(503,first.statusCode.value());assertEquals("5",first.headers.getFirst("Retry-After"));assertEquals("no-store",first.headers.getFirst("Cache-Control"))
+            assertTrue(entered.await(2,java.util.concurrent.TimeUnit.SECONDS))
+            val pool=java.util.concurrent.Executors.newSingleThreadExecutor()
+            try {pool.submit {transfer.upload("runner","instance",plan.transferId,"new",0,"new".toByteArray())}.get(1,java.util.concurrent.TimeUnit.SECONDS)}finally{pool.shutdownNow()}
+            assertFailsWith<org.springframework.web.server.ResponseStatusException>{api.manifest("instance","runner","wrong")}
+            release.countDown()
+            val until=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5)
+            var response=api.manifest("instance","runner","session")
+            while(response.statusCode.value()==503 && System.nanoTime()<until){Thread.sleep(5);response=api.manifest("instance","runner","session")}
+            assertEquals(200,response.statusCode.value());assertEquals(emptyMap(),response.body!!.files)
+            manager.runtime("instance").state="RUNNING"
+            assertFailsWith<IllegalStateException>{api.manifest("instance","runner","session")}
+        }finally{release.countDown();transfer.close()}
     }
 
 }

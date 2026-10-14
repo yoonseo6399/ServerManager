@@ -46,9 +46,9 @@ class Api(private val manager: ServerManager,private val accounts:AuthStore,priv
         if(System.currentTimeMillis()-verified>5*60*1000)throw org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.PRECONDITION_REQUIRED,"기존 폴더 가져오기 전에 패스키로 다시 인증하세요")
         manager.importRemoteFolder(id);return mapOf("status" to "IMPORTING")
     }
-    @PostMapping("/instances/{id}/start") fun start(@PathVariable id: String)=manager.start(id)
+    @PostMapping("/instances/{id}/start") fun start(@PathVariable id: String,authentication:org.springframework.security.core.Authentication)=manager.startAs(id,StartActor("WEB",accounts.account(authentication.name)?.displayName ?: "웹 사용자"))
     @PostMapping("/instances/{id}/stop") fun stop(@PathVariable id: String,@RequestParam(defaultValue="false") force: Boolean)=manager.stop(id,force)
-    @PostMapping("/instances/{id}/restart") fun restart(@PathVariable id: String)=manager.restart(id)
+    @PostMapping("/instances/{id}/restart") fun restart(@PathVariable id: String,authentication:org.springframework.security.core.Authentication)=manager.restartAs(id,StartActor("WEB",accounts.account(authentication.name)?.displayName ?: "웹 사용자"))
     @PostMapping("/instances/{id}/command") fun command(@PathVariable id: String,@RequestBody req: CommandRequest)=manager.command(id,req.command)
     @GetMapping("/instances/{id}/events") fun events(@PathVariable id: String,@RequestParam(defaultValue="0") after: Long)=manager.events(id,after)
     @GetMapping("/instances/{id}/event-page") fun eventPage(@PathVariable id:String,@RequestParam(required=false) before:Long?,@RequestParam(required=false) after:Long?,@RequestParam(defaultValue="300") limit:Int)=manager.eventPage(id,before,after,limit)

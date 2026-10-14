@@ -138,6 +138,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     private val operationLocks=ConcurrentHashMap<String,Any>()
     private val stopMonitors=ConcurrentHashMap<String,StopMonitor>()
     private val stopTimeouts=ConcurrentHashMap.newKeySet<String>()
+    private val idleStops=ConcurrentHashMap.newKeySet<String>()
     private val stopping=ConcurrentHashMap.newKeySet<String>()
     private val ready=ConcurrentHashMap.newKeySet<String>()
     private val activity=ConcurrentHashMap<String,AtomicLong>()
@@ -495,8 +496,14 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             send(RunnerMessage("file-progress",id,detail=mapper.writeValueAsString(value.copy(direction="TO_RUNNER"))))
         }
         progress(FolderImportProgress("SCANNING",message="실행기로 받을 파일을 대조하고 있습니다"),true)
-        val response=http("GET","/api/runners/transfer/$id/manifest")
-        check(response.statusCode()==200) { "서버 파일 목록을 받지 못했습니다: HTTP ${response.statusCode()}" }
+        val deadline=System.nanoTime()+java.util.concurrent.TimeUnit.MINUTES.toNanos(30)
+        var response=http("GET","/api/runners/transfer/$id/manifest")
+        while(response.statusCode()==503 && System.nanoTime()<deadline) {
+            progress(FolderImportProgress("SCANNING",message="관리 서버에서 파일 무결성을 검증하고 있습니다. 검증 완료 후 이어받습니다"),true)
+            Thread.sleep(5000)
+            response=http("GET","/api/runners/transfer/$id/manifest")
+        }
+        transferResponse(response,"서버 파일 목록 검증 대기")
         val manifest=mapper.readValue<RunnerFileManifest>(response.body())
         DeltaTransfer.validate(manifest,serverDir(id))
         val stage=diagnosticRoot(id)?.resolve("stage-${UUID.randomUUID()}")?.createDirectories() ?: folders.stage(id)
@@ -583,9 +590,9 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                 }
             } } }
             val code=process.waitFor();sable.stopped(id);queryPorts.remove(id)
-            atomicText(instanceRoot(id).resolve("exit.json"),mapper.writeValueAsString(RunnerExitReport(code,CrashReports.changed(serverDir(id),crashesBefore),if(id in stopTimeouts)"STOP_TIMEOUT" else null)))
+            atomicText(instanceRoot(id).resolve("exit.json"),mapper.writeValueAsString(RunnerExitReport(code,CrashReports.changed(serverDir(id),crashesBefore),if(id in stopTimeouts)"STOP_TIMEOUT" else if(id in idleStops)"IDLE" else null)))
             ready.remove(id)
-            stopMonitors.remove(id)?.close();stopTimeouts.remove(id)
+            stopMonitors.remove(id)?.close();stopTimeouts.remove(id);idleStops.remove(id)
             stopping.remove(id)
             processes.remove(id,process)
             send(RunnerMessage("state",id,"SYNCING",version(),"종료 코드 $code · "+if(instance.syncEnabled())"변경 파일 인계 중" else "동기화 OFF · 실행기 파일 보존"))
@@ -593,12 +600,21 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         }
     }
     }
+    private fun sendExitReport(id:String,raw:String):HttpResponse<ByteArray> {
+        val report=mapper.readValue<RunnerExitReport>(raw)
+        val compatible=if(report.reason=="IDLE") {
+            val response=http("GET","/api/runners/transfer/$id/capabilities")
+            if(response.statusCode()!=404)transferResponse(response,"종료 사유 지원 확인 대기")
+            if(response.statusCode()==200 && mapper.readTree(response.body()).path("exitReasonProtocol").asInt()>=1)report else report.copy(reason=null)
+        } else report
+        return http("POST","/api/runners/transfer/$id/exit",HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(compatible)),"application/json")
+    }
     private fun uploadStopped(id:String) {
         if(!dirty(id).exists() || processes[id]?.isAlive==true || orphanAlive(id) || sessionToken==null || !reserveUpload(id))return
         try {
             if(configs[id]?.syncEnabled()==false) {
                 check(!instanceRoot(id).resolve("upload.pending").exists()) {"이전 인계를 먼저 완료하세요"}
-                instanceRoot(id).resolve("exit.json").takeIf {it.exists()}?.let {exit->transferResponse(http("POST","/api/runners/transfer/$id/exit",HttpRequest.BodyPublishers.ofString(exit.readText()),"application/json"),"서버 종료 보고 대기")}
+                instanceRoot(id).resolve("exit.json").takeIf {it.exists()}?.let {exit->transferResponse(sendExitReport(id,exit.readText()),"서버 종료 보고 대기")}
                 dirty(id).deleteIfExists();send(RunnerMessage("state",id,"STOPPED",version(),"동기화 OFF · 원본 파일은 현재 실행기에 있습니다"));return
             }
             val receipt=instanceRoot(id).resolve("upload.pending")
@@ -620,7 +636,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             }
             // A separate authenticated request arrives before commit, independent of WSS ordering.
             instanceRoot(id).resolve("exit.json").takeIf {it.exists()}?.let {exit->
-                val response=http("POST","/api/runners/transfer/$id/exit",HttpRequest.BodyPublishers.ofString(exit.readText()),"application/json")
+                val response=sendExitReport(id,exit.readText())
                 if(response.statusCode()!=404)transferResponse(response,"서버 종료 정보 전송 대기")
             }
             uploadFiles(id,null)
@@ -712,7 +728,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         // Only terminate this agent's tracked process, never a PID supplied to the OS.
         val process=processes[id] ?: return false
         if(expectedPid<=0 || !process.isAlive || process.pid()!=expectedPid)return false
-        stopping.add(id)
+        stopping.add(id);idleStops.remove(id)
         send(RunnerMessage("state",id,"STOPPING",version(),"사용자 요청으로 강제 종료 중 · 저장되지 않은 변경은 손실될 수 있습니다",pid=expectedPid))
         process.descendants().use {children->children.forEach {child->runCatching {child.destroyForcibly()}}}
         process.destroyForcibly()
@@ -724,7 +740,10 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         val process=processes[id];val counter=activity[id];val before=counter?.get()
         val config=configs[id]
         val count=if(process?.isAlive==true&&id in ready&&id !in stopping&&config!=null)queryPorts[id]?.let(query::currentCount) else null
-        val accepted=process!=null&&counter!=null&&processes[id]===process&&process.isAlive&&id in ready&&id !in stopping&&counter.get()==before&&count==0&&stop(id)
+        val accepted=synchronized(lifecycle) {
+            if(process==null||counter==null||processes[id]!==process||!process.isAlive||id !in ready||id in stopping||counter.get()!=before||count!=0)false
+            else {idleStops.add(id);stop(id).also {if(!it)idleStops.remove(id)}}
+        }
         send(RunnerMessage("idle-result",instanceId=id,state=if(accepted)"ACCEPTED" else "DENIED",detail=requestId))
     }
     private fun command(id:String,value:String) {

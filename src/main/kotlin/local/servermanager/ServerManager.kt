@@ -24,7 +24,7 @@ data class CreateRequest(val name: String, val loaderVersion: String, val port: 
 data class Event(val seq: Long, val time: String, val kind: String, val text: String)
 data class FileEntry(val name: String, val path: String, val directory: Boolean, val size: Long)
 data class MemoryCapacity(val totalMb: Long, val freeMb: Long, val reservedMb: Long, val maxHeapMb: Long, val committedHeapMb: Long, val startableHeapMb: Long)
-data class ServerSignal(val instanceId:String, val kind:String, val detail:String, val exit:ServerExit?=null, val error:DiscordErrorSummary?=null)
+data class ServerSignal(val instanceId:String, val kind:String, val detail:String, val exit:ServerExit?=null, val error:DiscordErrorSummary?=null,val startActor:StartActor?=null)
 interface RemoteController {
     fun workspace(instance:Instance,request:WorkspaceRequest):com.fasterxml.jackson.databind.JsonNode {error("실행기를 업데이트하세요")}
     fun supportsWorkspace(instance:Instance):Boolean=false
@@ -76,6 +76,8 @@ class RuntimeState {
     val discordError=DiscordErrorBuffer()
     @Volatile internal var stopMonitor:StopMonitor?=null
     @Volatile var remoteStopProgress:StopWatchStatus?=null
+    var startActor:StartActor?=null
+    var restartActor:StartActor?=null
     var startNotified=false
     var lastExit:ServerExit?=null
     var exitReport:RunnerExitReport?=null
@@ -112,7 +114,7 @@ class ServerManager {
     fun setDiagnosticActive(id:String,active:Boolean){val r=runtime(id);synchronized(r){check(!active||!r.idleCheckPending){"무인 종료 직전 확인이 끝난 뒤 진단을 시작하세요"};r.diagnosticActive=active;r.activityVersion++}}
     fun attachRemoteController(controller:RemoteController) { remoteController=controller }
     fun onSignal(listener:(ServerSignal)->Unit):AutoCloseable { signalListeners.add(listener); return AutoCloseable { signalListeners.remove(listener) } }
-    private fun signal(id:String,kind:String,detail:String,exit:ServerExit?=null,error:DiscordErrorSummary?=null) { signalListeners.forEach { listener -> runCatching { listener(ServerSignal(id,kind,detail,exit,error)) } } }
+    private fun signal(id:String,kind:String,detail:String,exit:ServerExit?=null,error:DiscordErrorSummary?=null) { signalListeners.forEach { listener -> runCatching { listener(ServerSignal(id,kind,detail,exit,error,if(kind=="start")runtime(id).startActor else null)) } } }
     fun automaticRestartError(id:String,detail:String) {runtime(id).event("error",detail);signal(id,"error",detail)}
     private fun started(id:String,r:RuntimeState) { if(!r.startNotified){r.startNotified=true;signal(id,"start","서버 시작을 완료했습니다. 이제 접속할 수 있습니다.")} }
     @Scheduled(fixedDelay = 2000) fun sampleResources() {
@@ -144,6 +146,10 @@ class ServerManager {
             serverDir(instance.id).createDirectories()
             instances[instance.id] = instance
             val r=RuntimeState()
+            if(root.resolve(instance.id).resolve("remote-lease").exists()) {
+                val actorFile=root.resolve(instance.id).resolve("start-actor.json")
+                if(actorFile.isRegularFile() && !Files.isSymbolicLink(actorFile) && actorFile.fileSize()<=16384)r.startActor=runCatching {mapper.readValue<StartActor>(actorFile.readText())}.getOrNull()
+            }
             root.resolve(instance.id).resolve("diagnostic.active").takeIf {it.exists()}?.readText()?.trim()?.let {sid->
                 require(UUID.fromString(sid).toString()==sid);r.diagnosticSession=sid;r.diagnosticActive=true
             }
@@ -414,17 +420,20 @@ class ServerManager {
             r.state="FAILED";r.folderImport=FolderImportProgress("FAILED",message=detail.orEmpty().take(500));r.event("error","기존 폴더 가져오기 실패: ${detail.orEmpty().take(500)}")
         }
     }
-    fun start(id:String)=startInternal(id,null)
-    fun startDiagnostic(id:String,session:String)=startInternal(id,session)
-    @Synchronized private fun startInternal(id: String,session:String?) {
+    fun start(id:String)=startAs(id,StartActor("SYSTEM","관리 시스템"))
+    fun startAs(id:String,actor:StartActor)=startInternal(id,null,actor)
+    fun startDiagnostic(id:String,session:String)=startInternal(id,session,StartActor("SYSTEM","모드 검사"))
+    @Synchronized private fun startInternal(id: String,session:String?,actor:StartActor) {
         val i=instance(id); val r=runtime(id)
         synchronized(r) {
             checkIdle(r,true);check(if(r.diagnosticActive)session!=null && session==r.diagnosticSession else session==null) {"모드 검사 패널에서 다음 시도를 준비하고 시작하세요"}; require(r.state != "IMPORT_FAILED") { "실패한 팩은 시작할 수 없습니다. 원본 mrpack에서 다시 가져오세요" }; require(eulaAccepted(id)) { "Minecraft EULA에 먼저 동의하세요" }
-            r.activityVersion++;r.stopReason=null;r.idleCheckPending=false;r.idleRequestId=null
+            r.activityVersion++;r.stopReason=null;r.idleCheckPending=false;r.idleRequestId=null;r.startActor=actor;r.restartActor=null
             r.discordError.clear();r.exitError=null;r.exitErrorCaptured=false;r.startNotified=false;r.exitReport=null;r.lastExit=null;r.remoteCloudReady=false;r.remoteWorkerReady=false
             r.fileTransfer=null;r.transferAuthoritative=false;r.transferMeter.reset()
             if(i.runnerId!=null) {
                 val controller=remoteController ?: error("원격 실행기 연결 기능을 사용할 수 없습니다")
+                root.resolve(id).resolve("remote-exit.json").deleteIfExists()
+                atomicText(root.resolve(id).resolve("start-actor.json"),mapper.writeValueAsString(actor))
                 root.resolve(id).resolve("remote-lease").writeText(i.runnerId!!)
                 r.remoteStopRequested=false;r.remoteRestartRequested=false;r.state="TRANSFERRING";r.players=null;r.resources=null
                 try { controller.start(i.copy(diagnosticSession=r.diagnosticSession)) } catch(e:Exception) { root.resolve(id).resolve("remote-lease").deleteIfExists();r.state="STOPPED";throw e }
@@ -513,17 +522,18 @@ class ServerManager {
         if(force) { val p=r.process ?: error("프로세스가 없습니다");r.stopReason="FORCED"; r.state="STOPPING"; p.descendants().use {children->children.forEach { it.destroyForcibly() }}; p.destroyForcibly(); r.event("system","강제 종료 요청") }
         else command(id,"stop")
     } }
-    fun restart(id: String) {
+    fun restart(id:String)=restartAs(id,StartActor("SYSTEM","관리 시스템"))
+    fun restartAs(id: String,actor:StartActor) {
         val r=runtime(id);check(!r.diagnosticActive) {"모드 검사에서는 각 시도를 종료한 뒤 패널에서 다시 시작하세요"}
         if(instance(id).runnerId!=null) {
-            synchronized(r) { check(r.state=="RUNNING") { "실행 중인 서버만 재시작할 수 있습니다" };r.stopReason="RESTART";remoteController?.restart(instance(id)) ?: error("실행기 연결이 없습니다");r.remoteStopRequested=true;r.remoteRestartRequested=true;r.state="STOPPING";r.event("system","원격 서버 재시작 요청") }
+            synchronized(r) { check(r.state=="RUNNING") { "실행 중인 서버만 재시작할 수 있습니다" };r.restartActor=actor;r.stopReason="RESTART";remoteController?.restart(instance(id)) ?: error("실행기 연결이 없습니다");r.remoteStopRequested=true;r.remoteRestartRequested=true;r.state="STOPPING";r.event("system","원격 서버 재시작 요청") }
             return
         }
         val old=synchronized(r) { check(r.state=="RUNNING") { "실행 중인 서버만 재시작할 수 있습니다" }; val p=r.process!!;r.stopReason="RESTART"; command(id,"stop"); p }
         workers.submit {
             if(!old.waitFor(60,java.util.concurrent.TimeUnit.SECONDS)) { r.event("error","정상 종료가 지연되어 재시작을 취소했습니다. 상태를 확인하세요."); return@submit }
             synchronized(r) { if(r.process===old) { r.process=null; r.state="STOPPED" } }
-            runCatching { start(id) }.onFailure { r.event("error","재시작 실패: ${it.message}") }
+            runCatching { startAs(id,actor) }.onFailure { r.event("error","재시작 실패: ${it.message}") }
         }
     }
     fun remoteState(id:String,runnerId:String,state:String,detail:String?=null) {
@@ -544,7 +554,9 @@ class ServerManager {
         require(report.crashReport==null || CrashReports.validName(report.crashReport))
         val r=runtime(id);synchronized(r) {
             check(root.resolve(id).resolve("remote-lease").exists() && !folderImportMarker(id).exists()) {"실행 중이던 서버의 종료만 보고할 수 있습니다"}
-            require(report.reason==null||report.reason=="STOP_TIMEOUT")
+            require(report.reason==null||report.reason in setOf("STOP_TIMEOUT","IDLE"))
+            atomicText(root.resolve(id).resolve("remote-exit.json"),mapper.writeValueAsString(report))
+            if(report.reason=="IDLE" && r.stopReason !in setOf("FORCED","STOP_TIMEOUT","SHUTDOWN")){r.stopReason="IDLE";r.remoteStopRequested=true;r.remoteRestartRequested=false}
             if(report.reason=="STOP_TIMEOUT"){r.stopReason="STOP_TIMEOUT";r.remoteStopRequested=true;r.remoteRestartRequested=false}
             r.exitReport=report
             if(!r.exitErrorCaptured){r.exitError=r.discordError.recent();r.exitErrorCaptured=true}
@@ -575,8 +587,8 @@ class ServerManager {
     }
     private fun resumeRemoteRestart(id:String) {
         val r=runtime(id)
-        val restart=synchronized(r) { if(r.remoteRestartRequested && r.remoteWorkerReady && r.remoteCloudReady && r.state=="STOPPED") { r.remoteRestartRequested=false;true } else false }
-        if(restart) workers.submit { runCatching { start(id) }.onFailure { synchronized(r) { r.event("error","원격 서버 재시작 실패: ${it.message}") } } }
+        val restart=synchronized(r) { if(r.remoteRestartRequested && r.remoteWorkerReady && r.remoteCloudReady && r.state=="STOPPED") { r.remoteRestartRequested=false;r.restartActor ?: StartActor("SYSTEM","관리 시스템") } else null }
+        if(restart!=null) workers.submit { runCatching { startAs(id,restart) }.onFailure { synchronized(r) { r.event("error","원격 서버 재시작 실패: ${it.message}") } } }
     }
     fun remoteStopProgress(id:String,runnerId:String,pid:Long,status:StopWatchStatus) {
         if(instance(id).runnerId!=runnerId)return
@@ -628,7 +640,13 @@ class ServerManager {
             return
         }
         val (exit,summary)=synchronized(r) {
+            val savedExit=root.resolve(id).resolve("remote-exit.json")
+            if(r.exitReport==null && savedExit.isRegularFile() && !Files.isSymbolicLink(savedExit) && savedExit.fileSize()<=65536) {
+                r.exitReport=mapper.readValue<RunnerExitReport>(savedExit.readText())
+                if(r.exitReport?.reason in setOf("IDLE","STOP_TIMEOUT")){r.stopReason=r.exitReport!!.reason;r.remoteStopRequested=true;r.remoteRestartRequested=false}
+            }
             root.resolve(id).resolve("remote-lease").deleteIfExists()
+            savedExit.deleteIfExists()
             val value=r.remoteStopRequested;r.remoteStopRequested=false;r.remoteWorkerReady=false;r.remoteCloudReady=false;r.state="STOPPED";r.players=null;r.resources=null;r.remotePid=null;r.remoteStopProgress=null
             r.fileTransfer=(r.fileTransfer ?: FolderImportProgress("COMPLETE")).copy(phase="COMPLETE",message="서버 파일 인계를 완료했습니다")
             r.event("system","원격 서버 파일 인계를 완료했습니다")
@@ -665,7 +683,7 @@ class ServerManager {
         synchronized(r) {
             if(!r.idleCheckPending||request==null||r.idleRequestId!=request)return
             r.idleCheckPending=false;r.idleRequestId=null
-            if(accepted){r.stopReason="IDLE";r.remoteStopRequested=true;if(r.state=="RUNNING")r.state="STOPPING";r.event("system","실행기에서 무인 상태를 다시 확인하여 저장 후 정상 종료합니다")}
+            if(accepted && r.stopReason !in setOf("FORCED","STOP_TIMEOUT","MANUAL","RESTART","SHUTDOWN")){r.stopReason="IDLE";r.remoteStopRequested=true;if(r.state=="RUNNING")r.state="STOPPING";r.event("system","실행기에서 무인 상태를 다시 확인하여 저장 후 정상 종료합니다")}
             else {r.activityVersion++;r.event("system","실행기의 무인 상태를 확인하지 못해 자동 종료를 취소했습니다")}
         }
     }

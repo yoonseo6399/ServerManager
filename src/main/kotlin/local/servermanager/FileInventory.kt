@@ -14,9 +14,9 @@ object FileInventory {
     }
     fun digest(path:Path):String {
         val hash=MessageDigest.getInstance("SHA-256")
-        path.inputStream().use { stream ->
+        Files.newInputStream(path,java.nio.file.LinkOption.NOFOLLOW_LINKS).use { stream ->
             val buffer=ByteArray(1024*1024)
-            while(true) { val count=stream.read(buffer);if(count<0)break;hash.update(buffer,0,count) }
+            while(true) { if(Thread.currentThread().isInterrupted)throw java.io.InterruptedIOException("파일 검증이 중단됐습니다");val count=stream.read(buffer);if(count<0)break;hash.update(buffer,0,count) }
         }
         return hash.digest().joinToString("") { "%02x".format(it) }
     }
@@ -35,9 +35,16 @@ object FileInventory {
         } }
         return files to dirs
     }
-    fun snapshot(base:Path):Map<String,String> = Files.walk(base).use { paths -> paths.filter {it!=base}.iterator().asSequence().associate { path ->
-        require(!Files.isSymbolicLink(path)) { "심볼릭 링크가 있어 동기화를 중단했습니다" }
-        val a=Files.readAttributes(path,java.nio.file.attribute.BasicFileAttributes::class.java)
-        base.relativize(path).toString() to "${a.isDirectory}|${a.size()}|${a.lastModifiedTime()}|${a.fileKey()}"
-    } }
+    fun snapshot(base:Path,maxPaths:Int=Int.MAX_VALUE):Map<String,String> = Files.walk(base).use { paths ->
+        val result=linkedMapOf<String,String>()
+        val unix=base.fileSystem.supportedFileAttributeViews().contains("unix")
+        paths.forEach {path->
+            require(result.size<maxPaths+1L) {"파일 목록이 검증 한도를 초과했습니다"}
+            val a=Files.readAttributes(path,java.nio.file.attribute.BasicFileAttributes::class.java,java.nio.file.LinkOption.NOFOLLOW_LINKS)
+            require(!a.isSymbolicLink && (a.isDirectory || a.isRegularFile)) {"심볼릭 링크 또는 일반 파일이 아닌 항목이 있어 동기화를 중단했습니다"}
+            val changed=if(unix)Files.getAttribute(path,"unix:ctime",java.nio.file.LinkOption.NOFOLLOW_LINKS) else null
+            result[base.relativize(path).toString()]="${a.isDirectory}|${a.size()}|${a.lastModifiedTime()}|${a.fileKey()}|$changed"
+        }
+        result
+    }
 }

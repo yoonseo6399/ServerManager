@@ -164,7 +164,7 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
         event.deferReply(true).queue({ hook ->
             guild.retrieveMemberById(event.user.id).useCache(false).queue({ member ->
                 if(event.jda!==client) { hook.editOriginal("설정이 변경되었습니다. 다시 요청하세요.").queue({}, {});return@queue }
-                val result=execute(guild.id,member.roles.map { it.id }.toSet(),event.user.id,event.id,id,action!!)
+                val result=execute(guild.id,member.roles.map { it.id }.toSet(),event.user.id,event.id,id,action!!,StartActor("DISCORD",member.effectiveName,event.user.id,member.user.effectiveAvatarUrl))
                 hook.editOriginal(result).setAllowedMentions(emptyList()).queue({}, {})
             }, { hook.editOriginal("현재 서버 역할을 확인하지 못했습니다. 잠시 후 다시 시도하세요.").queue({}, {}) })
         }, {})
@@ -182,16 +182,17 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
         event.deferReply(true).queue({ hook ->
             guild.retrieveMemberById(event.user.id).useCache(false).queue({ member ->
                 if(event.jda!==client) { hook.editOriginal("Discord 연결이 변경되었습니다. 다시 시도하세요.").queue({}, {});return@queue }
-                val result=execute(guild.id,member.roles.map { it.id }.toSet(),event.user.id,event.id,id,action)
+                val result=execute(guild.id,member.roles.map { it.id }.toSet(),event.user.id,event.id,id,action,StartActor("DISCORD",member.effectiveName,event.user.id,member.user.effectiveAvatarUrl))
                 hook.editOriginal(result).setAllowedMentions(emptyList()).queue({}, {})
             }, { hook.editOriginal("현재 서버 역할을 확인하지 못했습니다. 잠시 후 다시 시도하세요.").queue({}, {}) })
         }, {})
     }
-    fun execute(guild:String,roles:Set<String>,user:String,requestId:String,id:String,action:String):String = desktop.gate.read {
+    fun execute(guild:String,roles:Set<String>,user:String,requestId:String,id:String,action:String,actor:StartActor?=null):String = desktop.gate.read {
         if(desktop.stopping) "관리 앱 업데이트 중입니다. 잠시 후 다시 시도하세요."
-        else executeAllowed(guild,roles,user,requestId,id,action)
+        else executeAllowed(guild,roles,user,requestId,id,action,actor)
     }
-    @Synchronized private fun executeAllowed(guild:String,roles:Set<String>,user:String,requestId:String,id:String,action:String):String {
+    @Synchronized private fun executeAllowed(guild:String,roles:Set<String>,user:String,requestId:String,id:String,action:String,actor:StartActor?):String {
+        val starter=actor?.takeIf {it.source=="DISCORD" && it.discordId==user} ?: StartActor("DISCORD","Discord 사용자",user)
         val config=view().config
         if(!DiscordAccess.allowed(config,guild,roles,id,action)) {
             audit.append("discord:$guild:$user","discord $action",403,"discord");return "이 서버에 대한 ${mapOf("start" to "시작","stop" to "중지","restart" to "재시작")[action] ?: "조회"} 권한이 없습니다. 관리자에게 역할 설정을 요청하세요."
@@ -211,7 +212,7 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
                 val key="$guild:$user"
                 if(now-(lastStart[key] ?: 0)<10000) return "시작 요청은 10초 후 다시 보낼 수 있습니다."
                 lastStart[key]=now
-                manager.start(id)
+                manager.startAs(id,starter)
                 audit.append("discord:$guild:$user","discord start $id",200,"discord")
                 "${i.name}: 시작을 요청했습니다. /mc status로 준비 상태를 확인하세요."
             } else if(action=="stop") {
@@ -221,7 +222,7 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
                 "${i.name}: 저장 후 정상 종료를 요청했습니다."
             } else {
                 if(state!="RUNNING") return "${i.name}: 실행 중인 서버만 재시작할 수 있습니다."
-                manager.restart(id)
+                manager.restartAs(id,starter)
                 audit.append("discord:$guild:$user","discord restart $id",200,"discord")
                 "${i.name}: 저장 후 재시작을 요청했습니다."
             }
@@ -258,7 +259,7 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
                         panels.change(key) { it.copy(errorIds=emptyList(),startId=null) }
                         errorTimes.remove(signal.instanceId)
                     }
-                    val title=if(signal.kind=="start") "🟢 서버 시작 완료" else if(signal.kind=="error") "⚠️ 오류 감지" else if(signal.exit?.requested==false||signal.detail.contains("예기치")) "🛑 비정상 종료" else "⏹ 서버 종료"
+                    val title=if(signal.kind=="start") "🟢 서버 시작 완료" else if(signal.kind=="error") "⚠️ 오류 감지" else if(signal.exit?.reason=="IDLE") "🌙 무인 절전 종료" else if(signal.exit?.requested==false||signal.detail.contains("예기치")) "🛑 비정상 종료" else "⏹ 서버 종료"
                     val canAttach=channel.guild.selfMember.hasPermission(channel,net.dv8tion.jda.api.Permission.MESSAGE_ATTACH_FILES)
                     val attachment=reportBytes?.takeIf {canAttach}
                     val restart=(manager.view(signal.instanceId)["autoRestart"] as? AutoRestartStatus)?.takeIf {signal.kind=="stop"&&it.config.enabled}
@@ -268,6 +269,7 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
                         .setDescription((signal.detail+restartText+reportText+(if(count>1) "\n같은 종류의 알림 ${count}건을 묶었습니다." else "")).take(1500))
                         .setColor(if(signal.kind=="start") Color(0x4caf83) else if(signal.kind=="error" || signal.exit?.requested==false || signal.detail.contains("예기치")) Color(0xd85c55) else Color(0x5f8bb5))
                         .setTimestamp(Instant.now())
+                    if(signal.kind=="start")DiscordStartProfile.apply(embedBuilder,signal.startActor)
                     summary?.fields()?.forEach {(label,value)->embedBuilder.addField(label,value,false)}
                     if(summary!=null)embedBuilder.setFooter(if(reportSummary!=null)"크래시 리포트 요약" else "종료 직전 로그 요약")
                     val embed=embedBuilder.build()

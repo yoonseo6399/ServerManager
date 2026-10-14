@@ -67,4 +67,25 @@ class PowerSavingTest {
             manager.remoteIdleResult(id,"device-a","next",true);assertEquals("STOPPED",r.state)
         } finally {manager.shutdown();manager.root.resolve(id).toFile().deleteRecursively()}
     }
+    @Test fun `durable runner idle exit survives lost acknowledgement and central memory reset without crash notice or auto restart`() {
+        val manager=ServerManager();val id=(manager.create(CreateRequest("idle-exit", "21.1.219",ServerSocket(0).use {it.localPort},512))["config"] as Instance).id
+        manager.assignRunner(id,"device-a");val r=manager.runtime(id)
+        val signals=mutableListOf<ServerSignal>();val sub=manager.onSignal {signals.add(it)}
+        try {
+            manager.root.resolve(id).resolve("remote-lease").writeText("device-a")
+            r.state="SYNCING"
+            manager.remoteExited(id,"device-a",RunnerExitReport(0,reason="IDLE"))
+            assertEquals("IDLE",r.stopReason);assertTrue(r.remoteStopRequested)
+            // A restart loses in-memory intent while the authenticated exit record remains.
+            r.exitReport=null;r.stopReason=null;r.remoteStopRequested=false
+            manager.remoteCommitted(id,"device-a")
+            val event=signals.single {it.kind=="stop"};val exit=event.exit!!
+            assertTrue(exit.requested);assertEquals("IDLE",exit.reason);assertNull(event.error)
+            assertContains(event.detail,"절전");assertFalse(event.detail.contains("예기치"))
+            assertFalse(AutoRestart.eligible(AutoRestartPolicy(true,includeManual=true),exit))
+            assertFalse(manager.root.resolve(id).resolve("remote-exit.json").exists())
+            assertFailsWith<IllegalStateException>{manager.remoteExited(id,"device-a",RunnerExitReport(0,reason="IDLE"))}
+        } finally {sub.close();manager.shutdown();manager.root.resolve(id).toFile().deleteRecursively()}
+    }
+
 }

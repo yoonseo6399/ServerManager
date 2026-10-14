@@ -50,6 +50,7 @@ class RunnerIdleStopTest {
                 val stop=RunnerAgent::class.java.getDeclaredMethod("stopIfEmpty",String::class.java,String::class.java).also {it.isAccessible=true}
                 stop.invoke(agent,"11111111-1111-1111-1111-111111111111","request-ticket");responder?.join(3000)
                 assertEquals(if(mode=="empty")"stop\n" else "",output.toString(),mode)
+                assertEquals(mode=="empty","11111111-1111-1111-1111-111111111111" in field<Set<String>>(agent,"idleStops"),mode)
                 verify(process,never()).destroyForcibly()
                 val result=messages.single {it.contains("idle-result")}
                 assertContains(result,if(mode=="empty")"ACCEPTED" else "DENIED",message=mode);assertContains(result,"request-ticket")
