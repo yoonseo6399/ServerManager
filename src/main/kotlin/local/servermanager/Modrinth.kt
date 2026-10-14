@@ -29,7 +29,10 @@ data class ModrinthLink(val project:String,val version:String?=null) {
 data class ModrinthTarget(val minecraft:String,val loader:String,val allowPrerelease:Boolean=false) {
     init {require(minecraft.matches(Regex("[0-9]+(?:\\.[0-9]+){1,2}")));require(loader in setOf("fabric","forge","neoforge")) {"이 모드 기능은 Fabric·Forge·NeoForge 서버를 지원합니다"}}
 }
-data class RinProject(val id:String,val slug:String,val title:String,val serverSide:String,val type:String="mod",val environment:String="unknown")
+data class RinProject(val id:String,val slug:String,val title:String,val serverSide:String,val type:String="mod",val environment:String="unknown",
+    val description:String="",val iconUrl:String?=null)
+/** Modrinth environments where a dedicated server cannot load the mod. */
+val CLIENT_ENVIRONMENTS=setOf("client_only","singleplayer_only")
 data class RinDependency(val projectId:String?,val versionId:String?,val type:String,val filename:String?=null)
 data class RinFile(val filename:String,val url:String,val size:Long,val sha512:String,val sha1:String,val primary:Boolean) {
     fun validate():RinFile {
@@ -55,6 +58,11 @@ data class RinVersion(val id:String,val projectId:String,val name:String,val num
 }
 data class RinSearchHit(val projectId:String,val slug:String,val title:String,val description:String)
 data class RinSearch(val hits:List<RinSearchHit>,val offset:Int,val total:Int)
+/** Hash and bulk-project lookups used to build the installed mod dependency graph. */
+interface ModrinthLookup {
+    fun versionsFromHashes(hashes:List<String>):Map<String,RinVersion>
+    fun projects(ids:Collection<String>):List<RinProject>
+}
 interface ModrinthRepository {
     fun project(id:String):RinProject
     fun versions(project:String,target:ModrinthTarget):List<RinVersion>
@@ -62,16 +70,27 @@ interface ModrinthRepository {
     fun projectVersion(project:String,idOrNumber:String):RinVersion
 }
 
-class ModrinthApi(private val fetch:(String)->String=Transport()::get,private val post:(String,String)->String=Transport()::post):ModrinthRepository {
+class ModrinthApi(private val fetch:(String)->String=Transport()::get,private val post:(String,String)->String=Transport()::post):ModrinthRepository,ModrinthLookup {
     private val mapper=jacksonObjectMapper()
     private fun enc(s:String)=URLEncoder.encode(s,Charsets.UTF_8)
     private fun token(s:String)=ModrinthLink.identifier(s)
     private fun strings(n:JsonNode)=n.map {it.asText()}.toSet()
     private fun nullable(n:JsonNode):String?=n.takeUnless {it.isNull || it.isMissingNode}?.asText()?.takeIf {it.isNotBlank()}
-    private fun parseVersion(n:JsonNode)=RinVersion(token(n.path("id").asText()),token(n.path("project_id").asText()),n.path("name").asText(),n.path("version_number").asText(),n.path("version_type").asText(),n.path("date_published").asText(),strings(n.path("game_versions")),strings(n.path("loaders")),n.path("files").map {f->RinFile(f.path("filename").asText(),f.path("url").asText(),f.path("size").asLong(-1),f.path("hashes").path("sha512").asText().lowercase(),f.path("hashes").path("sha1").asText().lowercase(),f.path("primary").asBoolean())},n.path("dependencies").map {d->RinDependency(nullable(d.path("project_id"))?.let(::token),nullable(d.path("version_id"))?.let(::token),d.path("dependency_type").asText(),nullable(d.path("file_name"))).also {require(it.type in setOf("required","optional","incompatible","embedded")) {"알 수 없는 모드 의존성 종류입니다"}}},n.path("environment").asText("unknown"))
-    override fun project(id:String):RinProject {
-        val n=mapper.readTree(fetch("/project/${token(id)}"))
-        return RinProject(token(n.path("id").asText()),token(n.path("slug").asText()),n.path("title").asText(),n.path("server_side").asText("unknown"),n.path("project_type").asText(),n.path("environment").asText("unknown"))
+    private fun parseVersion(n:JsonNode)=RinVersion(token(n.path("id").asText()),token(n.path("project_id").asText()),n.path("name").asText(),n.path("version_number").asText(),n.path("version_type").asText(),n.path("date_published").asText(),strings(n.path("game_versions")),strings(n.path("loaders")),n.path("files").map {f->RinFile(f.path("filename").asText(),f.path("url").asText(),f.path("size").asLong(-1),f.path("hashes").path("sha512").asText().lowercase(),f.path("hashes").path("sha1").asText().lowercase(),f.path("primary").asBoolean())},n.path("dependencies").map {d->RinDependency(nullable(d.path("project_id"))?.let(::token),nullable(d.path("version_id"))?.let(::token),d.path("dependency_type").asText(),nullable(d.path("file_name"))).also {require(it.type in setOf("required","optional","incompatible","embedded")) {"알 수 없는 모드 의존성 종류입니다"}}},nullable(n.path("environment")) ?: "unknown")
+    /** Project `environment` is an array of every version's environment; versions carry a single string. */
+    private fun projectEnvironment(n:JsonNode):String {
+        val values=if(n.isArray)n.map {it.asText()}.filter {it.isNotBlank() && it!="unknown"} else listOfNotNull(nullable(n)?.takeIf {it!="unknown"})
+        return if(values.isEmpty())"unknown" else values.firstOrNull {it !in CLIENT_ENVIRONMENTS} ?: values.first()
+    }
+    private fun parseProject(n:JsonNode)=RinProject(token(n.path("id").asText()),token(n.path("slug").asText()),n.path("title").asText().take(200),n.path("server_side").asText("unknown"),n.path("project_type").asText(),projectEnvironment(n.path("environment")),
+        n.path("description").asText().take(500),nullable(n.path("icon_url"))?.takeIf {runCatching {URI(it).let {u->u.scheme=="https" && u.host=="cdn.modrinth.com"}}.getOrDefault(false)})
+    override fun project(id:String):RinProject=parseProject(mapper.readTree(fetch("/project/${token(id)}")))
+    override fun projects(ids:Collection<String>):List<RinProject> {
+        val wanted=ids.map(::token).distinct();require(wanted.size<=2000)
+        return wanted.chunked(100).flatMap {batch->
+            val n=mapper.readTree(fetch("/projects?ids=${enc(mapper.writeValueAsString(batch))}"));require(n.isArray && n.size()<=batch.size)
+            n.map(::parseProject).also {rows->check(rows.all {it.id in batch}) {"요청하지 않은 Modrinth 프로젝트가 반환됐습니다"}}
+        }
     }
     override fun versions(project:String,target:ModrinthTarget):List<RinVersion> {
         val path="/project/${token(project)}/version?loaders=${enc(mapper.writeValueAsString(listOf(target.loader)))}&game_versions=${enc(mapper.writeValueAsString(listOf(target.minecraft)))}&include_changelog=false"
@@ -87,7 +106,7 @@ class ModrinthApi(private val fetch:(String)->String=Transport()::get,private va
         require(n.path("hits").isArray && n.path("hits").size()<=20)
         return RinSearch(n.path("hits").map {h->RinSearchHit(token(h.path("project_id").asText()),token(h.path("slug").asText()),h.path("title").asText().take(200),h.path("description").asText().take(1000))},offset,n.path("total_hits").asInt())
     }
-    fun versionsFromHashes(hashes:List<String>):Map<String,RinVersion> {
+    override fun versionsFromHashes(hashes:List<String>):Map<String,RinVersion> {
         require(hashes.size in 1..500 && hashes.all {it.matches(Regex("[a-f0-9]{128}"))}) {"SHA-512 파일 해시를 입력하세요"}
         val requested=hashes.toSet()
         val n=mapper.readTree(post("/version_files",mapper.writeValueAsString(mapOf("hashes" to requested,"algorithm" to "sha512"))))

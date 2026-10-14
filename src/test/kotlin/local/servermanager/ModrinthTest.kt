@@ -106,4 +106,16 @@ class ModrinthTest {
         val hash=plan.mods.first().file.sha512
         assertEquals(plan.mods.first().version.id,api.versionsFromHashes(listOf(hash)).getValue(hash).id)
     }
+    @Test fun `actual public API environments separate client-only mods from server mods`() {
+        assumeTrue(System.getenv("SM_TEST_MODRINTH_LIVE")=="1")
+        val api=ModrinthApi();val projects=api.projects(listOf("AANobbMI","LNytGWDc")).associateBy {it.slug}
+        assertEquals("client_only",projects.getValue("sodium").environment)
+        assertFalse(projects.getValue("create").environment in CLIENT_ENVIRONMENTS)
+        assertTrue(projects.getValue("sodium").iconUrl!!.startsWith("https://cdn.modrinth.com/"))
+        // versions() drops client-only builds for installs, so a known Sodium NeoForge 1.21.1 version is read directly.
+        val sodium=api.version("uMOpc5uV");assertEquals("client_only",sodium.environment)
+        val hash=sodium.files.first().sha512
+        val source=ModSources.lookup(api,listOf(hash),ModSourceCache(),false).cache.sources.getValue(hash)
+        assertTrue(source.clientOnly);assertEquals("sodium",source.slug)
+    }
 }

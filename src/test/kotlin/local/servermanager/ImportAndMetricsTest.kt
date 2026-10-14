@@ -53,18 +53,29 @@ class ImportAndMetricsTest {
         path.writeText("corrupt")
         assertFailsWith<IllegalArgumentException> { PackFormat.verify(path,file) }
     }
-    private fun mod(name:String,id:String,dependency:String?=null):Path {
-        val file=temp.resolve("stage/mods/$name.jar");file.parent.createDirectories()
-        val manifest="[[mods]]\nmodId = \"$id\"\nversion = \"1.0\"\n"+(dependency?.let { "[[dependencies.$id]]\nmodId = \"$it\"\ntype = \"required\"\nside = \"BOTH\"\n" } ?: "")
-        ZipOutputStream(file.outputStream()).use { zip ->zip.putNextEntry(ZipEntry("META-INF/neoforge.mods.toml"));zip.write(manifest.toByteArray());zip.closeEntry() };return file
-    }
-    @Test fun `client exclusion refuses required dependency conflicts`() {
-        mod("client","clientmod");mod("server","servermod","clientmod")
+    private fun mod(name:String):Path=temp.resolve("stage/mods/$name.jar").also {it.parent.createDirectories();it.writeText("jar $name")}
+    private fun hash(path:Path)=MessageDigest.getInstance("SHA-512").digest(path.readBytes()).joinToString("") { "%02x".format(it) }
+    private fun source(project:String,clientOnly:Boolean,vararg required:String)=ModSource(project,project,project,versionId="v",versionNumber="1",clientOnly=clientOnly,dependencies=required.map { ModDependency(it,"required") })
+    @Test fun `client exclusion uses Modrinth environments and keeps required dependencies`() {
+        val declared=mod("client");val shader=mod("shader");val lib=mod("clientlib");val server=mod("server");val unknown=mod("unknown")
+        val sources=mapOf(hash(declared) to source("clientmod",false),hash(shader) to source("shader",true,"clientlib"),hash(lib) to source("clientlib",true),hash(server) to source("servermod",false,"clientmod"))
         val plan=PackPlan("test","1","1.21.1","21.1.252",listOf(PackFile("mods/client.jar",emptyMap(),emptyList(),1,"unsupported")),emptyList(),emptyList())
-        assertFailsWith<IllegalArgumentException> { ModInspector.exclude(temp.resolve("stage"),plan,emptySet()) {} }
-        temp.resolve("stage/mods/server.jar").deleteExisting()
-        ModInspector.exclude(temp.resolve("stage"),plan,emptySet()) {}
-        assertFalse(temp.resolve("stage/mods/client.jar").exists())
+        val log=mutableListOf<String>()
+        ClientModFilter.exclude(temp.resolve("stage"),plan,emptySet(),{ ModSourceLookup(ModSourceCache(sources),emptyList()) }) { log.add(it) }
+        // The server mod requires the pack-declared client file, so it stays; Modrinth client-only files go.
+        assertTrue(declared.exists());assertTrue(server.exists());assertTrue(unknown.exists())
+        assertFalse(shader.exists());assertFalse(lib.exists())
+        assertTrue(log.any { it.contains("필수 의존성이라 유지") });assertTrue(log.any { it.contains("unknown.jar") })
+        server.deleteExisting()
+        ClientModFilter.exclude(temp.resolve("stage"),plan,emptySet(),{ ModSourceLookup(ModSourceCache(sources),listOf("offline")) }) { log.add(it) }
+        assertFalse(declared.exists());assertTrue(unknown.exists());assertTrue("offline" in log)
+    }
+    @Test fun `client-only providers required by a kept client-only mod are not protected`() {
+        val shader=mod("shader");val lib=mod("clientlib")
+        val sources=mapOf(hash(shader) to source("shader",true,"clientlib"),hash(lib) to source("clientlib",false))
+        val plan=PackPlan("test","1","1.21.1","21.1.252",listOf(PackFile("mods/clientlib.jar",emptyMap(),emptyList(),1,"unsupported")),emptyList(),emptyList())
+        ClientModFilter.exclude(temp.resolve("stage"),plan,emptySet(),{ ModSourceLookup(ModSourceCache(sources),emptyList()) }) {}
+        assertFalse(shader.exists());assertFalse(lib.exists())
     }
     @Test fun `process resource sampling reports real RSS and successive CPU samples`() {
         val metrics=ProcessMetrics();val handle=ProcessHandle.current()

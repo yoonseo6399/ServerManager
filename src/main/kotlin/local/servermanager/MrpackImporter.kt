@@ -84,9 +84,9 @@ object PackFormat {
         require(files.sumOf { it.fileSize } + total <= MAX_TOTAL) { "팩 전체 크기는 2 GiB 이하여야 합니다" }
         val overrides=entries.filter { !it.isDirectory && (it.name.startsWith("overrides/") || it.name.startsWith("server-overrides/")) }.map { it.name }
         val warnings=buildList {
-            if(files.any { it.server == "unsupported" }) add("클라이언트 전용 표시 파일은 제외 후보입니다. 모드 의존성 충돌은 가져오기를 중단합니다.")
+            if(files.any { it.server == "unsupported" }) add("클라이언트 전용 표시 파일은 제외 후보입니다. 서버 모드가 Modrinth에서 필수로 쓰는 파일은 유지합니다.")
             if(files.any { it.server == "optional" }) add("서버 optional 파일은 포함합니다.")
-            add("환경 정보가 없거나 모드 메타데이터가 불확실한 파일은 보수적으로 유지합니다.")
+            add("가져오는 중 Modrinth에서 각 모드의 실행 환경과 의존성을 확인합니다. 찾지 못한 모드는 유지합니다.")
         }
         PackPlan(node.path("name").asText("가져온 모드팩"),node.path("versionId").asText(),minecraft,loaderVersion,files,overrides,warnings,loader)
     }
@@ -117,56 +117,45 @@ object PackFormat {
     }
 }
 
-data class ModMetadata(val ids: Set<String>, val required: Set<String>, val clientOnly: Boolean = false)
-object ModInspector {
-    fun inspect(file: Path): ModMetadata? = runCatching {
-        ZipFile(file.toFile()).use { jar ->
-            // Nested mods may introduce dependencies not declared by the outer JAR.
-            // Until their full graph is supported, never auto-remove based on an incomplete graph.
-            if(jar.entries().toList().any { !it.isDirectory && it.name.endsWith(".jar") }) return@use null
-            val fabric=jar.getEntry("fabric.mod.json")
-            if(fabric!=null) {
-                require(fabric.size in 1..1048576)
-                val node=jar.getInputStream(fabric).use { jacksonObjectMapper().readTree(it.readNBytes(1048577)) }
-                return@use ModMetadata(setOf(node.path("id").asText()),node.path("depends").fieldNames().asSequence().toSet(),node.path("environment").asText()=="client")
-            }
-            val entry=jar.getEntry("META-INF/neoforge.mods.toml") ?: jar.getEntry("META-INF/mods.toml") ?: return@use null
-            require(entry.size in 1..1048576)
-            val toml=jar.getInputStream(entry).use { org.tomlj.Toml.parse(it.readNBytes(1048577).toString(Charsets.UTF_8)) }
-            require(!toml.hasErrors())
-            val mods=toml.getArray("mods") ?: return@use null
-            val ids=(0 until mods.size()).mapNotNull { mods.getTable(it).getString("modId") }.toSet()
-            val required=mutableSetOf<String>()
-            toml.getTable("dependencies")?.let { deps -> deps.keySet().forEach { key ->
-                val array=deps.getArray(key)
-                if(array!=null) for(i in 0 until array.size()) {
-                    val dep=array.getTable(i)
-                    if(dep.getString("side")!="CLIENT" && (dep.getString("type")=="required" || dep.getBoolean("mandatory")==true || (dep.getString("type")==null && dep.getBoolean("mandatory")==null))) dep.getString("modId")?.let { required.add(it) }
-                }
-            } }
-            ModMetadata(ids,required)
-        }
-    }.getOrNull()
-
-    fun exclude(stage: Path, plan: PackPlan, replaced: Set<String>, log: (String)->Unit) {
+/**
+ * Removes client-only files from a staged pack. A file is client-only when the pack marks it `env.server=unsupported`
+ * or its Modrinth version environment cannot run on a dedicated server. Any candidate a kept mod requires on
+ * Modrinth is kept instead, repeated until no kept mod loses a required project.
+ */
+object ClientModFilter {
+    private fun sha512(file:Path)=file.inputStream().use {input->
+        val digest=MessageDigest.getInstance("SHA-512");val buffer=ByteArray(1024*1024)
+        while(true){val n=input.read(buffer);if(n<0)break;digest.update(buffer,0,n)}
+        digest.digest().joinToString("") {"%02x".format(it)}
+    }
+    fun exclude(stage:Path,plan:PackPlan,replaced:Set<String>,lookup:(Collection<String>)->ModSourceLookup,log:(String)->Unit) {
         val mods=stage.resolve("mods")
-        val metadata=if(mods.isDirectory()) Files.list(mods).use { paths -> paths.filter { it.extension=="jar" }.toList().associateWith { inspect(it) } } else emptyMap()
-        val candidates=plan.files.filter { it.server=="unsupported" && it.path !in replaced }.map { stage.resolve(it.path) }.toMutableSet()
-        candidates.addAll(metadata.filterValues { it?.clientOnly==true }.keys)
-        val unknown=candidates.filter { it.extension=="jar" && metadata[it]==null }
-        unknown.forEach { candidates.remove(it);log("판별 불가로 유지: ${stage.relativize(it)}") }
-        if(metadata.any { it.value==null && it.key !in candidates }) {
-            candidates.filter { it.extension=="jar" }.toList().forEach { candidates.remove(it);log("다른 모드의 의존성 분석이 불확실해 유지: ${it.fileName}") }
+        val jars=if(mods.isDirectory())Files.list(mods).use {paths->paths.filter {it.isRegularFile() && it.name.endsWith(".jar",true)}.toList()} else emptyList()
+        val hashes=jars.associateWith {sha512(it)}
+        val result=lookup(hashes.values.toSet());result.warnings.forEach(log)
+        val sources=hashes.mapValues {result.cache.sources[it.value]}
+        fun label(file:Path)=sources[file]?.title?.let {"$it (${file.fileName})"} ?: stage.relativize(file).toString()
+        val declared=plan.files.filter {it.server=="unsupported" && it.path !in replaced}.map {stage.resolve(it.path)}.filter {it.exists()}
+        val candidates=(declared+sources.filterValues {it?.clientOnly==true}.keys).toMutableSet()
+        // Keeping a candidate can make its own requirements needed, so protection repeats to a fixed point.
+        var changed=true
+        while(changed) {
+            changed=false
+            val kept=jars.filter {it !in candidates}
+            val required=kept.flatMap {f->sources[f]?.takeUnless {it.clientOnly}?.required.orEmpty().map {it to f}}.groupBy({it.first},{it.second})
+            for(file in candidates.filter {it in sources}.toList()) {
+                val users=sources[file]?.provides.orEmpty().flatMap {required[it].orEmpty()}.distinct()
+                if(users.isNotEmpty()){candidates.remove(file);changed=true;log("서버 모드 ${users.take(3).joinToString {label(it)}}의 필수 의존성이라 유지: ${label(file)}")}
+            }
         }
-        val required=metadata.filterKeys { it !in candidates }.values.filterNotNull().flatMap { it.required }.toSet()
-        val conflicts=candidates.flatMap { metadata[it]?.ids.orEmpty() }.filter { it in required }
-        require(conflicts.isEmpty()) { "서버 필수 의존성과 클라이언트 전용 모드가 충돌합니다: ${conflicts.joinToString()}. 팩 구성을 수정하세요." }
-        candidates.forEach { it.deleteIfExists();log("클라이언트 전용 제외: ${stage.relativize(it)}") }
+        val unknown=jars.filter {it !in candidates && sources[it]==null}
+        if(unknown.isNotEmpty())log("Modrinth에서 찾지 못한 모드 ${unknown.size}개는 의존성을 확인하지 못해 그대로 둡니다: ${unknown.take(10).joinToString {it.fileName.toString()}}")
+        candidates.sortedBy {it.toString()}.forEach {it.deleteIfExists();log("클라이언트 전용 제외: ${label(it)}")}
     }
 }
 
 @Service
-class MrpackImporter(private val manager: ServerManager) {
+class MrpackImporter(private val manager: ServerManager,private val catalog: ModrinthCatalog) {
     private val mapper=jacksonObjectMapper()
     private val http=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).followRedirects(HttpClient.Redirect.NEVER).build()
     private val jobs=Executors.newSingleThreadExecutor()
@@ -198,7 +187,8 @@ class MrpackImporter(private val manager: ServerManager) {
                     download(file,stage.resolve(file.path))
                 }
                 val replaced=PackFormat.overrides(zip,stage)
-                if(req.excludeClientOnly) ModInspector.exclude(stage,plan,replaced) { r.event("system",it) }
+                // Looked-up dependencies are saved with the new server for the mod management page.
+                if(req.excludeClientOnly) ClientModFilter.exclude(stage,plan,replaced,{ catalog.lookup(manager.root.resolve(id).resolve("mod-sources.json"),it,true) }) { r.event("system",it) }
                 else r.event("warn","클라이언트 전용 모드 제외가 꺼져 있습니다. 서버에서 실행되지 않는 모드가 포함될 수 있습니다.")
                 // Commit only after all files pass checks. The target is a new, never-started instance.
                 Files.walk(stage).use { paths -> paths.filter { it.isRegularFile() }.forEach { src ->

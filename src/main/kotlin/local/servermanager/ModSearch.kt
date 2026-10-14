@@ -1,42 +1,76 @@
 package local.servermanager
 
-/** Required edges refer to top-level files, including IDs provided by declared embedded mods. */
+/**
+ * Required edges come from Modrinth version dependencies, matched by project ID between top-level files.
+ * Files Modrinth does not know have no known requirements; they never block changes to other mods.
+ */
 class ModGraph(snapshot:ModInventorySnapshot) {
     val active=snapshot.mods.filter {it.enabled}.associateBy {it.filename}
-    private val platform=setOf("minecraft","java","fabricloader","forge","neoforge")
+    /** Per file, each required project and the active files providing it. */
+    private val needs:Map<String,Map<String,Set<String>>>
     val requirements:Map<String,Set<String>>
-    private val missing=mutableMapOf<String,MutableSet<String>>()
+    /** Required Modrinth projects that no active file provides, keyed by the requiring file. */
+    val missing:Map<String,Set<String>>
     init {
-        require(active.isNotEmpty()) {"활성 모드가 없습니다"}
-        require(active.values.all {it.metadata?.complete==true}) {"의존성을 읽지 못한 모드가 있습니다. 목록의 경고를 먼저 확인하세요"}
-        val providers=active.values.flatMap {f->f.metadata!!.takeUnless {it.clientOnly}?.mods.orEmpty().flatMap {m->(m.provides+m.id).map {it to f.filename}}}.groupBy({it.first},{it.second})
-        requirements=active.mapValues {(_,f)->f.metadata!!.takeUnless {it.clientOnly}?.requirements.orEmpty().filter {it.kind=="required" && it.id !in platform}.flatMap {d->
-            if(providers[d.id].isNullOrEmpty())missing.getOrPut(f.filename){mutableSetOf()}.add(d.id)
-            providers[d.id].orEmpty()
-        }.toSet()-f.filename}
+        val providers=providers(active.values)
+        // A client-only file cannot load on the server, so its requirements protect nothing there.
+        needs=active.mapValues {(file,mod)->mod.source?.takeUnless {it.clientOnly}?.required.orEmpty().associateWith {providers[it].orEmpty()-file}}
+        requirements=needs.mapValues {it.value.values.flatten().toSet()}
+        missing=needs.mapValues {(file,deps)->deps.filter {(project,files)->files.isEmpty() && project !in active.getValue(file).source!!.provides}.keys}.filterValues {it.isNotEmpty()}
     }
     val dependencyReasons:Map<String,List<String>> get()=requirements.entries.flatMap {(owner,deps)->deps.map {it to owner}}.groupBy({it.first},{it.second}).mapValues {it.value.sorted()}
     val dependencyFiles:Set<String> get()=dependencyReasons.keys
-    fun validateEnabled(files:Set<String> = active.keys) {
-        val unresolved=missing.filterKeys {it in files}
-        require(unresolved.isEmpty()) {unresolved.entries.joinToString(" · "){"${it.key}: 필수 모드 ${it.value.joinToString()}가 없습니다"}}
-    }
     fun closure(files:Set<String>):Set<String> {
         require(files.all {it in active}) {"활성 모드를 선택하세요"}
         val result=files.toMutableSet();val pending=ArrayDeque(files)
         while(pending.isNotEmpty())requirements.getValue(pending.removeFirst()).forEach {if(result.add(it))pending.add(it)}
         return result
     }
+    /** Disabling a provider also disables every mod left without any provider of a required project. */
     fun disable(files:Set<String>):Set<String> {
-        require(files.isNotEmpty() && files.all {it in active}) {"비활성화할 모드를 선택하세요"}
-        val blocked=files.intersect(dependencyFiles)
-        require(blocked.isEmpty()) {"필수 의존성 모드는 비활성화할 수 없습니다: "+blocked.sorted().joinToString(" · ") {"$it (사용 중: ${dependencyReasons.getValue(it).joinToString()})"}}
-        validateEnabled(active.keys-files)
-        return files
+        require(files.isNotEmpty() && files.all {it in active}) {"비활성화할 활성 모드를 선택하세요"}
+        val result=files.toMutableSet();var changed=true
+        while(changed) {
+            changed=false
+            for((file,deps) in needs)if(file !in result && deps.values.any {it.isNotEmpty() && it.all {p->p in result}}){result.add(file);changed=true}
+        }
+        return result
+    }
+    companion object {
+        fun providers(mods:Collection<InstalledMod>)=mods.flatMap {m->m.source?.provides.orEmpty().map {it to m.filename}}.groupBy({it.first},{it.second}).mapValues {it.value.toSet()}
+        /**
+         * Re-enabling also restores disabled files that provide a missing required project.
+         * Requirements nothing can satisfy are reported, not blocking: a non-Modrinth file may provide them.
+         */
+        fun enable(snapshot:ModInventorySnapshot,files:Set<String>):Pair<Set<String>,List<String>> {
+            val disabled=snapshot.mods.filter {!it.enabled}.associateBy {it.filename}
+            require(files.isNotEmpty() && files.all {it in disabled}) {"다시 켤 비활성 모드를 선택하세요"}
+            val enabled=snapshot.mods.filter {it.enabled}
+            fun title(project:String)=snapshot.projects[project]?.title ?: project
+            val result=files.toMutableSet();val warnings=mutableListOf<String>()
+            var changed=true
+            while(changed) {
+                changed=false
+                val provided=providers(enabled+result.map(disabled::getValue)).keys
+                for(file in result.toList())for(project in disabled.getValue(file).source?.takeUnless {it.clientOnly}?.required.orEmpty()-provided) {
+                    val candidates=disabled.values.filter {it.filename !in result && project in it.source?.provides.orEmpty()}
+                    if(candidates.size==1){result.add(candidates.single().filename);changed=true}
+                }
+            }
+            val proposed=enabled+result.map(disabled::getValue)
+            val provided=providers(proposed).keys
+            for(file in result.sorted())for(project in disabled.getValue(file).source?.takeUnless {it.clientOnly}?.required.orEmpty()-provided)
+                warnings.add("$file: 필수 모드 ${title(project)}을(를) 찾지 못했습니다")
+            val duplicate=proposed.mapNotNull {m->m.source?.let {it.projectId to m}}.groupBy({it.first},{it.second}).filter {(_,mods)->mods.size>1 && mods.any {it.filename in result}}
+            require(duplicate.isEmpty()) {"같은 모드의 다른 파일이 이미 켜져 있습니다: "+duplicate.keys.joinToString {title(it)}}
+            val clash=proposed.flatMap {m->m.source?.dependencies.orEmpty().filter {it.type=="incompatible" && it.projectId in provided}.map {m to it.projectId}}
+                .filter {(m,project)->m.filename in result || proposed.any {it.filename in result && project in it.source?.provides.orEmpty()}}
+            require(clash.isEmpty()) {"Modrinth에 서로 호환되지 않는다고 등록된 모드입니다: "+clash.joinToString {(m,project)->"${m.source!!.title} / ${title(project)}"}}
+            return result to warnings
+        }
     }
     fun plan(suspects:Set<String>,keep:Set<String>):ModSearchPlan {
         require(suspects.isNotEmpty() && suspects.all {it in active}) {"검사할 의심 모드를 선택하세요"}
-        validateEnabled()
         val fixed=closure(keep+dependencyFiles)
         val candidates=(suspects-fixed).sorted()
         require(candidates.isNotEmpty()) {"선택한 모드는 모두 유지 모드 또는 필수 의존성입니다"}
