@@ -31,6 +31,8 @@ interface RemoteController {
     fun install(instance:Instance,requestId:String) {error("실행기를 업데이트하세요")}
     fun start(instance:Instance)
     fun stop(instance:Instance)
+    fun supportsForceStop(instance:Instance):Boolean=false
+    fun forceStop(instance:Instance,pid:Long) {error("원격 강제 종료에는 실행기 0.4.7 이상이 필요합니다")}
     fun restart(instance:Instance)
     fun command(instance:Instance,value:String)
     fun completed(instance:Instance) {}
@@ -228,7 +230,7 @@ class ServerManager {
         val i = instance(id); val r = runtime(id)
         val result=synchronized(r) { mapOf("config" to i.copy(), "state" to r.state, "pid" to (if(i.runnerId!=null) r.remotePid else r.process?.takeIf { it.isAlive }?.pid()), "resources" to r.resources?.takeIf { (i.runnerId!=null || r.process?.isAlive == true) && (i.runnerId!=null || it.pid == r.process?.pid()) }, "players" to r.players?.takeIf { r.state=="RUNNING" && java.time.Duration.between(Instant.parse(it.sampledAt),Instant.now()).seconds<30 }, "directory" to (if(i.syncEnabled())serverDir(id).toString() else r.folderSource?.get("path") ?: "현재 실행기의 원본 서버 폴더"), "eulaAccepted" to eulaAccepted(id),"activityVersion" to r.activityVersion,"diagnosticActive" to r.diagnosticActive,"modBusy" to (r.modBusy||r.remoteFileBusy)) }
         val transfer=synchronized(r) {mapOf("folderSource" to r.folderSource,"folderImport" to r.folderImport?.let(r.transferMeter::view),"fileTransfer" to r.fileTransfer?.let(r.transferMeter::view))}
-        return result+transfer+mapOf("playerQueryMessage" to r.playerQueryMessage?.takeIf {r.state=="RUNNING"},"sableUdp" to remoteController?.sableStatus(i),"powerSaving" to powerStatus?.invoke(id),"autoRestart" to autoRestartStatus?.invoke(id))
+        return result+transfer+mapOf("forceStopSupported" to (i.runnerId==null || remoteController?.supportsForceStop(i)==true),"playerQueryMessage" to r.playerQueryMessage?.takeIf {r.state=="RUNNING"},"sableUdp" to remoteController?.sableStatus(i),"powerSaving" to powerStatus?.invoke(id),"autoRestart" to autoRestartStatus?.invoke(id))
     }
     private fun validate(req: CreateRequest) {
         require(req.name.isNotBlank() && req.name.length <= 80) { "이름은 1~80자로 입력하세요" }
@@ -483,8 +485,18 @@ class ServerManager {
         }
     }
     fun stop(id: String,force: Boolean) { val r=runtime(id); synchronized(r) {
-        if(instance(id).runnerId!=null) { require(!force) { "원격 서버는 정상 종료를 사용하세요" };command(id,"stop");return }
-        if(force) { r.stopReason="MANUAL";val p=r.process ?: error("프로세스가 없습니다"); r.state="STOPPING"; p.descendants().forEach { it.destroyForcibly() }; p.destroyForcibly(); r.event("system","강제 종료 요청") }
+        val i=instance(id)
+        if(i.runnerId!=null) {
+            if(!force){command(id,"stop");return}
+            check(r.state in setOf("STARTING","RUNNING","STOPPING")) {"강제 종료할 실행 중인 서버가 없습니다"}
+            val pid=r.remotePid ?: error("실행기의 Minecraft PID를 확인한 뒤 다시 시도하세요")
+            val controller=remoteController ?: error("원격 실행기 연결 기능을 사용할 수 없습니다")
+            controller.forceStop(i,pid)
+            r.stopReason="FORCED";r.remoteStopRequested=true;r.remoteRestartRequested=false;r.state="STOPPING"
+            r.event("system","원격 강제 종료 요청 · 저장되지 않은 변경은 손실될 수 있습니다. 프로세스 종료 확인 후 파일을 인계합니다.")
+            return
+        }
+        if(force) { val p=r.process ?: error("프로세스가 없습니다");r.stopReason="FORCED"; r.state="STOPPING"; p.descendants().use {children->children.forEach { it.destroyForcibly() }}; p.destroyForcibly(); r.event("system","강제 종료 요청") }
         else command(id,"stop")
     } }
     fun restart(id: String) {

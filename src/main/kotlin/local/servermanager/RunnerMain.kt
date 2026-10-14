@@ -276,6 +276,9 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                         "start" -> if(message.instanceId!=null && message.detail!=null) workers.submit { beginStart(message.instanceId,message.detail) }
                         "import-folder" -> if(message.instanceId!=null && message.detail!=null && message.token!=null)workers.submit {importFolder(message.instanceId,message.detail,message.token)}
                         "stop" -> message.instanceId?.let { stop(it) }
+                        "force-stop" -> if(connection.get()===webSocket && message.instanceId!=null && message.pid!=null) {
+                            if(!runCatching {forceStop(message.instanceId,message.pid)}.getOrDefault(false))send(RunnerMessage("log",message.instanceId,"system",detail="강제 종료 실패 · 대상 프로세스가 변경되었거나 종료 요청을 처리할 수 없습니다. 상태를 새로고침하세요."))
+                        }
                         "idle-stop" -> if(message.instanceId!=null && message.detail!=null)workers.submit {stopIfEmpty(message.instanceId,message.detail)}
                         "restart" -> message.instanceId?.let { stop(it) }
                         "command" -> if(message.instanceId!=null && message.command!=null) command(message.instanceId,message.command)
@@ -689,6 +692,18 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         stopping.add(id)
         send(RunnerMessage("state",id,"STOPPING",version(),"저장 후 종료 중",pid=process.pid()))
         return true
+    }
+    private fun forceStop(id:String,expectedPid:Long):Boolean=synchronized(lifecycle) {
+        // Only terminate this agent's tracked process, never a PID supplied to the OS.
+        val process=processes[id] ?: return false
+        if(expectedPid<=0 || !process.isAlive || process.pid()!=expectedPid)return false
+        stopping.add(id)
+        send(RunnerMessage("state",id,"STOPPING",version(),"사용자 요청으로 강제 종료 중 · 저장되지 않은 변경은 손실될 수 있습니다",pid=expectedPid))
+        process.descendants().use {children->children.forEach {child->runCatching {child.destroyForcibly()}}}
+        process.destroyForcibly()
+        // The normal process waiter confirms exit, records metadata, then uploads.
+        // Keep processes/dirty/lease intact until that path has finished.
+        true
     }
     private fun stopIfEmpty(id:String,requestId:String) {
         val process=processes[id];val counter=activity[id];val before=counter?.get()

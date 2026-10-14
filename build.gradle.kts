@@ -25,6 +25,7 @@ tasks.test {
     useJUnitPlatform()
     // Tests must never inherit the live profile, even when launched from its working directory.
     environment("SERVER_MANAGER_DATA", layout.buildDirectory.dir("test-profile").get().asFile.absolutePath)
+    environment("SERVER_MANAGER_HOME", layout.buildDirectory.dir("test-desktop-home").get().asFile.absolutePath)
 }
 
 tasks.processResources { inputs.file("VERSION"); doLast { destinationDir.resolve("app-version.txt").writeText(project.version.toString()) } }

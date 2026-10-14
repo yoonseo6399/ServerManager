@@ -301,6 +301,16 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
         check(send(id,RunnerMessage("import-folder",instanceId=instance.id,detail=mapper.writeValueAsString(instance),token=requestId))) { "실행기에 가져오기 명령을 전달하지 못했습니다" }
     }
     override fun stop(instance:Instance) { check(send(requireRunner(instance),RunnerMessage("stop",instanceId=instance.id))) { "실행기에 종료 명령을 전달하지 못했습니다" } }
+    override fun supportsForceStop(instance:Instance):Boolean {
+        val id=instance.runnerId ?: return false
+        return connected(id) && runCatching {SignedUpdates.compare(registry.active(id)?.version ?: "unknown","0.4.7")>=0}.getOrDefault(false)
+    }
+    override fun forceStop(instance:Instance,pid:Long) {
+        val id=requireRunner(instance)
+        check(supportsForceStop(instance)) {"원격 강제 종료에는 실행기 0.4.7 이상이 필요합니다"}
+        require(pid>0)
+        check(send(id,RunnerMessage("force-stop",instanceId=instance.id,pid=pid))) {"실행기에 강제 종료 명령을 전달하지 못했습니다"}
+    }
     override fun restart(instance:Instance) { stop(instance) }
     override fun command(instance:Instance,value:String) { check(send(requireRunner(instance),RunnerMessage("command",instanceId=instance.id,command=value))) { "실행기에 콘솔 명령을 전달하지 못했습니다" } }
     @Synchronized override fun completed(instance:Instance) {
