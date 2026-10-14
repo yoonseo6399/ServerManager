@@ -18,7 +18,7 @@ class SableLiveTest {
     @TempDir lateinit var temp:Path
     @Test fun `actual Sable and bridge boot with separated Query and normal save stop`() {
         val source=Path.of(System.getenv("SM_LIVE_SABLE_JAR") ?: error("Supply a legally obtained Sable2.0.6 JAR; it is never redistributed"))
-        assertEquals("2.0.6",ModArchive.inspect(source,"neoforge").mods.single {it.id=="sable"}.version)
+        assertEquals("2.0.6",SableIdentity.version(source))
         val server=temp.resolve("server").also {it.createDirectories()}
         val port=java.net.ServerSocket(0).use {it.localPort}
         val instance=Instance("fixture","Sable",loaderVersion="21.1.249",port=port,memoryMb=1024,javaPath=Path.of(System.getProperty("java.home"),"bin/java").toString())

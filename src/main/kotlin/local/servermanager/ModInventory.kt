@@ -7,16 +7,25 @@ import java.nio.file.attribute.BasicFileAttributes
 import java.security.MessageDigest
 import kotlin.io.path.*
 
+@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown=true)
 data class InstalledMod(val filename:String,val enabled:Boolean,val size:Long,val sha256:String,val sha512:String,
-    val metadata:ModArchiveInfo?,val warning:String?=null)
-data class ModInventorySnapshot(val revision:String,val mods:List<InstalledMod>,val warnings:List<String>,val dependencyFiles:List<String> = emptyList(),val dependencyReasons:Map<String,List<String>> = emptyMap())
+    val source:ModSource?=null,val warning:String?=null)
+@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown=true)
+data class ModInventorySnapshot(val revision:String,val mods:List<InstalledMod>,val warnings:List<String>,val dependencyFiles:List<String> = emptyList(),val dependencyReasons:Map<String,List<String>> = emptyMap(),
+    val missing:Map<String,List<String>> = emptyMap(),val projects:Map<String,ModProjectRef> = emptyMap(),val blockedReasons:Map<String,String> = emptyMap())
 data class ModContentLink(val filename:String,val version:RinVersion,val file:RinFile)
 
 /** An explicit, read-only scan. Do not call from periodic status/UI polling. */
 object ModInventory {
+    private val managedBridge:Pair<String,Long>? by lazy {
+        ModInventory::class.java.getResourceAsStream("/sable/servermanager-sable-bridge.jar")?.use {stream->
+            val bytes=stream.readNBytes(1024*1024+1);require(bytes.size<=1024*1024)
+            hex(MessageDigest.getInstance("SHA-512").digest(bytes)) to bytes.size.toLong()
+        }
+    }
     private fun hex(bytes:ByteArray)=bytes.joinToString(""){"%02x".format(it)}
-    fun scan(directory:Path,loader:String):ModInventorySnapshot {
-        require(loader in setOf("fabric","forge","neoforge"))
+    /** Hashes files only. JAR contents are never parsed; dependencies come from [attach]. */
+    fun scan(directory:Path):ModInventorySnapshot {
         val paths=if(!directory.exists())emptyList() else {
             require(directory.isDirectory(NOFOLLOW_LINKS) && !Files.isSymbolicLink(directory))
             Files.list(directory).use {items->
@@ -33,24 +42,36 @@ object ModInventory {
         val mods=paths.map {p->
             val before=attrs.getValue(p);val sha256=MessageDigest.getInstance("SHA-256");val sha512=MessageDigest.getInstance("SHA-512")
             p.inputStream().use {input->var count=0L;while(true) {val n=input.read(buffer);if(n<0)break;count+=n;check(count<=before.size()) {"검사 중 모드 크기가 바뀌었습니다"};sha256.update(buffer,0,n);sha512.update(buffer,0,n)};check(count==before.size())}
-            val info=runCatching {ModArchive.inspect(p,loader)}
             val after=Files.readAttributes(p,BasicFileAttributes::class.java,NOFOLLOW_LINKS)
             check(after.isRegularFile && before.size()==after.size() && before.lastModifiedTime()==after.lastModifiedTime() && before.fileKey()==after.fileKey()) {"검사 중 모드가 변경되었습니다. 다시 검사하세요"}
-            InstalledMod(p.name,!p.name.endsWith(".disabled",true),before.size(),hex(sha256.digest()),hex(sha512.digest()),info.getOrNull(),info.exceptionOrNull()?.let {"모드 메타데이터를 읽지 못했습니다 (${it.javaClass.simpleName})"})
+            InstalledMod(p.name,!p.name.endsWith(".disabled",true),before.size(),hex(sha256.digest()),hex(sha512.digest()))
         }
         val revision=MessageDigest.getInstance("SHA-256")
         mods.forEach {revision.update("${it.filename}\u0000${it.enabled}\u0000${it.size}\u0000${it.sha512}\n".toByteArray())}
-        val warnings=buildList {
-            if(mods.groupBy {if(it.filename.endsWith(".disabled",true))it.filename.dropLast(9).lowercase() else it.filename.lowercase()}.any {it.value.size>1})add("같은 파일 이름의 활성/비활성 모드가 중복됩니다")
-            val active=mods.filter {it.enabled}
-            if(active.groupBy {it.sha512}.any {it.value.size>1})add("내용이 같은 모드 JAR가 중복됩니다")
-            val providers=active.flatMap {mod->mod.metadata?.mods.orEmpty().flatMap {m->(m.provides+m.id).map {it to mod.filename}}}.groupBy {it.first}
-            providers.filter {it.value.size>1}.keys.sorted().forEach {add("모드 ID 중복: $it")}
-            if(active.any {it.metadata?.complete!=true})add("알 수 없거나 중첩된 모드 의존성이 있습니다. 자동 비활성화는 아직 안전하지 않습니다")
+        return ModInventorySnapshot(hex(revision.digest()),mods,emptyList())
+    }
+    /** Adds saved Modrinth sources and the dependency graph. The revision still identifies file content only. */
+    fun attach(snapshot:ModInventorySnapshot,lookup:ModSourceLookup):ModInventorySnapshot {
+        val sable=lookup.cache.sources.values.distinct().singleOrNull {it.slug=="sable"&&it.versionNumber=="2.0.6"}
+        val bridge=managedBridge
+        val mods=snapshot.mods.map {m->
+            val source=lookup.cache.sources[m.sha512] ?: if(bridge!=null&&sable!=null&&m.sha512==bridge.first&&m.size==bridge.second)
+                ModSource("servermanager-sable-bridge","servermanager-sable-bridge","Server Manager Sable 연결",versionId="1.0.0",versionNumber="1.0.0",environment="server_only",dependencies=listOf(ModDependency(sable.projectId,"required",sable.versionId)),origin="BUNDLED") else null
+            m.copy(source=source,warning=if(source!=null)null else "Modrinth에서 찾지 못해 의존성을 확인할 수 없습니다")
         }
-        val snapshot=ModInventorySnapshot(hex(revision.digest()),mods,warnings)
-        val graph=runCatching {ModGraph(snapshot)}.getOrNull()
-        return snapshot.copy(dependencyFiles=graph?.dependencyFiles?.sorted().orEmpty(),dependencyReasons=graph?.dependencyReasons.orEmpty())
+        val active=mods.filter {it.enabled}
+        val warnings=buildList {
+            addAll(lookup.warnings)
+            if(mods.groupBy {if(it.filename.endsWith(".disabled",true))it.filename.dropLast(9).lowercase() else it.filename.lowercase()}.any {it.value.size>1})add("같은 파일 이름의 활성/비활성 모드가 중복됩니다")
+            if(active.groupBy {it.sha512}.any {it.value.size>1})add("내용이 같은 모드 JAR가 중복됩니다")
+            active.mapNotNull {it.source}.groupBy {it.projectId}.filter {it.value.size>1}.values.sortedBy {it.first().title}.forEach {add("같은 모드가 여러 파일로 켜져 있습니다: ${it.first().title}")}
+            val unknown=mods.count {it.source==null}
+            if(unknown>0)add("Modrinth에서 찾지 못한 모드 ${unknown}개는 의존성을 확인하지 못합니다. 직접 받은 파일이거나 다른 사이트의 모드일 수 있습니다")
+        }
+        val graph=ModGraph(snapshot.copy(mods=mods))
+        val names=lookup.cache.projects.filterKeys {id->mods.any {m->m.source?.projectId==id || m.source?.dependencies?.any {it.projectId==id}==true}}
+        return snapshot.copy(mods=mods,warnings=warnings,dependencyFiles=graph.dependencyFiles.sorted(),dependencyReasons=graph.dependencyReasons,
+            missing=graph.missing.mapValues {it.value.sorted()},projects=names,blockedReasons=graph.blockedReasons)
     }
     /** A content match never uses the local filename as proof of identity. */
     fun link(snapshot:ModInventorySnapshot,lookup:(List<String>)->Map<String,RinVersion>):List<ModContentLink> {

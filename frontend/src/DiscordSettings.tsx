@@ -1,3 +1,4 @@
+import {SaveBar} from './SaveBar';
 import {memo,useEffect,useState} from 'react';
 import {api,ApiError} from './http';
 import {useAuth} from './Auth';
@@ -23,7 +24,7 @@ export const DiscordSettings=memo(function DiscordSettings({instances}:Props){
  {error&&<div role="alert" className="alert error-banner">{error}</div>}{notice&&<div role="status" className="notice alert">{notice}</div>}
  <div className="discord-status"><strong>{status?.state||'확인 중'}</strong><span>{status?.message}</span></div>
  {status?.guilds.length!==0&&<p className="muted">연결된 Discord 서버: {status?.guilds.map(g=>`${g.name} (${g.id})`).join(', ')}</p>}
- <form onSubmit={e=>{e.preventDefault();if(!view)return;run(async()=>{const saved=await api<View>('/admin/discord','PUT',{config,revision:view.revision,token:token.trim()||null,clearToken});setView(saved);setConfig(normalize(saved.config));setToken('');setClearToken(false);setDirty(false);setNotice('Discord 설정을 저장했습니다. 연결 상태는 잠시 후 갱신됩니다.');setStatus(await api('/admin/discord/status'));});}}>
+ <form id="discord-settings-form" onSubmit={e=>{e.preventDefault();if(!view)return;run(async()=>{const saved=await api<View>('/admin/discord','PUT',{config,revision:view.revision,token:token.trim()||null,clearToken});setView(saved);setConfig(normalize(saved.config));setToken('');setClearToken(false);setDirty(false);setNotice('Discord 설정을 저장했습니다. 연결 상태는 잠시 후 갱신됩니다.');setStatus(await api('/admin/discord/status'));});}}>
  <fieldset disabled={busy||!view} className="discord-fieldset">
  <label className="check-label"><input type="checkbox" checked={config.enabled} onChange={e=>change({...config,enabled:e.target.checked})}/>Discord 연동 켜기</label>
  <label className="security-label">봇 토큰<input type="password" autoComplete="new-password" spellCheck={false} maxLength={512} value={token} placeholder={view?.tokenConfigured&&!clearToken?'저장된 토큰 있음 · 비워두면 유지':'Discord Developer Portal의 Bot 토큰'} onChange={e=>{setToken(e.target.value);setClearToken(false);setDirty(true);}}/></label>
@@ -52,8 +53,9 @@ export const DiscordSettings=memo(function DiscordSettings({instances}:Props){
  <label className="check-label"><input type="checkbox" checked={a.panel} onChange={e=>change({...config,alerts:config.alerts.map((x,n)=>n===index?{...x,panel:e.target.checked}:x)})}/>전용 채널 제어 패널</label>
  <button type="button" onClick={()=>change({...config,alerts:config.alerts.filter((_,n)=>n!==index)})}>알림 규칙 삭제</button></div>)}
  <button type="button" onClick={()=>change({...config,alerts:[...config.alerts,{guildId:status?.guilds[0]?.id||'',channelId:'',instanceId:instances[0]?.config.id||'',errors:true,stops:true,starts:true,panel:true}]})}>채널 규칙 추가</button>
- <div className="actions spaced"><button className="primary" type="submit" disabled={!dirty}>Discord 설정 저장</button><button type="button" onClick={()=>run(load)}>저장된 설정 다시 불러오기</button><button type="button" disabled={dirty||!view?.config.enabled} onClick={()=>run(async()=>{await api('/admin/discord/reconnect','POST');setNotice('다시 연결을 요청했습니다.');})}>다시 연결</button></div>
+ <div className="actions spaced"><button type="button" onClick={()=>run(load)}>저장된 설정 다시 불러오기</button><button type="button" disabled={dirty||!view?.config.enabled} onClick={()=>run(async()=>{await api('/admin/discord/reconnect','POST');setNotice('다시 연결을 요청했습니다.');})}>다시 연결</button></div>
  </fieldset></form>
+ <SaveBar label="Discord 설정" dirty={dirty&&!!view&&(!!token||clearToken||JSON.stringify(config)!==JSON.stringify(normalize(view.config)))} busy={busy} error={error} saveLabel="Discord 설정 저장" onSave={()=>{(document.getElementById('discord-settings-form') as HTMLFormElement)?.requestSubmit();}} onReset={()=>{if(view)setConfig(normalize(view.config));setToken('');setClearToken(false);setDirty(false);setError('');}}/>
  {status?.inviteUrl&&<p><a href={status.inviteUrl} target="_blank" rel="noreferrer">Discord 서버에 봇 초대하기</a></p>}
  <details><summary>처음 연결하는 방법</summary><ol><li><a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">Discord Developer Portal</a>에서 앱과 봇을 만들고 Bot 토큰을 이 화면에 저장하세요.</li><li>연동을 켠 뒤 위의 초대 링크로 봇을 초대하세요. 전용 채널에는 채널 보기·메시지 보내기·임베드 링크·메시지 기록 보기·메시지 관리·파일 첨부 권한이 필요합니다.</li><li>Discord 설정 → 고급 → 개발자 모드를 켜고 서버·역할·텍스트 채널 ID를 복사해 규칙에 넣으세요.</li><li>Interactions Endpoint URL은 비워 두세요. 추가 포트 개방과 Message Content / Server Members 특권 인텐트는 필요하지 않습니다.</li><li>관리 앱과 Mac이 켜져 있어야 명령과 알림이 작동합니다. Mac 자체를 켜는 기능은 아닙니다.</li></ol></details></section>;
 },(a,b)=>JSON.stringify(a.instances.map(i=>i.config.id+':'+i.config.name))===JSON.stringify(b.instances.map(i=>i.config.id+':'+i.config.name)));

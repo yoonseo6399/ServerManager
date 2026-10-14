@@ -23,13 +23,23 @@ class ModManagementTest {
         while(mods.page(id).job?.phase !in setOf("COMPLETE","FAILED") && System.nanoTime()<deadline)Thread.sleep(20)
         assertEquals("COMPLETE",mods.page(id).job?.phase,mods.page(id).job?.message)
     }
+    private fun sha512(path:Path)=java.security.MessageDigest.getInstance("SHA-512").digest(path.readBytes()).joinToString("") {"%02x".format(it)}
+    /** Stand-in for Modrinth: each fixture JAR is known by hash, with its required projects. */
+    private class FakeModrinth:ModrinthLookup {
+        val known=mutableMapOf<String,Pair<String,List<String>>>()
+        override fun versionsFromHashes(hashes:List<String>)=hashes.mapNotNull {h->known[h]?.let {(project,deps)->
+            h to RinVersion("v-$project",project,project,"1.0.0","release","2026-01-01T00:00:00Z",setOf("1.21.1"),setOf("fabric"),emptyList(),deps.map {RinDependency(it,null,"required")},"client_and_server")}}.toMap()
+        override fun projects(ids:Collection<String>)=ids.map {RinProject(it,it,it,"required",environment="client_and_server")}
+    }
     private fun fixture(action:(ServerManager,ModManagement,String)->Unit) {
         val manager=ServerManager();val id=(manager.create(CreateRequest("mod-test-${UUID.randomUUID()}","0.16.14",ServerSocket(0).use {it.localPort},512,loader="Fabric"))["config"] as Instance).id
-        val mods=ModManagement(manager)
+        val modrinth=FakeModrinth();val mods=ModManagement(manager,ModrinthCatalog(modrinth))
         try {
             manager.root.resolve(id).resolve("installed.ok").writeText("0.16.14");manager.runtime(id).state="STOPPED"
             val source=manager.originalServerDir(id)
-            jar(source.resolve("mods/lib.jar"),"lib");jar(source.resolve("mods/suspect.jar"),"suspect","\"lib\":\"*\"");jar(source.resolve("mods/other.jar"),"other")
+            modrinth.known[sha512(jar(source.resolve("mods/lib.jar"),"lib"))]="lib" to emptyList()
+            modrinth.known[sha512(jar(source.resolve("mods/suspect.jar"),"suspect"))]="suspect" to listOf("lib")
+            modrinth.known[sha512(jar(source.resolve("mods/other.jar"),"other"))]="other" to emptyList()
             source.resolve("world/region").createDirectories();source.resolve("world/level.dat").writeText("original protected world")
             source.resolve("world/region/r.0.0.mca").writeText("untouched")
             mods.refresh(id);waitJob(mods,id);action(manager,mods,id)
@@ -41,7 +51,8 @@ class ModManagementTest {
     @Test fun `disable is dependency closed reversible content preserving and stale revision guarded`()=fixture {manager,mods,id->
         val source=manager.originalServerDir(id);val original=FileInventory.collect(source)
         val revision=mods.page(id).inventory!!.revision
-        assertFails {mods.preview(id,ModSelection(revision,setOf("lib.jar")))}
+        assertFailsWith<IllegalArgumentException>{mods.preview(id,ModSelection(revision,setOf("lib.jar")))}
+        assertEquals(listOf("suspect.jar"),mods.page(id).inventory!!.dependencyReasons["lib.jar"])
         val request=ModSelection(revision,setOf("suspect.jar"))
         assertEquals(listOf("suspect.jar"),mods.preview(id,request).affected)
         mods.toggle(id,request);waitJob(mods,id)
@@ -54,6 +65,8 @@ class ModManagementTest {
         assertEquals(original,FileInventory.collect(source));assertFalse(manager.root.resolve(id).resolve("import.pending").exists())
         jar(source.resolve("mods/external.jar.disabled"),"external");mods.refresh(id);waitJob(mods,id);fresh=mods.page(id).inventory!!
         assertFails {mods.preview(id,ModSelection(fresh.revision,setOf("external.jar.disabled"),true))}
+        assertNull(fresh.mods.single {it.filename=="external.jar.disabled"}.source)
+        assertTrue(manager.root.resolve(id).resolve("mod-sources.json").readText().contains("suspect"))
     }
     @Test fun `isolated manual search keeps original world requires verdict and supports pause resume correction and logs`()=fixture {manager,mods,id->
         val source=manager.originalServerDir(id);val original=FileInventory.collect(source)

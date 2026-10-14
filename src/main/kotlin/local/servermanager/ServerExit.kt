@@ -8,13 +8,14 @@ import java.time.Instant
 import kotlin.io.path.*
 
 /** Exit metadata only; never a persisted parsed log or stack trace. */
-data class RunnerExitReport(val code:Int?=null,val crashReport:String?=null)
+data class RunnerExitReport(val code:Int?=null,val crashReport:String?=null,@get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) val reason:String?=null)
 data class ServerExit(val code:Int?,val requested:Boolean,val reason:String,val crashReport:String?=null,val at:String=Instant.now().toString()) {
     fun summary():String=when(reason) {
         "IDLE"->"플레이어가 없는 상태가 이어져 절전 종료했습니다."
         "RESTART"->"재시작 요청으로 정상 종료했습니다."
         "SHUTDOWN"->"관리 앱 종료를 위해 서버를 종료했습니다."
         "MANUAL"->"사용자 요청으로 서버를 종료했습니다."
+        "STOP_TIMEOUT"->"종료 신호 후 3분 동안 저장 진전이 없어 자동 강제 종료했습니다. 저장되지 않은 변경은 손실될 수 있습니다."
         "FORCED"->"사용자 요청으로 서버를 강제 종료했습니다. 저장되지 않은 변경은 손실될 수 있습니다."
         else->if(crashReport!=null)"크래시 리포트를 생성하고 예기치 않게 종료했습니다." else "예기치 않게 서버가 종료되었습니다."
     }+(code?.let {" (종료 코드 $it)"} ?: " (종료 코드 확인 불가)")

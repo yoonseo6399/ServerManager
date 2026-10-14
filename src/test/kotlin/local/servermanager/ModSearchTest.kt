@@ -4,13 +4,13 @@ import org.junit.jupiter.api.Test
 import kotlin.test.*
 
 class ModSearchTest {
-    private fun mod(id:String,vararg deps:String)=InstalledMod("$id.jar",true,10,id,id,ModArchiveInfo("fabric",listOf(ModIdentity(id,"1",id)),deps.map {ModRequirement(id,it,listOf("*"),"required")}))
+    private fun source(id:String,deps:List<ModDependency>,clientOnly:Boolean=false)=ModSource(id,id,id,versionId="v$id",versionNumber="1",clientOnly=clientOnly,dependencies=deps)
+    private fun mod(id:String,vararg deps:String)=InstalledMod("$id.jar",true,10,id,id,source(id,deps.map {ModDependency(it,"required")}))
     private fun graph(vararg mods:InstalledMod)=ModGraph(ModInventorySnapshot("r",mods.toList(),emptyList()))
-    @Test fun `dependency providers stay enabled while their dependent mods can be disabled`() {
-        val lib=mod("lib").let {it.copy(metadata=it.metadata!!.copy(mods=listOf(ModIdentity("lib","1","Library",setOf("alias")))))}
+    @Test fun `disabling a provider also disables mods that require it while plans keep providers fixed`() {
+        val lib=mod("lib").let {it.copy(source=source("lib",listOf(ModDependency("alias","embedded"))))}
         val g=graph(mod("main","alias"),lib,mod("extra","main"),mod("other"))
-        val blocked=assertFailsWith<IllegalArgumentException>{g.disable(setOf("lib.jar"))}
-        assertTrue(blocked.message.orEmpty().contains("main.jar"))
+        assertTrue(assertFailsWith<IllegalArgumentException>{g.disable(setOf("lib.jar"))}.message!!.contains("main.jar"))
         assertEquals(listOf("main.jar"),g.dependencyReasons["lib.jar"])
         assertEquals(setOf("extra.jar"),g.disable(setOf("extra.jar")))
         val p=g.plan(setOf("lib.jar","main.jar","other.jar"),setOf("main.jar"))
@@ -18,20 +18,102 @@ class ModSearchTest {
         assertEquals(listOf("other.jar"),p.groups.single().files)
         assertEquals(setOf("other.jar"),g.disabled(p,emptySet()))
     }
+    @Test fun `a second provider of the same project keeps dependents enabled`() {
+        val copy=mod("lib").copy(filename="lib-copy.jar",sha512="lib2")
+        assertFailsWith<IllegalArgumentException>{graph(mod("main","lib"),mod("lib"),copy).disable(setOf("lib.jar"))}
+    }
     @Test fun `all transitive providers and cross-file cycles are fixed even if selected as suspects`() {
         val g=graph(mod("a","bridge"),mod("bridge","b"),mod("b","a"),mod("c"),mod("addon","c"))
         val p=g.plan(setOf("a.jar","b.jar","c.jar","addon.jar"),emptySet())
         assertEquals(listOf("addon.jar"),p.groups.single().files)
         assertEquals(setOf("a.jar","b.jar","bridge.jar","c.jar"),p.fixed.toSet())
         assertEquals(setOf("addon.jar"),g.disabled(p,emptySet()))
-        assertFails {g.disable(setOf("c.jar","addon.jar"))}
+        assertFailsWith<IllegalArgumentException>{g.disable(setOf("c.jar"))}
+        assertFailsWith<IllegalArgumentException>{g.disable(setOf("a.jar"))}
     }
-    @Test fun `missing and unknown dependencies block automatic modification`() {
-        val missing=graph(mod("a","missing"));assertFails {missing.plan(setOf("a.jar"),emptySet())}
+    @Test fun `missing and unknown dependencies are reported without blocking other mods`() {
+        val missing=graph(mod("a","missing"),mod("b"))
+        assertEquals(mapOf("a.jar" to setOf("missing")),missing.missing)
+        assertFailsWith<IllegalArgumentException>{missing.plan(setOf("b.jar"),emptySet())}
         assertEquals(setOf("a.jar"),missing.disable(setOf("a.jar")))
-        assertFails {graph(mod("a").copy(metadata=null))}
-        val g=graph(mod("a","minecraft","fabricloader","java"))
-        assertEquals(setOf("a.jar"),g.closure(setOf("a.jar")))
+        val unknown=graph(mod("a").copy(source=null),mod("b","a"))
+        assertTrue(unknown.dependencyFiles.isEmpty());assertEquals(setOf("a.jar"),unknown.disable(setOf("a.jar")))
+        val client=graph(mod("lib"),mod("shader","lib").let {it.copy(source=it.source!!.copy(clientOnly=true))})
+        assertEquals(setOf("lib.jar"),client.dependencyFiles)
+    }
+    @Test fun `enabling restores disabled providers and rejects duplicate or incompatible projects`() {
+        fun off(m:InstalledMod)=m.copy(filename=m.filename+".disabled",enabled=false)
+        fun snapshot(vararg mods:InstalledMod)=ModInventorySnapshot("r",mods.toList(),emptyList(),projects=mapOf("ghost" to ModProjectRef("ghost","ghost","Ghost Lib")))
+        val (files,warnings)=ModGraph.enable(snapshot(off(mod("main","lib")),off(mod("lib","core")),off(mod("core")),off(mod("unrelated"))),setOf("main.jar.disabled"))
+        assertEquals(setOf("main.jar.disabled","lib.jar.disabled","core.jar.disabled"),files);assertTrue(warnings.isEmpty())
+        assertFailsWith<IllegalArgumentException>{ModGraph.enable(snapshot(off(mod("main","ghost"))),setOf("main.jar.disabled"))}
+        assertFailsWith<IllegalArgumentException>{ModGraph.enable(snapshot(mod("main"),off(mod("main")).copy(filename="main-old.jar.disabled")),setOf("main-old.jar.disabled"))}
+        val bad=mod("bad").let {it.copy(source=source("bad",listOf(ModDependency("main","incompatible"))))}
+        assertFailsWith<IllegalArgumentException>{ModGraph.enable(snapshot(mod("main"),off(bad)),setOf("bad.jar.disabled"))}
+        assertFailsWith<IllegalArgumentException>{ModGraph.enable(snapshot(mod("main")),setOf("main.jar"))}
+    }
+    @Test fun `Modrinth lookup caches by hash and only retries unknown files when asked`() {
+        val calls=mutableListOf<List<String>>()
+        val dep=RinDependency("lib",null,"required")
+        val version=RinVersion("v1","main","Main","1.0","release","2026-01-01T00:00:00Z",setOf("1.21.1"),setOf("neoforge"),emptyList(),listOf(dep),"client_and_server")
+        val api=object:ModrinthLookup {
+            override fun versionsFromHashes(hashes:List<String>):Map<String,RinVersion> {calls.add(hashes.sorted());return if("a" in hashes)mapOf("a" to version) else emptyMap()}
+            override fun projects(ids:Collection<String>)=ids.map {RinProject(it,it,it.uppercase(),"required",environment="client_and_server")}
+        }
+        val first=ModSources.lookup(api,listOf("a","b"),ModSourceCache(),false)
+        val source=first.cache.sources.getValue("a")
+        assertEquals("MAIN",source.title);assertEquals(setOf("lib"),source.required);assertFalse(source.clientOnly)
+        assertEquals(listOf(ModDependency("lib","required")),source.dependencies);assertEquals("LIB",first.cache.projects.getValue("lib").title)
+        assertTrue("b" in first.cache.notFound)
+        assertSame(first.cache,ModSources.lookup(api,listOf("a","b"),first.cache,false).cache);assertEquals(1,calls.size)
+        ModSources.lookup(api,listOf("a","b"),first.cache,true);assertEquals(listOf("b"),calls.last())
+        assertFalse("x" in ModSources.lookup(api,listOf("a","b"),first.cache.copy(notFound=first.cache.notFound+("x" to "t")),true).cache.notFound)
+        val failing=object:ModrinthLookup {override fun versionsFromHashes(hashes:List<String>):Map<String,RinVersion> =error("offline");override fun projects(ids:Collection<String>)=emptyList<RinProject>()}
+        val offline=ModSources.lookup(failing,listOf("c"),first.cache,false)
+        assertSame(first.cache,offline.cache);assertTrue(offline.warnings.single().contains("offline"))
+    }
+    @Test fun `client only uses the version environment before deprecated server side`() {
+        val v=RinVersion("v","p","n","1","release","",emptySet(),emptySet(),emptyList(),emptyList())
+        assertTrue(ModSources.clientOnly(v.copy(environment="client_only"),null))
+        assertTrue(ModSources.clientOnly(v.copy(environment="singleplayer_only"),null))
+        assertFalse(ModSources.clientOnly(v.copy(environment="client_only_server_optional"),null))
+        assertFalse(ModSources.clientOnly(v.copy(environment="client_and_server"),RinProject("p","p","p","unsupported")))
+        assertTrue(ModSources.clientOnly(v,RinProject("p","p","p","required",environment="client_only")))
+        assertTrue(ModSources.clientOnly(v,RinProject("p","p","p","unsupported")))
+        assertFalse(ModSources.clientOnly(v,RinProject("p","p","p","optional")))
+    }
+    @Test fun `unknown kept consumers block provider removal and trials instead of guessing no dependencies`() {
+        val g=graph(mod("private").copy(source=null),mod("lib"),mod("addon","lib"))
+        assertFailsWith<IllegalArgumentException>{g.disable(setOf("lib.jar"))}
+        assertFailsWith<IllegalArgumentException>{g.disable(setOf("addon.jar"))}
+        assertFailsWith<IllegalArgumentException>{g.plan(setOf("addon.jar"),emptySet())}
+        assertEquals(setOf("private.jar"),g.disable(setOf("private.jar")))
+    }
+    @Test fun `exact dependency versions and version specific incompatibility cannot match another version`() {
+        fun off(m:InstalledMod)=m.copy(filename=m.filename+".disabled",enabled=false)
+        val main=mod("main").copy(source=source("main",listOf(ModDependency("lib","required","v2"))))
+        val old=mod("lib").copy(source=source("lib",emptyList()).copy(versionId="v1"))
+        val correct=off(mod("lib")).copy(source=source("lib",emptyList()).copy(versionId="v2"))
+        assertTrue(graph(main,old).missing["main.jar"]!!.contains("lib@v2"))
+        assertFails {ModGraph.enable(ModInventorySnapshot("r",listOf(off(main),old),emptyList()),setOf("main.jar.disabled"))}
+        assertEquals(setOf("main.jar.disabled","lib.jar.disabled"),ModGraph.enable(ModInventorySnapshot("r",listOf(off(main),correct),emptyList()),setOf("main.jar.disabled")).first)
+        val bad=off(mod("bad").copy(source=source("bad",listOf(ModDependency("lib","incompatible","v2")))))
+        assertEquals(setOf("bad.jar.disabled"),ModGraph.enable(ModInventorySnapshot("r",listOf(old,bad),emptyList()),setOf("bad.jar.disabled")).first)
+        assertFails {ModGraph.enable(ModInventorySnapshot("r",listOf(correct.copy(enabled=true),bad),emptyList()),setOf("bad.jar.disabled"))}
+    }
+    @Test fun `version only dependencies are resolved persisted and reused offline with exact identity`() {
+        val version=RinVersion("mainV","main","Main","1","release","",emptySet(),emptySet(),emptyList(),listOf(RinDependency(null,"libV2","required")))
+        var versionCalls=0
+        val api=object:ModrinthLookup {
+            override fun versionsFromHashes(hashes:List<String>)=mapOf("hash" to version)
+            override fun version(id:String):RinVersion {versionCalls++;return version.copy(id=id,projectId="lib",dependencies=emptyList())}
+            override fun projects(ids:Collection<String>)=ids.map {RinProject(it,it,it,"required")}
+        }
+        val result=ModSources.lookup(api,listOf("hash"),ModSourceCache(),false)
+        assertEquals(listOf(ModDependency("lib","required","libV2")),result.cache.sources.getValue("hash").dependencies)
+        assertEquals(1,versionCalls)
+        assertSame(result.cache,ModSources.lookup(api,listOf("hash"),result.cache,false).cache)
+        assertEquals(1,versionCalls)
     }
     private fun solve(all:List<String>,fails:(List<String>)->Boolean):Pair<SearchStep,List<SearchObservation>> {
         val history=mutableListOf<SearchObservation>()

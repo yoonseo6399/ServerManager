@@ -94,7 +94,7 @@ class SableRunner(private val client:HttpClient,private val url:String,private v
         val bytes=javaClass.getResourceAsStream("/sable/servermanager-sable-bridge.jar")?.use {it.readNBytes(1024*1024)}
         fun ours()=bytes!=null && target.isRegularFile(LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(target) && target.fileSize()==bytes.size.toLong() && MessageDigest.isEqual(MessageDigest.getInstance("SHA-256").digest(target.readBytes()),MessageDigest.getInstance("SHA-256").digest(bytes))
         val supported=instance.loader=="NeoForge" && instance.minecraft=="1.21.1" && directory.resolve("mods").takeIf {it.isDirectory()}?.let {mods->
-            mods.listDirectoryEntries("*.jar").take(2001).takeIf {it.size<=2000}?.flatMap {runCatching {ModArchive.inspect(it,"neoforge").mods}.getOrDefault(emptyList())}?.filter {it.id=="sable"}?.let {it.size==1 && it.single().version=="2.0.6"}
+            mods.listDirectoryEntries("*.jar").take(2001).takeIf {it.size<=2000}?.mapNotNull {SableIdentity.version(it)}?.let {it.size==1 && it.single()=="2.0.6"}
         }==true
         if(!enabled || !supported) {
             if(ours()) {
@@ -122,4 +122,24 @@ class SableRunner(private val client:HttpClient,private val url:String,private v
     fun stopped(instance:String){keys.remove(instance)}
     @Synchronized fun disconnect(){web?.abort();web=null;outbox?.close();outbox=null;udp.values.forEach {it.close()};udp.clear()}
     override fun close(){disconnect();keys.clear();bridge?.stop(0);bridge=null;httpPool.shutdownNow()}
+}
+
+/** Only the supported Sable identity is read for bridge ABI safety. This never inspects dependencies. */
+internal object SableIdentity {
+    fun version(path:Path):String?=runCatching {
+        require(path.isRegularFile(LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(path))
+        java.util.zip.ZipFile(path.toFile()).use {zip->
+            val entry=zip.getEntry("META-INF/neoforge.mods.toml") ?: zip.getEntry("META-INF/mods.toml") ?: return@use null
+            require(entry.size in 1..1048576)
+            val text=zip.getInputStream(entry).use {it.readNBytes(1048577)};require(text.size<=1048576)
+            val toml=org.tomlj.Toml.parse(String(text,Charsets.UTF_8));require(!toml.hasErrors())
+            val mods=toml.getArray("mods") ?: return@use null
+            (0 until mods.size()).map {mods.getTable(it)}.singleOrNull {it.getString("modId")=="sable"}?.getString("version")?.let {version->
+                if(version=="${'$'}{file.jarVersion}")zip.getEntry("META-INF/MANIFEST.MF")?.let {manifest->
+                    require(manifest.size in 1..1048576)
+                    zip.getInputStream(manifest).use {input->val data=input.readNBytes(1048577);require(data.size<=1048576);java.util.jar.Manifest(data.inputStream()).mainAttributes.getValue("Implementation-Version")}
+                } else version
+            }
+        }
+    }.getOrNull()
 }

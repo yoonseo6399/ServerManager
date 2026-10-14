@@ -14,8 +14,9 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import kotlin.io.path.*
 
+data class ModLinkRequest(val revision:String,val filename:String,val link:String)
 data class ModSelection(val revision:String,val files:Set<String>,val enabled:Boolean=false)
-data class ModTogglePreview(val revision:String,val enabled:Boolean,val selected:List<String>,val affected:List<String>)
+data class ModTogglePreview(val revision:String,val enabled:Boolean,val selected:List<String>,val affected:List<String>,val warnings:List<String> = emptyList())
 data class ModSearchRequest(val revision:String,val suspects:Set<String>,val keep:Set<String> = emptySet())
 data class ModTrial(val number:Int,val round:Int,val groups:List<String>,val disabled:List<String>,var started:Boolean=false,
     var verdict:String?=null,var note:String="",val createdAt:String=java.time.Instant.now().toString())
@@ -27,11 +28,16 @@ data class ModDiagnosticView(val id:String,val phase:String,val round:Int,val pl
 data class ModPage(val inventory:ModInventorySnapshot?,val inventoryRevision:String?,val job:ModJob?,val diagnostic:ModDiagnosticView?,val next:SearchStep?,val active:Boolean)
 
 @Service
-class ModManagement(private val manager:ServerManager) {
+class ModManagement(private val manager:ServerManager,private val catalog:ModrinthCatalog) {
     private val mapper=jacksonObjectMapper()
     private val executor=Executors.newFixedThreadPool(2)
     private val locks=ConcurrentHashMap<String,Any>()
     private val inventories=ConcurrentHashMap<String,ModInventorySnapshot>()
+    private val inventoryTokens=ConcurrentHashMap<String,String>()
+    private fun publishInventory(id:String,snapshot:ModInventorySnapshot) {
+        inventories[id]=snapshot
+        inventoryTokens[id]=java.util.UUID.randomUUID().toString()
+    }
     private val jobs=ConcurrentHashMap<String,ModJob>()
     private val sessions=ConcurrentHashMap<String,ModDiagnostic>()
     private val published=ConcurrentHashMap<String,ModDiagnostic>()
@@ -45,14 +51,19 @@ class ModManagement(private val manager:ServerManager) {
     private fun save(id:String,s:ModDiagnostic){val json=mapper.writeValueAsString(s);require(json.toByteArray().size<16*1024*1024) {"검사 이력이 너무 큽니다. 현재 검사를 종료하세요"};atomicText(stateFile(id),json);sessions[id]=s;published[id]=mapper.readValue(json)}
     private fun root(id:String,s:ModDiagnostic)=base(id).resolve("diagnostics").resolve(s.id)
     private fun loader(id:String)=manager.instance(id).loader.lowercase().also {require(it in setOf("fabric","forge","neoforge")) {"Fabric·Forge·NeoForge 모드 서버에서 사용할 수 있습니다"}}
-    private fun scan(id:String)=ModInventory.scan(manager.originalServerDir(id).resolve("mods"),loader(id))
+    private fun files(id:String)=ModInventory.scan(manager.originalServerDir(id).resolve("mods").also {loader(id)})
+    /** Dependencies are fetched from Modrinth once per file hash and saved with the server. */
+    private fun scan(id:String,retryMissing:Boolean=false):ModInventorySnapshot {
+        val snapshot=files(id)
+        return ModInventory.attach(snapshot,catalog.lookup(base(id).resolve("mod-sources.json"),snapshot.mods.map {it.sha512},retryMissing))
+    }
     fun page(id:String,includeInventory:Boolean=true):ModPage {
         manager.instance(id)
         // Polling never hashes files or waits on a long copy/apply operation.
         val s=published[id] ?: if(sessions[id]!=null)null else locked(id){session(id)?.let {mapper.readValue<ModDiagnostic>(mapper.writeValueAsString(it)).also {copy->published[id]=copy}}}
         val inventory=inventories[id] ?: s?.snapshot
         val view=s?.let {ModDiagnosticView(it.id,it.phase,it.round,it.plan,it.trials,it.findings,it.error)}
-        return ModPage(if(includeInventory)inventory else null,inventory?.revision,jobs[id],view,s?.let {next(it)},manager.runtime(id).diagnosticActive)
+        return ModPage(if(includeInventory)inventory else null,inventory?.let {inventoryTokens.computeIfAbsent(id){java.util.UUID.randomUUID().toString()}},jobs[id],view,s?.let {next(it)},manager.runtime(id).diagnosticActive)
     }
     private fun next(s:ModDiagnostic):SearchStep {
         val all=s.plan.groups.map {it.id}-s.excluded.toSet()
@@ -70,39 +81,32 @@ class ModManagement(private val manager:ServerManager) {
             finally {manager.releaseMods(id)}
         }} catch(e:Exception){manager.releaseMods(id);throw e}
     }
-    fun refresh(id:String)=locked(id) {loader(id);job(id,manager.runtime(id).diagnosticActive){inventories[id]=scan(id)}}
+    fun refresh(id:String)=locked(id) {loader(id);job(id,manager.runtime(id).diagnosticActive){publishInventory(id,scan(id,true))}}
+    fun link(id:String,req:ModLinkRequest)=locked(id) {
+        check(!manager.runtime(id).diagnosticActive) {"진행 중인 검사를 먼저 종료하세요"}
+        val snapshot=inventory(id,req.revision);require(snapshot.mods.any {it.filename==req.filename})
+        job(id) {
+            check(files(id).revision==req.revision) {"모드 파일이 변경되었습니다"}
+            catalog.link(base(id).resolve("mod-sources.json"),snapshot,req.filename,req.link)
+            publishInventory(id,scan(id))
+        }
+    }
     fun preview(id:String,req:ModSelection):ModTogglePreview=locked(id) {
         check(!manager.runtime(id).diagnosticActive) {"진행 중인 검사를 먼저 중단하세요"}
         val snapshot=inventory(id,req.revision);require(req.files.isNotEmpty())
-        val files=if(!req.enabled)ModGraph(snapshot).disable(req.files) else {
-            val disabled=snapshot.mods.filter {!it.enabled}.associateBy {it.filename}
-            require(req.files.all {it in disabled})
-            val remembered=base(id).resolve("mod-enabled-history.json").takeIf {it.exists()}?.let {mapper.readValue<Map<String,String>>(it.toFile())}.orEmpty()
-            require(req.files.all {remembered[it.removeSuffix(".disabled")]==disabled.getValue(it).sha256}) {"이 화면에서 비활성화한 모드만 다시 켤 수 있습니다. 기존 비활성 파일은 파일 관리자에서 확인하세요"}
-            val proposed=snapshot.copy(mods=snapshot.mods.map {if(it.filename in req.files)it.copy(enabled=true) else it})
-            ModGraph(proposed).validateEnabled() // No required ID may be missing after restoration.
-            val ids=proposed.mods.filter {it.enabled}.flatMap {m->m.metadata!!.mods.firstOrNull()?.let {listOf(it.id)}.orEmpty()}
-            require(ids.distinct().size==ids.size) {"같은 모드 ID의 파일을 중복 활성화할 수 없습니다"}
-            val active=proposed.mods.filter {it.enabled}
-            val providers=active.flatMap {m->m.metadata!!.mods.flatMap {it.provides+it.id}}.toSet()
-            require(active.none {m->m.metadata!!.requirements.any {it.kind=="incompatible" && it.id in providers}}) {"서로 호환되지 않는다고 선언된 모드가 있습니다. 파일과 버전을 먼저 확인하세요"}
-            req.files
-        }
-        ModTogglePreview(req.revision,req.enabled,req.files.sorted(),files.sorted())
+        val (files,warnings)=if(!req.enabled)ModGraph(snapshot).disable(req.files) to emptyList() else ModGraph.enable(snapshot,req.files)
+        ModTogglePreview(req.revision,req.enabled,req.files.sorted(),files.sorted(),warnings)
     }
     fun toggle(id:String,req:ModSelection)=locked(id) {
         val preview=preview(id,req)
         job(id) {
-            val fresh=scan(id);check(fresh.revision==req.revision) {"검사 후 파일이 변경됐습니다. 다시 불러오세요"}
+            val fresh=files(id);check(fresh.revision==req.revision) {"검사 후 파일이 변경됐습니다. 다시 불러오세요"}
             val changes=preview.affected.associateWith {if(req.enabled)it.dropLast(9) else "$it.disabled"}
+            check(changes.values.none {target->fresh.mods.any {it.filename.equals(target,true)}}) {"같은 이름의 파일이 이미 있어 변경할 수 없습니다"}
             val guard=base(id).resolve("import.pending");check(!guard.exists());atomicText(guard,"mod-toggle")
             try {
-                val memory=base(id).resolve("mod-enabled-history.json")
-                val remembered=memory.takeIf {it.exists()}?.let {mapper.readValue<Map<String,String>>(it.toFile())}.orEmpty().toMutableMap()
-                if(!req.enabled)preview.affected.forEach {f->remembered[f]=fresh.mods.single {it.filename==f}.sha256}
-                atomicText(memory,mapper.writeValueAsString(remembered))
                 ModFiles.rename(manager.originalServerDir(id).resolve("mods"),changes,base(id).resolve("mod-backups"))
-                guard.deleteIfExists();inventories[id]=scan(id)
+                guard.deleteIfExists();publishInventory(id,scan(id))
             } catch(e:Exception) {
                 // Rollback is durable; leave the old-version-compatible start guard if recovery fails.
                 DeltaTransfer.recover(manager.originalServerDir(id).resolve("mods"),base(id).resolve("mod-backups"));guard.deleteIfExists();throw e
@@ -227,8 +231,9 @@ class ModManagement(private val manager:ServerManager) {
     }
     fun resume(id:String)=locked(id) {
         val s=session(id) ?: error("검사가 없습니다");check(s.phase=="PAUSED")
+        require(s.snapshot.mods.filter {it.enabled}.all {it.source!=null}) {"이전 검사에 Modrinth 의존성 정보가 없습니다. 검사를 종료하고 모드 목록을 다시 불러온 뒤 새 검사를 만드세요."}
         job(id){locked(id){
-            check(scan(id).revision==s.snapshot.revision) {"원본 모드가 변경됐습니다. 기존 검사를 종료하고 새 검사를 만드세요"}
+            check(files(id).revision==s.snapshot.revision) {"원본 모드가 변경됐습니다. 기존 검사를 종료하고 새 검사를 만드세요"}
             val home=root(id,s)
             check(s.snapshot.mods.all {m->home.resolve("original-mods").resolve(m.filename).let {it.isRegularFile() && FileInventory.digest(it)==m.sha256}}) {"검사 복사본이 완성되지 않았습니다. 검사를 종료하고 다시 만드세요"}
             manager.diagnosticContext(id,s.id)
@@ -249,6 +254,7 @@ class ModManagement(private val manager:ServerManager) {
 class ModApi(private val mods:ModManagement) {
     @GetMapping fun page(@PathVariable id:String,@RequestParam(defaultValue="false") inventory:Boolean)=mods.page(id,inventory)
     @PostMapping("/refresh") fun refresh(@PathVariable id:String)=mods.refresh(id)
+    @PostMapping("/link") fun link(@PathVariable id:String,@RequestBody req:ModLinkRequest)=mods.link(id,req)
     @PostMapping("/toggle-preview") fun preview(@PathVariable id:String,@RequestBody req:ModSelection)=mods.preview(id,req)
     @PostMapping("/toggle") fun toggle(@PathVariable id:String,@RequestBody req:ModSelection)=mods.toggle(id,req)
     @PostMapping("/diagnostic") fun create(@PathVariable id:String,@RequestBody req:ModSearchRequest)=mods.create(id,req)

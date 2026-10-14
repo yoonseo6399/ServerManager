@@ -24,72 +24,24 @@ class ModArtifactsTest {
         return RinPlannedMod(RinProject(name,name,"Example","required"),version,file,installed)
     }
     private fun plan(vararg mods:RinPlannedMod)=RinInstallPlan(ModrinthTarget("1.21.1","fabric"),mods.first().project.id,mods.toList(),emptyList())
-    @Test fun `Fabric metadata preserves dependency ranges and marks nested client mods as incomplete`() {
-        val path=jar("fabric.jar",mapOf("fabric.mod.json" to fabric(extra=",\"provides\":[\"alias\"],\"depends\":{\"minecraft\":\"~1.21.1\",\"library\":[\">=1.0\",\"2.x\"]},\"breaks\":{\"badmod\":\"*\"}")))
-        val metadata=ModArchive.inspect(path,"fabric")
-        assertTrue(metadata.complete);assertEquals("2.0.0",metadata.mods.single().version)
-        assertEquals(setOf("alias"),metadata.mods.single().provides)
-        assertEquals(listOf(">=1.0","2.x"),metadata.requirements.single {it.id=="library"}.ranges)
-        assertEquals("incompatible",metadata.requirements.single {it.id=="badmod"}.kind)
-        val nested=jar("nested.jar",mapOf("fabric.mod.json" to fabric().replace("\"*\"","\"client\""),"META-INF/jars/dependency.jar" to "not loaded"))
-        val info=ModArchive.inspect(nested,"fabric");assertTrue(info.clientOnly);assertTrue(info.nestedJars);assertFalse(info.complete)
-    }
-    @Test fun `NeoForge multiple mod IDs resolve manifest version and omit client-only dependency edges`() {
-        val path=jar("neo.jar",mapOf("META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\r\nImplementation-Version: 4.2.0\r\n\r\n","META-INF/neoforge.mods.toml" to """
-            modLoader="javafml"
-            loaderVersion="[4,)"
-            [[mods]]
-            modId="first"
-            version="${'$'}{file.jarVersion}"
-            [[mods]]
-            modId="second"
-            version="1.0"
-            [[dependencies.first]]
-            modId="minecraft"
-            type="required"
-            versionRange="[1.21.1,1.22)"
-            side="BOTH"
-            [[dependencies.second]]
-            modId="clientlib"
-            type="required"
-            side="CLIENT"
-            [[dependencies.second]]
-            modId="serverlib"
-            mandatory=false
-            side="SERVER"
-        """.trimIndent()))
-        val info=ModArchive.inspect(path,"neoforge");assertTrue(info.complete)
-        assertEquals("javafml",info.languageLoader);assertEquals("[4,)",info.languageLoaderRange)
-        assertEquals("4.2.0",info.mods.single {it.id=="first"}.version)
-        assertEquals(setOf("minecraft","serverlib"),info.requirements.map {it.id}.toSet())
-        assertEquals("optional",info.requirements.single {it.id=="serverlib"}.kind)
-        assertEquals(listOf("[1.21.1,1.22)"),info.requirements.single {it.id=="minecraft"}.ranges)
-    }
-    @Test fun `unknown missing version malformed and oversized archives never claim complete metadata`() {
-        val unknown=jar("unknown.jar",mapOf("ordinary-resource" to "data"));assertFalse(ModArchive.inspect(unknown,"fabric").complete)
-        val missing=jar("missing.jar",mapOf("fabric.mod.json" to fabric().replace(",\"version\":\"2.0.0\"","")));assertFalse(ModArchive.inspect(missing,"fabric").complete)
-        val bad=jar("bad.jar",mapOf("fabric.mod.json" to "not json"));assertFails {ModArchive.inspect(bad,"fabric")}
-        val huge=jar("huge.jar",mapOf("fabric.mod.json" to " ".repeat(1024*1024+1)));assertFailsWith<IllegalArgumentException>{ModArchive.inspect(huge,"fabric")}
-        val unresolved=jar("version.jar",mapOf("META-INF/mods.toml" to """[[mods]]
-            modId="example"
-            version="${'$'}{file.jarVersion}"
-        """.trimIndent()));assertFalse(ModArchive.inspect(unresolved,"forge").complete)
-    }
     @Test fun `inventory is read only identifies disabled and duplicate mods and revisions follow content`() {
         val dir=temp.resolve("mods").createDirectory()
         val active=jar("source.jar",mapOf("fabric.mod.json" to fabric()))
         Files.copy(active,dir.resolve("renamed.jar"));Files.copy(active,dir.resolve("old.jar.DISABLED"));Files.copy(active,dir.resolve("duplicate.jar"))
-        val snapshot=ModInventory.scan(dir,"fabric")
-        assertEquals(3,snapshot.mods.size);assertEquals(2,snapshot.mods.count {it.enabled});assertTrue(snapshot.warnings.any {it.contains("ID 중복")})
-        assertEquals(snapshot,ModInventory.scan(dir,"fabric"))
+        val snapshot=ModInventory.scan(dir)
+        assertEquals(3,snapshot.mods.size);assertEquals(2,snapshot.mods.count {it.enabled})
+        val attached=ModInventory.attach(snapshot,ModSourceLookup(ModSourceCache(),emptyList()))
+        assertTrue(attached.warnings.any {it.contains("내용이 같은")});assertTrue(attached.mods.all {it.source==null && it.warning!=null})
+        assertEquals(snapshot.revision,attached.revision)
+        assertEquals(snapshot,ModInventory.scan(dir))
         Files.move(dir.resolve("renamed.jar"),dir.resolve("renamed.jar.disabled"))
-        assertNotEquals(snapshot.revision,ModInventory.scan(dir,"fabric").revision)
+        assertNotEquals(snapshot.revision,ModInventory.scan(dir).revision)
         assertEquals(digest(active.readBytes(),"SHA-512"),snapshot.mods.first().sha512)
         assertEquals(3,dir.listDirectoryEntries().size)
     }
     @Test fun `content linking accepts renamed files and rejects a false size or unrelated hash`() {
         val dir=temp.resolve("mods").createDirectory();val path=jar("source.jar",mapOf("fabric.mod.json" to fabric()));Files.copy(path,dir.resolve("renamed.jar"))
-        val snapshot=ModInventory.scan(dir,"fabric");val mod=planned(path.readBytes())
+        val snapshot=ModInventory.scan(dir);val mod=planned(path.readBytes())
         val links=ModInventory.link(snapshot) {hashes->assertEquals(listOf(mod.file.sha512),hashes);mapOf(mod.file.sha512 to mod.version)}
         assertEquals("renamed.jar",links.single().filename)
         assertFailsWith<IllegalStateException>{ModInventory.link(snapshot) {mapOf("0".repeat(128) to mod.version)}}
@@ -133,7 +85,7 @@ class ModArtifactsTest {
         if(!System.getProperty("os.name").startsWith("Windows")) {
             val dir=temp.resolve("mods").createDirectory();val outside=temp.resolve("outside.jar").also {it.writeText("keep")}
             Files.createSymbolicLink(dir.resolve("escape.jar"),outside)
-            assertFailsWith<IllegalArgumentException>{ModInventory.scan(dir,"fabric")};assertEquals("keep",outside.readText())
+            assertFailsWith<IllegalArgumentException>{ModInventory.scan(dir)};assertEquals("keep",outside.readText())
         }
     }
     @Test fun `actual small NeoForge download hashes metadata and content link agree without installation`() {
@@ -143,9 +95,10 @@ class ModArtifactsTest {
         require(plan.mods.size<=8 && plan.mods.sumOf {it.file.size}<=16L*1024*1024) {"Live fixture download budget exceeded"}
         ModrinthDownloads().stage(plan,temp).use {staged->
             assertTrue(staged.files.isNotEmpty())
-            val inventory=ModInventory.scan(staged.directory,target.loader)
-            assertTrue(inventory.mods.any {row->row.metadata?.mods?.any {it.id=="ferritecore"}==true})
+            val inventory=ModInventory.scan(staged.directory)
             val links=ModInventory.link(inventory,api::versionsFromHashes)
+            val sources=ModSources.lookup(api,inventory.mods.map {it.sha512},ModSourceCache(),false).cache.sources
+            assertTrue(sources.values.any {it.slug=="ferrite-core" && !it.clientOnly})
             assertEquals(plan.mods.map {it.version.id}.toSet(),links.map {it.version.id}.toSet())
             assertTrue(inventory.mods.all {it.warning==null})
         }

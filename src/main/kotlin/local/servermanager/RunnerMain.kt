@@ -136,6 +136,8 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     private val configs=ConcurrentHashMap<String,Instance>()
     private val uploading=ConcurrentHashMap.newKeySet<String>()
     private val operationLocks=ConcurrentHashMap<String,Any>()
+    private val stopMonitors=ConcurrentHashMap<String,StopMonitor>()
+    private val stopTimeouts=ConcurrentHashMap.newKeySet<String>()
     private val stopping=ConcurrentHashMap.newKeySet<String>()
     private val ready=ConcurrentHashMap.newKeySet<String>()
     private val activity=ConcurrentHashMap<String,AtomicLong>()
@@ -573,6 +575,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             process.inputStream.bufferedReader().useLines { lines -> lines.forEach { line ->
                 val kind=if(line.contains("ERROR") || line.contains("Exception")) "error" else if(line.contains("WARN")) "warn" else "output"
                 if(line.contains("logged in with entity id")||line.contains("joined the game"))activity[id]?.incrementAndGet()
+                if(processes[id]===process)stopMonitors[id]?.log(line)
                 writer.appendLine(line);writer.flush()
                 send(RunnerMessage("log",id,kind,version(),line.take(4096)))
                 if(line.contains("Done (") && line.contains("For help") && processes[id]===process) {
@@ -580,8 +583,9 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                 }
             } } }
             val code=process.waitFor();sable.stopped(id);queryPorts.remove(id)
-            atomicText(instanceRoot(id).resolve("exit.json"),mapper.writeValueAsString(RunnerExitReport(code,CrashReports.changed(serverDir(id),crashesBefore))))
+            atomicText(instanceRoot(id).resolve("exit.json"),mapper.writeValueAsString(RunnerExitReport(code,CrashReports.changed(serverDir(id),crashesBefore),if(id in stopTimeouts)"STOP_TIMEOUT" else null)))
             ready.remove(id)
+            stopMonitors.remove(id)?.close();stopTimeouts.remove(id)
             stopping.remove(id)
             processes.remove(id,process)
             send(RunnerMessage("state",id,"SYNCING",version(),"종료 코드 $code · "+if(instance.syncEnabled())"변경 파일 인계 중" else "동기화 OFF · 실행기 파일 보존"))
@@ -686,10 +690,21 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             instanceRoot(id).resolve("upload.pending").deleteIfExists()
             if(diagnosticRoot(id)==null)folders.published(id,manifest)
     }
-    private fun stop(id:String):Boolean {
+    private fun stop(id:String):Boolean=synchronized(lifecycle) {
         val process=processes[id] ?: return false
         if(!runCatching {process.outputStream.write("stop\n".toByteArray());process.outputStream.flush()}.isSuccess)return false
         stopping.add(id)
+        stopMonitors.computeIfAbsent(id) {
+            StopMonitor(process,serverDir(id),{processes[id]===process&&id in stopping}) {
+                synchronized(lifecycle) {
+                    if(processes[id]===process&&process.isAlive&&id in stopping) {
+                        stopTimeouts.add(id)
+                        send(RunnerMessage("stop-progress",id,pid=process.pid(),detail=mapper.writeValueAsString(StopWatchStatus(0,"3분 동안 종료 저장 진전 없음 · 자동 강제 종료",true))))
+                        process.descendants().use {children->children.forEach {runCatching {it.destroyForcibly()}}};process.destroyForcibly()
+                    }
+                }
+            }
+        }
         send(RunnerMessage("state",id,"STOPPING",version(),"저장 후 종료 중",pid=process.pid()))
         return true
     }
@@ -718,6 +733,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     }
     private fun report(id:String,process:Process) {
         if(!process.isAlive)return
+        stopMonitors[id]?.let {monitor->send(RunnerMessage("stop-progress",id,pid=process.pid(),detail=mapper.writeValueAsString(monitor.status())))}
         val sample=metrics.sample(process.toHandle())
         val players=queryPorts[id]?.let(query::players)
         send(RunnerMessage("query-status",id,state=if(id in ready && players==null)"UNKNOWN" else "KNOWN"))

@@ -1,20 +1,21 @@
 import {useEffect,useRef,useState} from 'react';
-import {Check,ChevronLeft,ChevronRight,FlaskConical,Pause,Play,RefreshCw,Search,ShieldCheck,Square,X} from 'lucide-react';
+import {Check,ChevronLeft,ChevronRight,FlaskConical,Pause,Play,Power,PowerOff,RefreshCw,Search,ShieldCheck,Square,X} from 'lucide-react';
 import {api} from './http';
 import './mods.css';
 
-type Identity={id:string;name:string;version:string|null;provides:string[]};
-type Mod={filename:string;enabled:boolean;size:number;sha256:string;warning:string|null;metadata:{mods:Identity[];complete:boolean;warnings:string[];requirements:{owner:string;id:string;kind:string;ranges:string[]}[]}|null};
-type Snapshot={revision:string;mods:Mod[];warnings:string[];dependencyFiles:string[];dependencyReasons:Record<string,string[]>};
+type Source={origin?:string;projectId:string;slug:string;title:string;description:string;iconUrl:string|null;versionNumber:string;environment:string;clientOnly:boolean;dependencies:{projectId:string|null;type:string;versionId?:string|null}[]};
+type Mod={filename:string;enabled:boolean;size:number;sha256:string;warning:string|null;source:Source|null};
+type Snapshot={revision:string;mods:Mod[];warnings:string[];dependencyFiles:string[];dependencyReasons:Record<string,string[]>;blockedReasons?:Record<string,string>;missing?:Record<string,string[]>;projects?:Record<string,{id:string;slug:string;title:string}>};
 type Trial={number:number;round:number;groups:string[];disabled:string[];started:boolean;verdict:string|null;note:string;createdAt:string};
 type Session={id:string;phase:string;round:number;error:string|null;plan:{groups:{id:string;files:string[]}[];fixed:string[];protectedSuspects:string[]};trials:Trial[];findings:string[][]};
 type Page={inventoryRevision:string|null;inventory:Snapshot|null;job:{phase:string;message:string;files:number;bytes:number}|null;diagnostic:Session|null;next:{status:string;groups:string[];message:string}|null;active:boolean};
-type Preview={revision:string;enabled:boolean;selected:string[];affected:string[]};
+type Preview={revision:string;enabled:boolean;selected:string[];affected:string[];warnings?:string[]};
+type Filter='all'|'enabled'|'disabled'|'missing'|'unknown'|'client';
 const verdictLabel:Record<string,string>={PASS:'성공 · 문제 없음',FAIL:'실패 · 원래 문제 재현',INVALID:'판정 불가'};
 const busyStates=['RUNNING','STARTING','STOPPING','INSTALLING','IMPORTING','TRANSFERRING','SYNCING','SYNC_FAILED','UNKNOWN'];
 export function ModsPanel({id,loader,state,canManage,onChanged,onConsole}:{id:string;loader:string;state:string;canManage:boolean;onChanged:()=>Promise<unknown>;onConsole:()=>void}) {
  const [data,setData]=useState<Page|null>(null),[error,setError]=useState(''),[sending,setSending]=useState(false);
- const [query,setQuery]=useState(''),[page,setPage]=useState(0),[suspects,setSuspects]=useState<Set<string>>(new Set()),[keep,setKeep]=useState<Set<string>>(new Set()),[selected,setSelected]=useState<Set<string>>(new Set());
+ const [query,setQuery]=useState(''),[filter,setFilter]=useState<Filter>('all'),[page,setPage]=useState(0),[suspects,setSuspects]=useState<Set<string>>(new Set()),[keep,setKeep]=useState<Set<string>>(new Set()),[selected,setSelected]=useState<Set<string>>(new Set());
  const [historyOpen,setHistoryOpen]=useState(false),[historyPage,setHistoryPage]=useState(0);
  const inventoryRevision=useRef<string|null>(null);
  const [preview,setPreview]=useState<Preview|null>(null),[note,setNote]=useState(''),[logTrial,setLogTrial]=useState<number|null>(null);
@@ -27,15 +28,21 @@ export function ModsPanel({id,loader,state,canManage,onChanged,onConsole}:{id:st
  const running=busyStates.includes(state),stopped=!running;
  const locked=working||running||!canManage||!!data?.active;
  const dependencies=new Set(inv?.dependencyFiles||[]);
- const mods=inv?.mods||[],filtered=mods.filter(m=>`${m.filename} ${m.metadata?.mods.map(x=>`${x.id} ${x.name}`).join(' ')}`.toLowerCase().includes(query.toLowerCase()));
- const lastPage=Math.max(0,Math.ceil(filtered.length/75)-1),shownPage=Math.min(page,lastPage);
+ const mods=inv?.mods||[],missing=inv?.missing||{};
+ const matches:Record<Filter,(m:Mod)=>boolean>={all:()=>true,enabled:m=>m.enabled,disabled:m=>!m.enabled,missing:m=>!!missing[m.filename]?.length,unknown:m=>!m.source,client:m=>!!m.source?.clientOnly};
+ const filters:{id:Filter;label:string;count:number}[]=([['all','전체'],['enabled','활성'],['disabled','비활성'],['missing','의존성 누락'],['unknown','Modrinth 미확인'],['client','클라이언트 전용']] as [Filter,string][]).map(([id,label])=>({id,label,count:mods.filter(matches[id]).length}));
+ const needle=query.toLowerCase(),filtered=mods.filter(m=>matches[filter](m)&&`${m.filename} ${m.source?.title||''} ${m.source?.slug||''}`.toLowerCase().includes(needle));
+ const project=(id:string|null)=>!id?'미확인 의존성':inv?.projects?.[id]?.title||mods.find(m=>m.source?.projectId===id)?.source?.title||id;
+ const name=(file:string)=>mods.find(m=>m.filename===file)?.source?.title||file;
+ const selectedEnabled=mods.filter(m=>m.enabled&&!inv?.blockedReasons?.[m.filename]&&!dependencies.has(m.filename)&&selected.has(m.filename)).map(m=>m.filename),selectedDisabled=mods.filter(m=>!m.enabled&&selected.has(m.filename)).map(m=>m.filename);
+ const lastPage=Math.max(0,Math.ceil(filtered.length/75)-1),shownPage=Math.min(page,lastPage),visible=filtered.slice(shownPage*75,(shownPage+1)*75);
  const change=(setter:typeof setSelected,value:string,checked:boolean)=>setter(old=>{const next=new Set(old);if(checked)next.add(value);else next.delete(value);return next;});
  const groups=(ids:string[])=>session?.plan.groups.filter(g=>ids.includes(g.id)).flatMap(g=>g.files)||[];
- const requestPreview=async(enabled:boolean)=>{setSending(true);setError('');try{setPreview(await api<Preview>(endpoint+'/toggle-preview','POST',{revision:inv?.revision,files:[...selected],enabled}));}catch(e){setError((e as Error).message);}finally{setSending(false);}};
+ const requestPreview=async(files:string[],enabled:boolean)=>{if(sending)return;setSending(true);setError('');try{setPreview(await api<Preview>(endpoint+'/toggle-preview','POST',{revision:inv?.revision,files,enabled}));}catch(e){setError((e as Error).message);}finally{setSending(false);}};
  const verdict=(value:string,trial=current)=>{if(trial)action('/diagnostic/verdict',{trial:trial.number,verdict:value,note});};
  if(!['Fabric','Forge','NeoForge'].includes(loader))return <section className="settings-panel"><h2>모드 관리</h2><p>Fabric·Forge·NeoForge 서버에서 사용할 수 있습니다.</p></section>;
  return <section className="mods-panel">
-  <div className="mods-heading"><div><h2>모드 관리와 문제 모드 찾기</h2><p>의심 모드를 선택하고 직접 플레이한 결과로 원인을 좁혀보세요.</p></div><button disabled={working||running||!canManage} onClick={()=>action('/refresh')}><RefreshCw size={16}/> 모드 목록 불러오기</button></div>
+  <div className="mods-heading"><div><h2>모드 관리와 문제 모드 찾기</h2><p>Modrinth에서 확인한 의존성으로 모드를 켜고 끄고, 의심 모드를 골라 문제 원인을 좁혀보세요.</p></div><button disabled={working||running||!canManage} onClick={()=>action('/refresh')}><RefreshCw size={16}/> 모드 목록 불러오기</button></div>
   {error&&<div className="alert error-banner" role="alert">{error}<button onClick={()=>setError('')}>닫기</button></div>}
   {data?.job&&<div className={'mod-job '+data.job.phase.toLowerCase()} role="status"><span className={working?'mod-spinner':''}/><span>{data.job.message}{data.job.files>0&&` · ${data.job.files.toLocaleString()}개 · ${(data.job.bytes/1048576).toFixed(1)} MiB`}</span></div>}
   {inv?.warnings.length? <details className="mod-warnings"><summary>검사 주의사항 {inv.warnings.length}개</summary>{inv.warnings.map((w,i)=><p key={i}>{w}</p>)}</details>:null}
@@ -61,15 +68,50 @@ export function ModsPanel({id,loader,state,canManage,onChanged,onConsole}:{id:st
    {running&&!['RUNNING','STARTING'].includes(state)&&<p role="status" className="muted">정상 종료와 파일 인계가 끝나면 다음 조합을 준비할 수 있습니다.</p>}
    <details className="mod-history" open={historyOpen} onToggle={e=>setHistoryOpen(e.currentTarget.open)}><summary>시도 이력 ({session.trials.length}) · 판정 수정 및 로그</summary>{historyOpen&&session.trials.slice(historyPage*25,(historyPage+1)*25).map(t=><div key={t.number}><span>#{t.number} · {t.round}차 · {verdictLabel[t.verdict||'']||'미판정'} · {t.note}</span><div className="actions"><button onClick={()=>setLogTrial(t.number)}>보관 로그</button>{t.started&&<button disabled={working||running||!canManage||!data?.active||t.round!==session.round} title="현재 탐색 차수의 판정만 수정할 수 있습니다" onClick={()=>{const answer=prompt('수정 판정: PASS / FAIL / INVALID',t.verdict||'INVALID');if(answer&&['PASS','FAIL','INVALID'].includes(answer))verdict(answer,t);}}>판정 수정</button>}</div></div>)}{historyOpen&&session.trials.length>25&&<div className="actions"><button disabled={!historyPage} onClick={()=>setHistoryPage(historyPage-1)}>이전 이력</button><span>{historyPage+1} / {Math.ceil(session.trials.length/25)}</span><button disabled={(historyPage+1)*25>=session.trials.length} onClick={()=>setHistoryPage(historyPage+1)}>다음 이력</button></div>}</details>
   </div>}
-  {!inv?<div className="mods-empty"><Search size={30}/><p>서버를 정지한 뒤 모드 목록을 불러오세요.</p><small>파일 해시 검사는 명시적으로 불러올 때만 실행합니다.</small></div>:<>
-   <div className="mods-toolbar"><label className="mod-filter"><Search size={17}/><input aria-label="모드 검색" placeholder="모드 이름, ID 또는 파일명 검색" value={query} onChange={e=>{setQuery(e.target.value);setPage(0);}}/></label><span>{mods.filter(m=>m.enabled).length}개 활성 · {mods.filter(m=>!m.enabled).length}개 비활성</span></div>
-   <div className="mod-selection-help"><p><strong>의심 모드</strong>에서 문제 원인을 찾습니다. <strong>항상 유지</strong>는 메인 모드와 필수 의존성을 검사 내내 보존합니다. 다른 활성 모드가 필수로 사용하는 의존성 모드는 선택을 잠그고 모든 시도에서 유지합니다. 선택하지 않은 모드도 그대로 유지합니다.</p><div className="actions"><button disabled={locked} onClick={()=>setSuspects(new Set(mods.filter(m=>m.enabled&&!dependencies.has(m.filename)).map(m=>m.filename)))}>검사 가능한 전체 모드를 의심 후보로 선택</button><button disabled={working} onClick={()=>{setSuspects(new Set());setKeep(new Set());setSelected(new Set());}}>선택 초기화</button></div></div>
-   <div className="mod-table-wrap"><table className="mod-table"><thead><tr><th>선택</th><th>모드 / 버전</th><th>상태</th><th>의심 모드</th><th>항상 유지</th></tr></thead><tbody>{filtered.slice(shownPage*75,(shownPage+1)*75).map(m=><tr key={m.filename}><td><input aria-label={`${m.filename} 선택`} type="checkbox" disabled={locked||dependencies.has(m.filename)} checked={selected.has(m.filename)} onChange={e=>change(setSelected,m.filename,e.target.checked)}/></td><td><strong>{m.metadata?.mods[0]?.name||m.filename}</strong><small>{m.filename}</small><small>{m.metadata?.mods.map(x=>`${x.id} ${x.version||'?'}`).join(' · ')}</small>{!!(m.warning||m.metadata?.warnings.length)&&<small className="mod-warning">{m.warning||m.metadata?.warnings.join(' · ')}</small>}<details><summary>의존성</summary>{m.metadata?.requirements.filter(r=>r.kind==='required').map((r,n)=><small key={n}>{r.id} · {r.ranges.join(' 또는 ')}</small>)}</details></td><td><span className={'mod-enabled '+(m.enabled?'on':'off')}>{m.enabled?'활성':'비활성'}</span>{dependencies.has(m.filename)&&<details><summary><ShieldCheck size={12}/> 필수 의존성 · 비활성화 불가</summary><small>{inv.dependencyReasons?.[m.filename]?.join(', ')}에서 필수로 사용하는 모드입니다.</small></details>}</td><td><input aria-label={`${m.filename} 의심 모드`} type="checkbox" disabled={locked||!m.enabled||dependencies.has(m.filename)} checked={suspects.has(m.filename)} onChange={e=>change(setSuspects,m.filename,e.target.checked)}/></td><td><input aria-label={`${m.filename} 항상 유지`} type="checkbox" disabled={locked||!m.enabled||dependencies.has(m.filename)} checked={keep.has(m.filename)||dependencies.has(m.filename)} onChange={e=>change(setKeep,m.filename,e.target.checked)}/></td></tr>)}</tbody></table></div>
-   {filtered.length>75&&<div className="log-history"><button disabled={!shownPage} onClick={()=>setPage(shownPage-1)}><ChevronLeft size={16}/> 이전</button><span>{shownPage+1} / {lastPage+1}</span><button disabled={shownPage===lastPage} onClick={()=>setPage(shownPage+1)}>다음 <ChevronRight size={16}/></button></div>}
-   <div className="actions mod-bottom-actions"><button disabled={locked||!selected.size||[...selected].some(f=>!mods.find(m=>m.filename===f)?.enabled)} onClick={()=>requestPreview(false)}>선택 모드 비활성화</button><button disabled={locked||!selected.size||[...selected].some(f=>mods.find(m=>m.filename===f)?.enabled)} onClick={()=>requestPreview(true)}>선택 모드 다시 활성화</button><button className="primary" disabled={locked||!suspects.size||!!session&&session.phase!=='FINISHED'} onClick={()=>action('/diagnostic',{revision:inv.revision,suspects:[...suspects],keep:[...keep]})}><FlaskConical size={17}/> 선택한 {suspects.size}개에서 문제 모드 찾기</button></div>
-   {running&&<p className="muted">서버 실행·인계 중에는 모드 목록 갱신과 변경이 잠깁니다.</p>}
-  </>}
-  {preview&&<div className="modal-backdrop"><div className="dialog mod-confirm" role="dialog" aria-modal="true" aria-label="모드 변경 확인"><h2>{preview.enabled?'모드 다시 활성화':'모드 비활성화'} 확인</h2><p>선택 {preview.selected.length}개를 변경합니다. 필수 의존성 모드는 변경할 수 없습니다. 원본 JAR는 삭제하지 않습니다.</p><ul>{preview.affected.map(f=><li key={f}>{f}{!preview.selected.includes(f)&&' · 선택 모드에 의존하여 함께 변경'}</li>)}</ul><div className="actions"><button onClick={()=>setPreview(null)}>취소</button><button className="primary" disabled={working||running} onClick={async()=>{await action('/toggle',{revision:preview.revision,files:preview.selected,enabled:preview.enabled});setPreview(null);setSelected(new Set());}}>확인하고 변경</button></div></div></div>}
+  {!inv?<div className="mods-empty"><Search size={30}/><p>서버를 정지한 뒤 모드 목록을 불러오세요.</p><small>파일 해시로 Modrinth에서 모드 정보와 의존성을 찾아 서버별로 저장합니다.</small></div>:<div className="mods-browser">
+   <div className="mods-sidebar" role="group" aria-label="모드 필터">
+    <h3>보기</h3>
+    {filters.map(f=><button key={f.id} className={'mods-filter-item'+(filter===f.id?' active':'')} aria-pressed={filter===f.id} onClick={()=>{setFilter(f.id);setPage(0);}}><span>{f.label}</span><span className="count">{f.count}</span></button>)}
+    <div className="mods-sidebar-help"><p><strong>의심</strong> 표시한 모드에서 문제 원인을 찾고, <strong>유지</strong> 표시한 모드는 검사 내내 켜 둡니다. 다른 모드가 필수로 쓰는 모드는 자동으로 유지됩니다.</p><button disabled={locked} onClick={()=>setSuspects(new Set(mods.filter(m=>m.enabled&&!dependencies.has(m.filename)).map(m=>m.filename)))}>검사 가능한 전체를 의심으로</button></div>
+   </div>
+   <div className="mods-main">
+    <div className="mods-actionbar" role="toolbar" aria-label="선택한 모드 작업">
+     <label className="mod-filter"><Search size={17}/><input aria-label="모드 검색" placeholder="모드 이름, 파일명 검색" value={query} onChange={e=>{setQuery(e.target.value);setPage(0);}}/></label>
+     <label className="mod-select-all"><input type="checkbox" aria-label="보이는 모드 모두 선택" disabled={locked||!visible.length} checked={!!visible.length&&visible.every(m=>selected.has(m.filename))} onChange={e=>setSelected(old=>{const next=new Set(old);visible.forEach(m=>e.target.checked?next.add(m.filename):next.delete(m.filename));return next;})}/>{selected.size?`${selected.size}개 선택`:'전체 선택'}</label>
+     <div className="actions">
+      <button disabled={locked||!selectedEnabled.length} onClick={()=>requestPreview(selectedEnabled,false)}><PowerOff size={15}/> 선택 비활성화{selectedEnabled.length?` (${selectedEnabled.length})`:''}</button>
+      <button disabled={locked||!selectedDisabled.length} onClick={()=>requestPreview(selectedDisabled,true)}><Power size={15}/> 선택 활성화{selectedDisabled.length?` (${selectedDisabled.length})`:''}</button>
+      <button className="primary" disabled={locked||!suspects.size||!!session&&session.phase!=='FINISHED'} onClick={()=>action('/diagnostic',{revision:inv.revision,suspects:[...suspects],keep:[...keep]})}><FlaskConical size={16}/> 의심 {suspects.size}개에서 문제 찾기</button>
+      <button disabled={working||!(selected.size||suspects.size||keep.size)} onClick={()=>{setSuspects(new Set());setKeep(new Set());setSelected(new Set());}}>선택 초기화</button>
+     </div>
+    </div>
+    {running&&<p className="muted" role="status">서버 실행·인계 중에는 모드 목록 갱신과 변경이 잠깁니다.</p>}
+    <div className="mod-list">{visible.map(m=>{const s=m.source,required=dependencies.has(m.filename),blocked=inv.blockedReasons?.[m.filename]||(required?`필수 의존성입니다. 사용 중: ${(inv.dependencyReasons?.[m.filename]||[]).join(', ')}`:null),users=inv.dependencyReasons?.[m.filename]||[],missing=inv.missing?.[m.filename]||[],needs=(s?.dependencies||[]).filter(d=>d.type==='required');return <article key={m.filename} className={'mod-card'+(m.enabled?'':' off')+(selected.has(m.filename)?' selected':'')}>
+     <input className="mod-card-check" aria-label={`${m.filename} 선택`} type="checkbox" disabled={locked} checked={selected.has(m.filename)} onChange={e=>change(setSelected,m.filename,e.target.checked)}/>
+     {s?.iconUrl?<img className="mod-icon" src={s.iconUrl} alt="" loading="lazy" referrerPolicy="no-referrer"/>:<div className="mod-icon placeholder" aria-hidden="true">{(s?.title||m.filename).slice(0,1).toUpperCase()}</div>}
+     <div className="mod-card-body">
+      <div className="mod-card-title">{s&&s.origin!=='BUNDLED'?<a href={`https://modrinth.com/mod/${encodeURIComponent(s.slug)}`} target="_blank" rel="noopener noreferrer">{s.title}</a>:<strong>{s?.title||m.filename.replace(/\.jar(\.disabled)?$/i,'')}</strong>}{s&&<span className="mod-version">{s.versionNumber}</span>}</div>
+      {s?.description&&<p className="mod-description">{s.description}</p>}
+      <div className="mod-badges">
+       <span className={'mod-badge '+(m.enabled?'on':'off')}>{m.enabled?'활성':'비활성'}</span>
+       {s?.origin==='BUNDLED'&&<span className="mod-badge library">관리 앱 보조 모드</span>}{s?.clientOnly&&<span className="mod-badge client">클라이언트 전용</span>}
+       {required&&<span className="mod-badge library" title={`${users.join(', ')}에서 필수로 사용`}><ShieldCheck size={12}/> {users.length}개 모드가 필수로 사용</span>}
+       {!s&&<><span className="mod-badge unknown">Modrinth 미확인</span><button className="mod-link" disabled={locked} onClick={()=>{const link=prompt('이 파일의 정확한 Modrinth 버전 링크를 입력하세요. 해시·크기가 같은 파일만 연결됩니다.');if(link)action('/link',{revision:inv.revision,filename:m.filename,link});}}>버전 링크 연결</button></>}
+       {missing.length>0&&<span className="mod-badge missing">필수 모드 없음: {missing.map(project).join(', ')}</span>}
+      </div>
+      {needs.length>0&&<p className="mod-deps">필수 의존성 · {needs.map(d=>project(d.projectId)+(d.versionId?` @${d.versionId}`:'')).join(', ')}</p>}
+      <small className="mod-file">{m.filename}</small>{blocked&&<small className="mod-warning">비활성화 불가 · {blocked}</small>}{m.warning&&<small className="mod-warning">{m.warning}</small>}
+     </div>
+     <div className="mod-card-side">
+      <button role="switch" aria-checked={m.enabled} aria-label={`${m.filename} ${m.enabled?'비활성화':'활성화'}`} className={'mod-switch'+(m.enabled?' on':'')} disabled={locked||m.enabled&&!!blocked} title={blocked||undefined} onClick={()=>requestPreview([m.filename],!m.enabled)}><span/></button>
+      <label className={'mod-chip'+(suspects.has(m.filename)?' on':'')}><input aria-label={`${m.filename} 의심 모드`} type="checkbox" disabled={locked||!m.enabled||required} checked={suspects.has(m.filename)} onChange={e=>change(setSuspects,m.filename,e.target.checked)}/>의심</label>
+      <label className={'mod-chip'+(keep.has(m.filename)||required?' on':'')}><input aria-label={`${m.filename} 항상 유지`} type="checkbox" disabled={locked||!m.enabled||required} checked={keep.has(m.filename)||required} onChange={e=>change(setKeep,m.filename,e.target.checked)}/>유지</label>
+     </div>
+    </article>;})}{!visible.length&&<p className="mods-empty">조건에 맞는 모드가 없습니다.</p>}</div>
+    {filtered.length>75&&<div className="log-history"><button disabled={!shownPage} onClick={()=>setPage(shownPage-1)}><ChevronLeft size={16}/> 이전</button><span>{shownPage+1} / {lastPage+1}</span><button disabled={shownPage===lastPage} onClick={()=>setPage(shownPage+1)}>다음 <ChevronRight size={16}/></button></div>}
+   </div>
+  </div>}
+  {preview&&<div className="modal-backdrop"><div className="dialog mod-confirm" role="dialog" aria-modal="true" aria-label="모드 변경 확인"><h2>{preview.enabled?'모드 활성화':'모드 비활성화'} 확인</h2><p>선택 {preview.selected.length}개{preview.affected.length>preview.selected.length?`와 의존 관계로 함께 바뀌는 ${preview.affected.length-preview.selected.length}개`:''}를 변경합니다. 원본 JAR는 삭제하지 않고 이름만 바꿉니다.</p><ul>{preview.affected.map(f=><li key={f}>{name(f)}{!preview.selected.includes(f)&&<span className="muted"> · {preview.enabled?'필수 의존성이라 함께 활성화':'선택한 모드'}</span>}</li>)}</ul>{!!preview.warnings?.length&&<div className="mod-warnings">{preview.warnings.map((w,i)=><p key={i}>{w}</p>)}</div>}<div className="actions"><button onClick={()=>setPreview(null)}>취소</button><button className="primary" disabled={working||running} onClick={async()=>{await action('/toggle',{revision:preview.revision,files:preview.selected,enabled:preview.enabled});setPreview(null);setSelected(new Set());}}>확인하고 변경</button></div></div></div>}
   {logTrial!==null&&<TrialLogs endpoint={endpoint} trial={logTrial} onClose={()=>setLogTrial(null)}/>}
  </section>;
 }

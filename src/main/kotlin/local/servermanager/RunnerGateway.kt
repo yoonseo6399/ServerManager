@@ -121,6 +121,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
             }
             "file-progress" -> if(event.instanceId!=null && event.detail!=null)runCatching {manager.runnerFileProgress(event.instanceId,id,mapper.readValue<FolderImportProgress>(event.detail))}
             "import-failed" -> if(event.instanceId!=null && event.token!=null)runCatching {manager.folderImportFailed(event.instanceId,id,event.token,event.detail)}
+            "stop-progress" -> if(event.instanceId!=null&&event.pid!=null&&event.detail!=null)runCatching {manager.remoteStopProgress(event.instanceId,id,event.pid,mapper.readValue<StopWatchStatus>(event.detail))}
             "idle-result" -> event.instanceId?.let {manager.remoteIdleResult(it,id,event.detail,event.state=="ACCEPTED")}
             "state" -> {
                 registry.seen(id,event.version?.take(80) ?: "unknown")

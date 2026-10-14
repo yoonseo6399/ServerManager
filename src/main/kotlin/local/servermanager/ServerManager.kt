@@ -74,6 +74,8 @@ class RuntimeState {
     var folderImport:FolderImportProgress?=null
     var fileTransfer:FolderImportProgress?=null
     val discordError=DiscordErrorBuffer()
+    @Volatile internal var stopMonitor:StopMonitor?=null
+    @Volatile var remoteStopProgress:StopWatchStatus?=null
     var startNotified=false
     var lastExit:ServerExit?=null
     var exitReport:RunnerExitReport?=null
@@ -230,7 +232,7 @@ class ServerManager {
         val i = instance(id); val r = runtime(id)
         val result=synchronized(r) { mapOf("config" to i.copy(), "state" to r.state, "pid" to (if(i.runnerId!=null) r.remotePid else r.process?.takeIf { it.isAlive }?.pid()), "resources" to r.resources?.takeIf { (i.runnerId!=null || r.process?.isAlive == true) && (i.runnerId!=null || it.pid == r.process?.pid()) }, "players" to r.players?.takeIf { r.state=="RUNNING" && java.time.Duration.between(Instant.parse(it.sampledAt),Instant.now()).seconds<30 }, "directory" to (if(i.syncEnabled())serverDir(id).toString() else r.folderSource?.get("path") ?: "현재 실행기의 원본 서버 폴더"), "eulaAccepted" to eulaAccepted(id),"activityVersion" to r.activityVersion,"diagnosticActive" to r.diagnosticActive,"modBusy" to (r.modBusy||r.remoteFileBusy)) }
         val transfer=synchronized(r) {mapOf("folderSource" to r.folderSource,"folderImport" to r.folderImport?.let(r.transferMeter::view),"fileTransfer" to r.fileTransfer?.let(r.transferMeter::view))}
-        return result+transfer+mapOf("forceStopSupported" to (i.runnerId==null || remoteController?.supportsForceStop(i)==true),"playerQueryMessage" to r.playerQueryMessage?.takeIf {r.state=="RUNNING"},"sableUdp" to remoteController?.sableStatus(i),"powerSaving" to powerStatus?.invoke(id),"autoRestart" to autoRestartStatus?.invoke(id))
+        return result+transfer+mapOf("shutdownWatchdog" to (r.stopMonitor?.status() ?: r.remoteStopProgress),"forceStopSupported" to (i.runnerId==null || remoteController?.supportsForceStop(i)==true),"playerQueryMessage" to r.playerQueryMessage?.takeIf {r.state=="RUNNING"},"sableUdp" to remoteController?.sableStatus(i),"powerSaving" to powerStatus?.invoke(id),"autoRestart" to autoRestartStatus?.invoke(id))
     }
     private fun validate(req: CreateRequest) {
         require(req.name.isNotBlank() && req.name.length <= 80) { "이름은 1~80자로 입력하세요" }
@@ -445,7 +447,7 @@ class ServerManager {
                 val (exit,summary)=synchronized(r) {
                     if(r.process!==p)return@submit
                     val requested=r.state=="STOPPING"
-                    r.process=null;r.state=if(code==0)"STOPPED" else "FAILED"
+                    r.stopMonitor?.close();r.stopMonitor=null;r.process=null;r.state=if(code==0)"STOPPED" else "FAILED"
                     ServerExit(code,requested,if(requested)r.stopReason ?: "MANUAL" else "UNEXPECTED",CrashReports.changed(serverDir(id),r.crashesBefore)).also {r.lastExit=it;r.event("system",it.summary())} to r.discordError.recent()
                 }
                 signal(id,"stop",exit.summary(),exit,if(!exit.requested)summary else null)
@@ -460,6 +462,7 @@ class ServerManager {
             p.inputStream.bufferedReader().useLines { lines -> lines.forEach { raw ->
                 val line=raw.replace(Regex("\u001B\\[[0-?]*[ -/]*[@-~]"), "")
                 playerActivity(r,line)
+                if(r.process===p)r.stopMonitor?.log(line)
                 val kind=when { line.contains("ERROR") || line.contains("Exception") -> "error"; line.contains("WARN") -> "warn"; else -> "output" }
                 synchronized(r) { if(r.state=="STARTING" && line.contains("Done (") && line.contains("For help")) {r.state="RUNNING";started(id,r)}; r.event(kind,line) }
                 if(r.discordError.offer(line,kind=="error")) signal(id,"error","서버 로그에서 오류가 감지되었습니다.",error=r.discordError.snapshot())
@@ -481,7 +484,18 @@ class ServerManager {
             }
             val p=r.process ?: error("프로세스가 없습니다")
             p.outputStream.write((command+"\n").toByteArray()); p.outputStream.flush(); r.event("input",command)
-            if(command.trim()=="stop") {if(r.stopReason==null)r.stopReason="MANUAL";r.state="STOPPING"}
+            if(command.trim()=="stop") {if(r.stopReason==null)r.stopReason="MANUAL";r.state="STOPPING";armStopMonitor(id,r,p)}
+        }
+    }
+    private fun armStopMonitor(id:String,r:RuntimeState,p:Process) {
+        if(r.stopMonitor!=null)return
+        r.stopMonitor=StopMonitor(p,serverDir(id),{r.process===p&&r.state=="STOPPING"}) {
+            synchronized(r) {
+                if(r.process===p&&p.isAlive&&r.state=="STOPPING") {
+                    r.stopReason="STOP_TIMEOUT";r.event("system","3분 동안 종료 저장 진전이 없어 Minecraft를 자동 강제 종료합니다. 저장되지 않은 변경은 손실될 수 있습니다.")
+                    p.descendants().use {children->children.forEach {runCatching {it.destroyForcibly()}}};p.destroyForcibly()
+                }
+            }
         }
     }
     fun stop(id: String,force: Boolean) { val r=runtime(id); synchronized(r) {
@@ -522,7 +536,7 @@ class ServerManager {
             if(state!="UNKNOWN" && !root.resolve(id).resolve("remote-lease").exists())return
             if(state=="SYNCING" && !r.exitErrorCaptured){r.exitError=r.discordError.recent();r.exitErrorCaptured=true}
             if(state=="SYNCING" && r.exitReport==null)r.exitReport=RunnerExitReport(Regex("종료 코드 (-?[0-9]+)").find(detail.orEmpty())?.groupValues?.get(1)?.toIntOrNull())
-            r.state=state;if(state=="RUNNING")started(id,r);if(state=="SYNCING"){r.remotePid=null;r.resources=null;r.players=null};if(state=="RUNNING"){r.fileTransfer=r.fileTransfer?.copy(phase="COMPLETE")};if(state=="SYNC_FAILED"){r.fileTransfer=(r.fileTransfer ?: FolderImportProgress("FAILED")).copy(phase="FAILED",message=detail?.take(500) ?: "실행기 연결과 파일 인계 상태를 확인하세요")};detail?.take(1000)?.let { r.event("system",it) }
+            r.state=state;if(state!="STOPPING")r.remoteStopProgress=null;if(state=="RUNNING")started(id,r);if(state=="SYNCING"){r.remotePid=null;r.resources=null;r.players=null};if(state=="RUNNING"){r.fileTransfer=r.fileTransfer?.copy(phase="COMPLETE")};if(state=="SYNC_FAILED"){r.fileTransfer=(r.fileTransfer ?: FolderImportProgress("FAILED")).copy(phase="FAILED",message=detail?.take(500) ?: "실행기 연결과 파일 인계 상태를 확인하세요")};detail?.take(1000)?.let { r.event("system",it) }
         }
     }
     fun remoteExited(id:String,runnerId:String,report:RunnerExitReport) {
@@ -530,6 +544,8 @@ class ServerManager {
         require(report.crashReport==null || CrashReports.validName(report.crashReport))
         val r=runtime(id);synchronized(r) {
             check(root.resolve(id).resolve("remote-lease").exists() && !folderImportMarker(id).exists()) {"실행 중이던 서버의 종료만 보고할 수 있습니다"}
+            require(report.reason==null||report.reason=="STOP_TIMEOUT")
+            if(report.reason=="STOP_TIMEOUT"){r.stopReason="STOP_TIMEOUT";r.remoteStopRequested=true;r.remoteRestartRequested=false}
             r.exitReport=report
             if(!r.exitErrorCaptured){r.exitError=r.discordError.recent();r.exitErrorCaptured=true}
         }
@@ -561,6 +577,14 @@ class ServerManager {
         val r=runtime(id)
         val restart=synchronized(r) { if(r.remoteRestartRequested && r.remoteWorkerReady && r.remoteCloudReady && r.state=="STOPPED") { r.remoteRestartRequested=false;true } else false }
         if(restart) workers.submit { runCatching { start(id) }.onFailure { synchronized(r) { r.event("error","원격 서버 재시작 실패: ${it.message}") } } }
+    }
+    fun remoteStopProgress(id:String,runnerId:String,pid:Long,status:StopWatchStatus) {
+        if(instance(id).runnerId!=runnerId)return
+        val r=runtime(id);synchronized(r) {
+            if(r.state!="STOPPING"||r.remotePid!=pid)return
+            r.remoteStopProgress=status
+            if(status.forced){r.stopReason="STOP_TIMEOUT";r.remoteStopRequested=true;r.remoteRestartRequested=false}
+        }
     }
     fun remoteLog(id:String,runnerId:String,kind:String,line:String) {
         if(instance(id).runnerId!=runnerId)return
@@ -605,7 +629,7 @@ class ServerManager {
         }
         val (exit,summary)=synchronized(r) {
             root.resolve(id).resolve("remote-lease").deleteIfExists()
-            val value=r.remoteStopRequested;r.remoteStopRequested=false;r.remoteWorkerReady=false;r.remoteCloudReady=false;r.state="STOPPED";r.players=null;r.resources=null;r.remotePid=null
+            val value=r.remoteStopRequested;r.remoteStopRequested=false;r.remoteWorkerReady=false;r.remoteCloudReady=false;r.state="STOPPED";r.players=null;r.resources=null;r.remotePid=null;r.remoteStopProgress=null
             r.fileTransfer=(r.fileTransfer ?: FolderImportProgress("COMPLETE")).copy(phase="COMPLETE",message="서버 파일 인계를 완료했습니다")
             r.event("system","원격 서버 파일 인계를 완료했습니다")
             ServerExit(r.exitReport?.code,value,if(value)r.stopReason ?: "MANUAL" else "UNEXPECTED",r.exitReport?.crashReport).also {r.lastExit=it} to (if(r.exitErrorCaptured)r.exitError else r.discordError.recent())
@@ -701,7 +725,7 @@ class ServerManager {
     fun move(id: String,from: String,to: String) { val r=runtime(id); synchronized(r) { checkIdle(r); val source=path(id,from); val target=path(id,to); require(source!=serverDir(id) && !target.exists()) { "대상 경로를 확인하세요" }; Files.move(source,target) } }
     fun delete(id: String,relative: String) { val r=runtime(id); synchronized(r) { checkIdle(r); val p=path(id,relative); require(p!=serverDir(id)) { "서버 루트는 삭제할 수 없습니다" }; val trash=root.resolve(id).resolve("trash"); trash.createDirectories(); Files.move(p,trash.resolve(UUID.randomUUID().toString()+"-"+p.name)) } }
     @PreDestroy fun shutdown() {
-        val processes=runtimes.values.mapNotNull { r -> synchronized(r) { r.process?.also {r.stopReason="SHUTDOWN";r.state="STOPPING"} } }.filter { it.isAlive }
+        val processes=runtimes.entries.mapNotNull { (id,r) -> synchronized(r) { r.process?.also {r.stopReason="SHUTDOWN";r.state="STOPPING";armStopMonitor(id,r,it)} } }.filter { it.isAlive }
         processes.forEach { p ->
             runCatching { p.outputStream.write("stop\n".toByteArray()); p.outputStream.flush() }
         }
