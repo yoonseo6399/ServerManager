@@ -7,6 +7,7 @@ import kotlin.io.path.*
 import kotlin.test.*
 
 class StartActorTest {
+    private val fixtureJava=java.nio.file.Path.of(System.getProperty("java.home"),"bin",if(System.getProperty("os.name").startsWith("Windows"))"java.exe" else "java").toString()
     @Test fun `start embed shows Discord profile name image and source without allowing other avatar hosts`() {
         val actor=StartActor("DISCORD","친구 이름","123456789012345678","https://cdn.discordapp.com/avatars/123456789012345678/hash.png")
         val builder=EmbedBuilder().setTitle("🟢 서버 시작 완료 · Let's Create").setDescription("이제 접속할 수 있습니다.")
@@ -21,7 +22,7 @@ class StartActorTest {
         assertTrue(auto.build().fields.any {it.value=="자동 재시작"})
     }
     @Test fun `accepted run retains its actor until ready and remote restart attributes only the next run`() {
-        val manager=ServerManager();val i=manager.create(CreateRequest("start actor","21.1.219",ServerSocket(0).use {it.localPort},512))["config"] as Instance
+        val manager=ServerManager();val i=manager.create(CreateRequest("start actor","21.1.219",ServerSocket(0).use {it.localPort},512,javaPath=fixtureJava))["config"] as Instance
         manager.attachRemoteController(object:RemoteController {
             override fun start(instance:Instance){}
             override fun stop(instance:Instance){}

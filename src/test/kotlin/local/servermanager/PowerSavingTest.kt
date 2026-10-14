@@ -10,6 +10,7 @@ class PowerSavingTest {
     private val start=Instant.parse("2026-10-14T00:00:00Z")
     private val enabled=PowerPolicy(true,30)
     private fun sample(at:Long,count:Int=0)=PlayerSample(count,if(count==0)emptyList() else listOf("Alex"),start.plusMillis(at).toString())
+    private val fixtureJava=java.nio.file.Path.of(System.getProperty("java.home"),"bin",if(System.getProperty("os.name").startsWith("Windows"))"java.exe" else "java").toString()
     @Test fun `only 30 minutes of distinct continuous known empty samples become due`() {
         val timer=EmptyPlayerTimer()
         for(at in 0L until 1_800_000L step 10000)assertFalse(timer.observe(enabled,"RUNNING",false,"process-a",sample(at),start.plusMillis(at),at))
@@ -34,7 +35,7 @@ class PowerSavingTest {
         assertEquals(0,timer.emptySeconds)
     }
     @Test fun `policy defaults off persists and rejects out of range or an in-flight final check`() {
-        val manager=ServerManager();val id=(manager.create(CreateRequest("power-test","21.1.219",ServerSocket(0).use {it.localPort},512))["config"] as Instance).id
+        val manager=ServerManager();val id=(manager.create(CreateRequest("power-test","21.1.219",ServerSocket(0).use {it.localPort},512,javaPath=fixtureJava))["config"] as Instance).id
         val power=PowerSaving(manager)
         try {
             assertEquals(PowerPolicy(),power.status(id).config)
@@ -54,7 +55,7 @@ class PowerSavingTest {
         } finally {power.close();manager.shutdown();manager.root.resolve(id).toFile().deleteRecursively()}
     }
     @Test fun `remote confirmations bind to selected device and request and rejection resets activity`() {
-        val manager=ServerManager();val id=(manager.create(CreateRequest("remote-power","21.1.219",ServerSocket(0).use {it.localPort},512))["config"] as Instance).id
+        val manager=ServerManager();val id=(manager.create(CreateRequest("remote-power","21.1.219",ServerSocket(0).use {it.localPort},512,javaPath=fixtureJava))["config"] as Instance).id
         manager.assignRunner(id,"device-a");val r=manager.runtime(id)
         try {
             r.state="RUNNING";r.idleCheckPending=true;r.idleRequestId="ticket"
@@ -68,7 +69,7 @@ class PowerSavingTest {
         } finally {manager.shutdown();manager.root.resolve(id).toFile().deleteRecursively()}
     }
     @Test fun `durable runner idle exit survives lost acknowledgement and central memory reset without crash notice or auto restart`() {
-        val manager=ServerManager();val id=(manager.create(CreateRequest("idle-exit", "21.1.219",ServerSocket(0).use {it.localPort},512))["config"] as Instance).id
+        val manager=ServerManager();val id=(manager.create(CreateRequest("idle-exit", "21.1.219",ServerSocket(0).use {it.localPort},512,javaPath=fixtureJava))["config"] as Instance).id
         manager.assignRunner(id,"device-a");val r=manager.runtime(id)
         val signals=mutableListOf<ServerSignal>();val sub=manager.onSignal {signals.add(it)}
         try {
