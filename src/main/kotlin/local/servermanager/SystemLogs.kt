@@ -89,7 +89,7 @@ class SystemLogs {
     @PreDestroy fun stop() {root?.detachAppender(appender);appender.stop()}
 }
 
-/** /api/admin/** is owner-only in Security; no raw log download endpoint is exposed. */
+/** Admin endpoints are owner-only in Security; no raw log download endpoint is exposed. */
 @RestController
 @RequestMapping("/api/admin/system-logs")
 class SystemLogsApi(private val logs:SystemLogs) {
