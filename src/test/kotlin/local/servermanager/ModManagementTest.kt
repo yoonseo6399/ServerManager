@@ -64,7 +64,7 @@ class ModManagementTest {
         mods.toggle(id,ModSelection(fresh.revision,setOf("suspect.jar.disabled"),true));waitJob(mods,id)
         assertEquals(original,FileInventory.collect(source));assertFalse(manager.root.resolve(id).resolve("import.pending").exists())
         jar(source.resolve("mods/external.jar.disabled"),"external");mods.refresh(id);waitJob(mods,id);fresh=mods.page(id).inventory!!
-        assertFails {mods.preview(id,ModSelection(fresh.revision,setOf("external.jar.disabled"),true))}
+        mods.preview(id,ModSelection(fresh.revision,setOf("external.jar.disabled"),true)).also {assertEquals(listOf("external.jar.disabled"),it.affected);assertTrue(it.warnings.single().contains("external.jar.disabled"))}
         assertNull(fresh.mods.single {it.filename=="external.jar.disabled"}.source)
         assertTrue(manager.root.resolve(id).resolve("mod-sources.json").readText().contains("suspect"))
     }
