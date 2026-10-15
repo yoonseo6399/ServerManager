@@ -42,8 +42,9 @@
 
 ## 실패 · 미실행 · 남은 위험
 - **미실행**: 서로 다른 실제 컴퓨터·공유기 포트포워딩·공개 DNS·외부 인터넷에서의 접속, macOS 실행(launchd), Windows 작업 스케줄러 환경에서 상주 서비스가 로그인 작업 종료 후에도 살아남는지, 프런트엔드 빌드·Playwright(미수정), `./gradlew bootJar`·패키징·`test-bootstrap.py`·CI. 위 66개 실패는 이 PC에서 기존부터 실패하며 Mac/Linux에서의 재실행이 필요하다.
-- **상주 서비스 분리 실행(`spawnDetached`)**: Mac은 `nohup` 분리, Windows는 WMI `Win32_Process.Create`를 쓰도록 작성했지만 **실제 설치판·작업 스케줄러·launchd에서 검증하지 않았다**(테스트는 호스트를 테스트 JVM/별도 JVM으로 직접 띄움). launchd plist에 `AbandonProcessGroup` 추가 등 설치기 보강이 필요할 수 있다.
-- 연결 안 된 부분: ① `MANAGER_APP` 구성요소 상태는 자리만 있고 관리 앱 업데이트 코드(`AppUpdates`)와 연결되지 않음. ② 호스트 소유 게임에서 `RunnerAgent`의 실제 `stop`/`forceStop` 흐름과 `processes` 맵을 이용한 기존 경로는 코드상 호환되지만 **RunnerAgent 전체를 호스트 모드로 구동하는 통합 테스트는 없음**(호스트·ServerManager·중계 각각의 테스트로 대체). ③ 호스트 프로세스가 죽거나 재시작되면 그 시점의 게임은 stdout 소비가 끊기므로 호스트 교체는 유휴일 때만 허용(구현됨)하며 호스트 비정상 종료는 복구 불가. ④ `hosted.relayForward` 실패 시 로컬 역할로 폴백하므로 호스트 연결이 불안정한 순간에 허브가 이중으로 생길 수 있음(포트 충돌로 거부될 것으로 예상, 미검증).
+- **상주 서비스 분리 실행(`spawnDetached`)**: Windows(WMI `Win32_Process.Create`)는 `./gradlew bootJar`로 만든 실제 JAR로 이 PC에서 검증했다(`GameHostSpawnTest`: 분리 실행→인증 접속→사전점검→유휴 교체 후 종료 확인, 2026-10-16). 그러나 **작업 스케줄러가 로그인 작업을 끝낼 때 호스트가 살아남는지**와 **macOS `nohup`/launchd 경로는 검증하지 않았다**. launchd plist에 `AbandonProcessGroup` 추가 등 설치기 보강이 필요할 수 있다.
+- `bootJar` 빌드는 통과(`build/libs/server-manager-0.5.1.jar`). 프런트엔드·패키징·부트스트랩 스크립트·CI는 여전히 미실행.
+- (수정됨) 호스트가 있을 때 중계 제어 메시지는 더 이상 로컬 역할로 폴백하지 않는다(허브 이중 생성 가능성 제거).
 - 상주 서비스 콘솔 로그는 컨트롤러 비정상 종료 시 최대 약 1초 분량이 재생되어 `console.log`에 중복될 수 있다(손실은 없음, 호스트 링 버퍼 5,000줄 범위 내).
 - 외부 도달성은 관리 서버 위치에서의 TCP 접속 시험만 제공하며 플레이어 쪽 인터넷 성공을 보증하지 않는다(`UNVERIFIED` 기본).
 - UDP(Sable)는 범위 밖이며 기존 제약 유지: 직접 중계 모드에서 UDP 중계는 지원하지 않는다.
