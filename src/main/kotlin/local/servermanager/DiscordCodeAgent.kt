@@ -89,10 +89,9 @@ class DiscordCodeAgent(private val config:()->DiscordConfig,private val current:
                             val setting=qwen?.config() ?: QwenConfig()
                             val size=event.getOption("model")?.asString ?: setting.model
                             val prompt=event.getOption("prompt")!!.asString;val think=event.getOption("think")?.asBoolean==true
-                            val remote=RemoteLlm.chat(size,prompt,think,setting.runnerId)
-                            check(remote!=null || setting.runnerId==null) {"웹 설정에서 지정한 실행기를 사용할 수 없습니다."}
-                            val answer=remote?.answer ?: LocalLlm().chat(size,prompt,think)
-                            val where=remote?.let {" · 실행기 ${it.runnerName.replace(Regex("[\\p{Cntrl}]")," ").take(40)}"} ?: ""
+                            val reply=QwenRequests.chat(size,prompt,think,setting.runnerId)
+                            val answer=reply.answer
+                            val where=reply.runnerName?.let {" · 실행기 ${it.replace(Regex("[\\p{Cntrl}]")," ").take(40)}"} ?: ""
                             if(event.jda===current()) {
                                 val info="Qwen3 $size$where · ${"%.1f".format(java.util.Locale.ROOT,answer.seconds)}초 · 출력 ${answer.tokens}토큰"+(if(answer.limited)" · 출력 한도 도달: 답변이 미완성일 수 있습니다." else "")
                                 if(answer.text.length<=1600)hook.editOriginal("$info\n\n${answer.text}").setAllowedMentions(emptyList()).complete()
@@ -106,7 +105,7 @@ class DiscordCodeAgent(private val config:()->DiscordConfig,private val current:
                 }
                 val main=event.name=="agent"
                 if(workspace.isBlank()) {hook.editOriginal("에이전트 작업 폴더를 먼저 설정하세요.").queue({}, {});return@queue}
-                if(main && mainSettings?.key().isNullOrBlank()) {hook.editOriginal("계정과 보안 → GPT 메인 에이전트에서 OpenAI API 키를 설정하세요. Gemini 키와 별도입니다.").queue({}, {});return@queue}
+                if(main && mainSettings?.let {it.ready(it.config())}!=true) {hook.editOriginal("AI 비서·에이전트에서 메인 제공자와 API 키를 설정하세요.").queue({}, {});return@queue}
                 if(!main && runCatching {poolStore?.credentials()?.isEmpty() ?: key.isBlank()}.getOrDefault(true)) {hook.editOriginal("Gemini API 키를 먼저 설정하세요.").queue({}, {});return@queue}
                 val accepted=if(main)mainBusy.compareAndSet(false,true) else subSlots.tryAcquire()
                 if(!accepted) {hook.editOriginal(if(main)"다른 GPT 메인 작업이 진행 중입니다." else "서브에이전트 3개가 실행 중입니다. 완료 후 요청하세요.").queue({}, {});return@queue}
@@ -162,7 +161,7 @@ class DiscordCodeAgent(private val config:()->DiscordConfig,private val current:
                             val runs=Path.of(workspace).resolve("build/agent-runs")
                             if(main) {
                                 val childThreads=java.util.concurrent.ConcurrentHashMap<String,DiscordAgentRun>()
-                                val result=MainAgentCoordinator(OpenAIResponsesModel(mainSettings!!.key()!!),{_,sink ->
+                                val result=MainAgentCoordinator(mainSettings!!.provider(selected!!) {send(AgentEvent("quota",it))},{_,sink ->
                                     val provider=gemini {sink(AgentEvent("quota",it))}
                                     AgentModel {req ->subSlots.acquire();try {provider.generate(req)} finally {subSlots.release()}}
                                 },selected!!,Path.of(workspace),runs,editable,testsEnabled,buildFiles,files,::send,{child,e ->
