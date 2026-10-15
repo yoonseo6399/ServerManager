@@ -173,3 +173,57 @@ class GameHostTest {
         ProcessHandle.of(pid).ifPresent {it.destroyForcibly()}
     }
 }
+
+class HostLifecycleTest {
+    private val closeables=mutableListOf<AutoCloseable>()
+    private val processes=mutableListOf<Process>()
+    @org.junit.jupiter.api.AfterEach fun cleanup(){closeables.reversed().forEach {runCatching {it.close()}};processes.forEach {runCatching {it.destroyForcibly()}}}
+    private fun javaBin()=Path.of(System.getProperty("java.home"),"bin","java").toString()
+    private fun gameCommand(dir:Path)=listOf(javaBin(),"-cp",System.getProperty("java.class.path"),"local.servermanager.FakeGameMain",dir.toString())
+
+    @Test fun `preflight passes with no host with a compatible host and with an idle incompatible host`() {
+        val none=Files.createTempDirectory("pf");assertTrue(HostLifecycle.preflight(none).ok)
+        val home=Files.createTempDirectory("pf2");val s=GameHostService(home,"0.5.2").also {closeables.add(it)};assertTrue(s.start())
+        assertTrue(HostLifecycle.preflight(home).ok)
+        val newer=Files.createTempDirectory("pf3");val n=GameHostService(newer,"0.9.0",protocol=2,minCompatible=2).also {closeables.add(it)};assertTrue(n.start())
+        val idle=HostLifecycle.preflight(newer,protocol=1,minHost=1)
+        assertTrue(idle.ok);assertEquals("HOST_WILL_BE_REPLACED",idle.reason)
+    }
+
+    @Test fun `preflight refuses to come up healthy against an incompatible host that owns a live game`() {
+        val home=Files.createTempDirectory("pf4");val game=Files.createTempDirectory("pfg")
+        val svc=GameHostService(home,"0.9.0",protocol=2,minCompatible=2).also {closeables.add(it)};assertTrue(svc.start())
+        val c=GameHostClient.connect(home,"new",protocol=2,minHost=1).also {closeables.add(it)}
+        val pid=c.start("srv",gameCommand(game),game,System.getenv()).process.pid();c.close()
+        Thread.sleep(300)
+        val result=HostLifecycle.preflight(home,protocol=1,minHost=1)
+        assertFalse(result.ok);assertEquals("HOST_PROTOCOL_INCOMPATIBLE",result.reason)
+        assertEquals(listOf("srv"),HostLifecycle.liveGames(home))
+        assertEquals("GAME_RUNNING",HostLifecycle.replaceIfIdle(home),"a host with a live game is never replaced")
+        assertTrue(ProcessHandle.of(pid).map {it.isAlive}.orElse(false))
+        ProcessHandle.of(pid).ifPresent {it.destroyForcibly()}
+    }
+
+    @Test fun `service update replaces only an idle host in a separate process`() {
+        val home=Files.createTempDirectory("pf5");val game=Files.createTempDirectory("pfg5")
+        val host=ProcessBuilder(javaBin(),"-cp",System.getProperty("java.class.path"),"local.servermanager.GameHostProcessMain",home.toString(),"0.5.1","--game-host").redirectErrorStream(true).start().also {processes.add(it)}
+        val end=System.currentTimeMillis()+20000;while(GameHostClient.readEndpoint(home)==null){assertTrue(System.currentTimeMillis()<end,"host process did not start");Thread.sleep(100)}
+        val old=GameHostClient.readEndpoint(home)!!;assertEquals("0.5.1",old.version)
+        val c=GameHostClient.connect(home,"c",retryMillis=5000)
+        val started=c.start("srv",gameCommand(game),game,System.getenv());val pid=started.process.pid()
+        assertEquals("GAME_RUNNING",HostLifecycle.replaceIfIdle(home),"busy host must wait")
+        assertTrue(host.isAlive)
+        c.stop("srv",pid);assertTrue(started.process.waitFor(10,java.util.concurrent.TimeUnit.SECONDS));c.ackExit("srv",pid);c.close()
+        assertNull(HostLifecycle.replaceIfIdle(home),"idle host is replaced")
+        assertTrue(host.waitFor(15,java.util.concurrent.TimeUnit.SECONDS),"old host process must have exited")
+        assertNull(GameHostClient.readEndpoint(home))
+    }
+
+    @Test fun `replacement refuses a process that is not a host`() {
+        val home=Files.createTempDirectory("pf6");(home/"host").createDirectories()
+        val sleeper=ProcessBuilder(javaBin(),"-cp",System.getProperty("java.class.path"),"local.servermanager.GameHostControllerMainSleep").start().also {processes.add(it)}
+        (home/"host/endpoint.json").writeText("""{"port":1,"secret":"x","pid":${sleeper.pid()},"version":"0.5.1","protocol":1,"minCompatible":1}""")
+        assertEquals("NOT_A_HOST_PROCESS",HostLifecycle.replaceIfIdle(home))
+        assertTrue(sleeper.isAlive)
+    }
+}

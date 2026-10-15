@@ -190,6 +190,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
                 manager.pendingFolderImports(id).forEach { (instance,request)->runCatching {importFolder(instance,request)} }
             }
             "update-status" -> event.detail?.let {runCatching {registry.updateStatus(id,mapper.readValue<RunnerUpdateStatus>(it))}}
+            "update-detail" -> event.detail?.takeIf {it.length<=200_000}?.let {runCatching {registry.updateDetail(id,mapper.readValue<UpdateDetail>(it))}}
             "folder-source" -> event.instanceId?.let { instance ->
                 if(registry.active(id)?.allowedInstanceIds?.contains(instance)==true)runCatching {manager.folderSource(instance,id,event.state.orEmpty(),event.detail)}
             }

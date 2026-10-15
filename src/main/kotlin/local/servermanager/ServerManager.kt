@@ -451,17 +451,43 @@ class ServerManager {
             ServerSocket(i.port,1,InetAddress.getByName("127.0.0.1")).use { }
             writeProperties(i)
             r.crashesBefore=CrashReports.snapshot(serverDir(id))
-            val p=ProcessBuilder(args).directory(serverDir(id).toFile()).redirectErrorStream(true).start()
-            r.process=p; r.state="STARTING"; r.players=null; r.event("system","서버 시작 · 127.0.0.1:${i.port} · PID ${p.pid()}")
-            workers.submit {
-                consume(id,p); val code=p.waitFor()
-                val (exit,summary)=synchronized(r) {
-                    if(r.process!==p)return@submit
-                    val requested=r.state=="STOPPING"
-                    r.stopMonitor?.close();r.stopMonitor=null;r.process=null;r.state=if(code==0)"STOPPED" else "FAILED"
-                    ServerExit(code,requested,if(requested)r.stopReason ?: "MANUAL" else "UNEXPECTED",CrashReports.changed(serverDir(id),r.crashesBefore)).also {r.lastExit=it;r.event("system",it.summary())} to r.discordError.recent()
-                }
-                signal(id,"stop",exit.summary(),exit,if(!exit.requested)summary else null)
+            // The resident host (when active) owns the process so it survives a manager restart or update.
+            val builder=ProcessBuilder(args).directory(serverDir(id).toFile()).redirectErrorStream(true)
+            val p=localLauncher?.launch(id,args,serverDir(id),builder.environment().toMap()) ?: builder.start()
+            r.process=p; r.state="STARTING"; r.players=null; r.event("system","서버 시작 · 127.0.0.1:${i.port} · PID ${p.pid()}"+if(p is HostedProcess)" · 상주 서비스가 프로세스를 소유" else "")
+            watch(id,r,p)
+        }
+    }
+    private fun watch(id:String,r:RuntimeState,p:Process) {
+        workers.submit {
+            consume(id,p); val code=p.waitFor()
+            val (exit,summary)=synchronized(r) {
+                if(r.process!==p)return@submit
+                val requested=r.state=="STOPPING"
+                r.stopMonitor?.close();r.stopMonitor=null;r.process=null;r.state=if(code==0)"STOPPED" else "FAILED"
+                ServerExit(code,requested,if(requested)r.stopReason ?: "MANUAL" else "UNEXPECTED",CrashReports.changed(serverDir(id),r.crashesBefore)).also {r.lastExit=it;r.event("system",it.summary())} to r.discordError.recent()
+            }
+            if(p is HostedProcess)localLauncher?.released(id,p.pid())
+            signal(id,"stop",exit.summary(),exit,if(!exit.requested)summary else null)
+        }
+    }
+    /** Optional resident game host; null keeps the original in-process behaviour. */
+    @Volatile var localLauncher:LocalGameLauncher?=null
+    /**
+     * Re-attaches games the resident host kept running while this app was replaced. Only servers that are configured as
+     * local, currently have no process here and are alive in the host are adopted; nothing is ever started or stopped.
+     * Returns the adopted instance IDs.
+     */
+    fun adoptHostedGames():List<String> {
+        val launcher=localLauncher ?: return emptyList()
+        return launcher.adoptable().filter {id->instances[id]?.runnerId==null && instances.containsKey(id)}.mapNotNull {id->
+            val r=runtime(id)
+            synchronized(r) {
+                if(r.process!=null)return@mapNotNull null
+                val p=launcher.adopt(id,ConsolePosition.load(profileDir(id).resolve("console.seq"))) ?: return@mapNotNull null
+                r.process=p;r.state=if((p as? HostedProcess)?.readyAtAttach==true)"RUNNING" else "STARTING";r.players=null;r.startNotified=true;r.crashesBefore=CrashReports.snapshot(serverDir(id))
+                r.event("system","상주 서비스에서 실행 중인 서버에 다시 연결했습니다 · PID ${p.pid()}")
+                watch(id,r,p);id
             }
         }
     }
@@ -469,6 +495,8 @@ class ServerManager {
         val r=runtime(id)
         val log=profileDir(id).resolve("console.log")
         log.toFile().appendText("\n--- ${Instant.now()} ---\n")
+        // Lines replayed from the resident host were already written by the previous manager process.
+        val hostedProcess=p as? HostedProcess;val position=profileDir(id).resolve("console.seq");var lastSaved=0L
         java.io.FileOutputStream(log.toFile(),true).bufferedWriter().use { writer ->
             p.inputStream.bufferedReader().useLines { lines -> lines.forEach { raw ->
                 val line=raw.replace(Regex("\u001B\\[[0-?]*[ -/]*[@-~]"), "")
@@ -478,6 +506,7 @@ class ServerManager {
                 synchronized(r) { if(r.state=="STARTING" && line.contains("Done (") && line.contains("For help")) {r.state="RUNNING";started(id,r)}; r.event(kind,line) }
                 if(r.discordError.offer(line,kind=="error")) signal(id,"error","서버 로그에서 오류가 감지되었습니다.",error=r.discordError.snapshot())
                 writer.appendLine(raw); writer.flush()
+                hostedProcess?.let {it.markWritten();val now=System.currentTimeMillis();if(now-lastSaved>1000){lastSaved=now;it.savePosition(position)}}
             } }
         }
     }
@@ -745,7 +774,9 @@ class ServerManager {
     fun move(id: String,from: String,to: String) { val r=runtime(id); synchronized(r) { checkIdle(r); val source=path(id,from); val target=path(id,to); require(source!=serverDir(id) && !target.exists()) { "대상 경로를 확인하세요" }; Files.move(source,target) } }
     fun delete(id: String,relative: String) { val r=runtime(id); synchronized(r) { checkIdle(r); val p=path(id,relative); require(p!=serverDir(id)) { "서버 루트는 삭제할 수 없습니다" }; val trash=root.resolve(id).resolve("trash"); trash.createDirectories(); Files.move(p,trash.resolve(UUID.randomUUID().toString()+"-"+p.name)) } }
     @PreDestroy fun shutdown() {
-        val processes=runtimes.entries.mapNotNull { (id,r) -> synchronized(r) { r.process?.also {r.stopReason="SHUTDOWN";r.state="STOPPING";armStopMonitor(id,r,it)} } }.filter { it.isAlive }
+        // Games owned by the resident host keep running; only remember how far the console was written and detach.
+        runtimes.entries.forEach {(id,r)->(r.process as? HostedProcess)?.savePosition(profileDir(id).resolve("console.seq"))}
+        val processes=runtimes.entries.mapNotNull { (id,r) -> synchronized(r) { r.process?.takeIf {it !is HostedProcess}?.also {r.stopReason="SHUTDOWN";r.state="STOPPING";armStopMonitor(id,r,it)} } }.filter { it.isAlive }
         processes.forEach { p ->
             runCatching { p.outputStream.write("stop\n".toByteArray()); p.outputStream.flush() }
         }

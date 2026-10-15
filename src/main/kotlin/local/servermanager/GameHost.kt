@@ -47,8 +47,8 @@ object GameHostProtocol {
     fun hmac(secret:ByteArray,vararg parts:ByteArray):ByteArray=Mac.getInstance("HmacSHA256").run {init(SecretKeySpec(secret,"HmacSHA256"));parts.forEach(::update);doFinal()}
 }
 
-data class HostEndpoint(val port:Int,val secret:String,val pid:Long,val version:String,val protocol:Int,val minCompatible:Int)
-data class HostInstanceStatus(val id:String,val pid:Long,val startMillis:Long,val alive:Boolean,val exitCode:Int?,val exitAcked:Boolean,val lastSeq:Long,val managed:Boolean,val reason:String?=null)
+data class HostEndpoint(val port:Int,val secret:String,val pid:Long,val version:String,val protocol:Int,val minCompatible:Int,val startMillis:Long=0)
+data class HostInstanceStatus(val id:String,val pid:Long,val startMillis:Long,val alive:Boolean,val exitCode:Int?,val exitAcked:Boolean,val lastSeq:Long,val managed:Boolean,val reason:String?=null,val ready:Boolean=false)
 private data class PersistedInstance(val id:String,val pid:Long,val startMillis:Long,val exitCode:Int?=null,val exitAcked:Boolean=false)
 private data class PersistedHost(val instances:List<PersistedInstance> =emptyList())
 
@@ -68,7 +68,7 @@ class GameHostService(private val home:Path,private val version:String,private v
 
     private inner class Game(val id:String,val process:Process?,val pid:Long,val startMillis:Long) {
         val ring=java.util.ArrayDeque<Pair<Long,String>>();val seq=AtomicLong()
-        @Volatile var exitCode:Int?=null;@Volatile var exitAcked=false
+        @Volatile var exitCode:Int?=null;@Volatile var exitAcked=false;@Volatile var ready=false
         val seenCommands=object:LinkedHashMap<String,Boolean>(){override fun removeEldestEntry(e:MutableMap.MutableEntry<String,Boolean>)=size>1000}
         val managed get()=process!=null
         fun alive()=if(process!=null)process.isAlive else ProcessHandle.of(pid).map {it.isAlive && it.info().startInstant().map {s->s.toEpochMilli()}.orElse(-1)==startMillis}.orElse(false)
@@ -88,7 +88,7 @@ class GameHostService(private val home:Path,private val version:String,private v
     }
 
     fun port():Int=server.localPort
-    fun endpoint()=HostEndpoint(server.localPort,Base64.getUrlEncoder().withoutPadding().encodeToString(secret),ProcessHandle.current().pid(),version,protocol,minCompatible)
+    fun endpoint()=HostEndpoint(server.localPort,Base64.getUrlEncoder().withoutPadding().encodeToString(secret),ProcessHandle.current().pid(),version,protocol,minCompatible,ProcessHandle.current().info().startInstant().map {it.toEpochMilli()}.orElse(0))
 
     /** Returns false when another resident host already owns [home]; never starts a second host. */
     fun start():Boolean {
@@ -185,7 +185,7 @@ class GameHostService(private val home:Path,private val version:String,private v
         }
     }
     fun statuses():List<HostInstanceStatus> =games.values.sortedBy {it.id}.map {
-        HostInstanceStatus(it.id,it.pid,it.startMillis,it.alive(),it.exitCode,it.exitAcked,it.seq.get(),it.managed,if(!it.managed && it.alive())"ORPHAN_ALIVE_NOT_CONTROLLABLE" else null)
+        HostInstanceStatus(it.id,it.pid,it.startMillis,it.alive(),it.exitCode,it.exitAcked,it.seq.get(),it.managed,if(!it.managed && it.alive())"ORPHAN_ALIVE_NOT_CONTROLLABLE" else null,it.ready)
     }
     fun anyAlive()=games.values.any {it.alive()}
     fun controllerAttached()=controller?.socket?.isClosed==false
@@ -204,7 +204,7 @@ class GameHostService(private val home:Path,private val version:String,private v
                 val replay:List<Pair<Long,String>>;val first:Long
                 synchronized(game.ring){replay=game.ring.filter {it.first>after};first=game.ring.firstOrNull()?.first ?: (game.seq.get()+1)}
                 val gap=if(after+1<first && game.seq.get()>after)mapOf("gapFrom" to after+1,"gapTo" to first-1) else emptyMap()
-                ok(mapOf("pid" to game.pid,"startMillis" to game.startMillis,"alive" to game.alive(),"exitCode" to game.exitCode,"lastSeq" to game.seq.get())+gap)
+                ok(mapOf("pid" to game.pid,"startMillis" to game.startMillis,"alive" to game.alive(),"exitCode" to game.exitCode,"lastSeq" to game.seq.get(),"ready" to game.ready)+gap)
                 replay.forEach {(s,l)->c.send(mapOf("t" to "console","id" to id,"seq" to s,"line" to l,"replay" to true))}
                 c.send(mapOf("t" to "attached","id" to id,"lastSeq" to game.seq.get()))
             }
@@ -266,6 +266,7 @@ class GameHostService(private val home:Path,private val version:String,private v
         try {
             BufferedReader(InputStreamReader(process.inputStream,Charsets.UTF_8)).useLines {lines->lines.forEach {line->
                 val s=game.seq.incrementAndGet()
+                if(!game.ready && line.contains("Done (") && line.contains("For help"))game.ready=true
                 synchronized(game.ring){game.ring.addLast(s to line);while(game.ring.size>ringSize)game.ring.removeFirst()}
                 controller?.send(mapOf("t" to "console","id" to game.id,"seq" to s,"line" to line.take(8192)))
             }}
@@ -284,16 +285,23 @@ class GameHostService(private val home:Path,private val version:String,private v
 /** Process view of a game owned by the resident host, so existing runner code can treat it like a normal Process. */
 class HostedProcess(private val client:GameHostClient,val id:String,private val pid:Long,private val startMillis:Long):Process() {
     private val exit=CountDownLatch(1)
-    private val console=java.io.PipedInputStream(1 shl 20)
-    private val consoleOut=java.io.PipedOutputStream(console)
+    private val console=QueueInputStream()
     @Volatile private var code:Int?=null
+    /** True when the game had already finished starting at the moment this controller attached. */
+    @Volatile var readyAtAttach=false
     private val stdin=object:OutputStream() {
         private val buffer=java.io.ByteArrayOutputStream()
         override fun write(b:Int){buffer.write(b)}
         override fun flush(){val text=buffer.toString(Charsets.UTF_8).also {buffer.reset()};text.split('\n').filter {it.isNotBlank()}.forEach {client.stdin(id,pid,it)}}
     }
-    internal fun feed(line:String){runCatching {consoleOut.write((line+"\n").toByteArray());consoleOut.flush()}}
-    internal fun finished(exitCode:Int){code=exitCode;runCatching {consoleOut.close()};exit.countDown()}
+    private val pendingSeqs=java.util.ArrayDeque<Long>()
+    /** Highest console sequence the consumer has fully handled (for example written to its log file). */
+    @Volatile var writtenSeq=0L;private set
+    internal fun feed(seq:Long,line:String){synchronized(pendingSeqs){pendingSeqs.addLast(seq)};console.put((line+"\n").toByteArray())}
+    /** Call once per line read from [getInputStream], after that line has been persisted. */
+    fun markWritten(){synchronized(pendingSeqs){pendingSeqs.pollFirst()?.let {writtenSeq=it}}}
+    fun savePosition(file:Path){runCatching {file.parent?.createDirectories();file.writeText(writtenSeq.toString())}}
+    internal fun finished(exitCode:Int){code=exitCode;console.finish();exit.countDown()}
     override fun getOutputStream():OutputStream=stdin
     override fun getInputStream():InputStream=console
     override fun getErrorStream():InputStream=InputStream.nullInputStream()
@@ -312,7 +320,7 @@ class GameHostRejected(val reason:String):java.io.IOException(reason)
 
 /** Controller side. A new client attaches after a controller update; it never restarts or duplicates a game. */
 class GameHostClient private constructor(private val socket:Socket,private val reader:BufferedReader,private val controllerId:String):AutoCloseable {
-    private val mapper=jacksonObjectMapper()
+    private val mapper=jacksonObjectMapper().configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES,false) // a newer host may add fields
     private val writer=PrintWriter(socket.getOutputStream().bufferedWriter(Charsets.UTF_8),false)
     private val pending=ConcurrentHashMap<String,java.util.concurrent.CompletableFuture<JsonNode>>()
     private val processes=ConcurrentHashMap<String,HostedProcess>()
@@ -326,6 +334,7 @@ class GameHostClient private constructor(private val socket:Socket,private val r
     var onRelay:(String)->Unit={}
     var onExit:(String,Long,Int)->Unit={_,_,_->}
     private val lastSeq=ConcurrentHashMap<String,Long>()
+    private val attachedLatches=ConcurrentHashMap<String,CountDownLatch>()
 
     companion object {
         fun readEndpoint(home:Path):HostEndpoint? {
@@ -386,8 +395,9 @@ class GameHostClient private constructor(private val socket:Socket,private val r
                     "console" -> {
                         val id=m.path("id").asText();val seq=m.path("seq").asLong()
                         val fresh=synchronized(lastSeq){val prev=lastSeq[id] ?: 0;if(seq>prev){lastSeq[id]=seq;true}else false}
-                        if(fresh){processes[id]?.feed(m.path("line").asText());onConsole(id,seq,m.path("line").asText())}
+                        if(fresh){processes[id]?.feed(seq,m.path("line").asText());onConsole(id,seq,m.path("line").asText())}
                     }
+                    "attached" -> attachedLatches[m.path("id").asText()]?.countDown()
                     "exit" -> {val id=m.path("id").asText();processes[id]?.finished(m.path("code").asInt());onExit(id,m.path("pid").asLong(),m.path("code").asInt())}
                     "relay" -> onRelay(m.path("body").asText())
                 }
@@ -401,7 +411,7 @@ class GameHostClient private constructor(private val socket:Socket,private val r
     fun start(id:String,command:List<String>,dir:Path,env:Map<String,String>):StartResult {
         val reply=request(mapOf("t" to "start","id" to id,"command" to command,"dir" to dir.toString(),"env" to env),30000)
         val process=HostedProcess(this,id,reply.path("pid").asLong(),reply.path("startMillis").asLong());processes[id]=process
-        if(!reply.path("duplicate").asBoolean())attachInternal(id,0,process) else attachInternal(id,lastSeq[id] ?: 0,process)
+        if(!reply.path("duplicate").asBoolean())attachInternal(id,0,process,adopting=false) else attachInternal(id,lastSeq[id] ?: 0,process)
         return StartResult(process,reply.path("duplicate").asBoolean())
     }
     /** Reconnect to a game that survived a controller update. Missed console output is replayed from [afterSeq]. */
@@ -410,10 +420,14 @@ class GameHostClient private constructor(private val socket:Socket,private val r
         val process=HostedProcess(this,id,info.pid,info.startMillis);processes[id]=process
         attachInternal(id,afterSeq,process);return process
     }
-    private fun attachInternal(id:String,afterSeq:Long,process:HostedProcess) {
+    private fun attachInternal(id:String,afterSeq:Long,process:HostedProcess,adopting:Boolean=true) {
+        val latch=CountDownLatch(1);attachedLatches[id]=latch
         lastSeq.remove(id);if(afterSeq>0)lastSeq[id]=afterSeq
         val reply=request(mapOf("t" to "attach","id" to id,"afterSeq" to afterSeq))
+        process.readyAtAttach=reply.path("ready").asBoolean()
         if(!reply.path("alive").asBoolean()){reply.path("exitCode").takeIf {!it.isNull}?.let {process.finished(it.asInt())}}
+        else if(!latch.await(10,TimeUnit.SECONDS))throw java.io.IOException("콘솔 재생이 끝나지 않았습니다")
+        attachedLatches.remove(id)
     }
     fun stdin(id:String,pid:Long,line:String)=request(mapOf("t" to "stdin","id" to id,"expectPid" to pid,"cmdId" to java.util.UUID.randomUUID().toString(),"line" to line))
     fun stdinWithId(id:String,pid:Long,cmdId:String,line:String)=request(mapOf("t" to "stdin","id" to id,"expectPid" to pid,"cmdId" to cmdId,"line" to line))
@@ -423,4 +437,33 @@ class GameHostClient private constructor(private val socket:Socket,private val r
     fun relay(body:String)=send(mapOf("t" to "relay","req" to "x","body" to body))
     /** Detach without touching any game. The host immediately accepts the next controller. */
     override fun close(){runCatching {socket.close()}}
+}
+
+/** Unbounded in-memory stream: the host connection's reader must never block on a slow console consumer. */
+class QueueInputStream:InputStream() {
+    private val queue=LinkedBlockingQueue<ByteArray>()
+    private val eof=ByteArray(0)
+    private var current=ByteArray(0);private var pos=0;private var ended=false
+    fun put(bytes:ByteArray){if(bytes.isNotEmpty())queue.put(bytes)}
+    fun finish(){queue.put(eof)}
+    @Synchronized private fun fill():Boolean {
+        while(pos>=current.size) {
+            if(ended)return false
+            val next=queue.take()
+            if(next===eof){ended=true;return false}
+            current=next;pos=0
+        }
+        return true
+    }
+    @Synchronized override fun read():Int=if(fill())current[pos++].toInt() and 0xff else -1
+    @Synchronized override fun read(b:ByteArray,off:Int,len:Int):Int {
+        if(len==0)return 0
+        if(!fill())return -1
+        val n=minOf(len,current.size-pos);System.arraycopy(current,pos,b,off,n);pos+=n;return n
+    }
+    override fun available():Int=synchronized(this){current.size-pos}
+}
+
+object ConsolePosition {
+    fun load(file:Path):Long=runCatching {file.readText().trim().toLong()}.getOrDefault(0L)
 }

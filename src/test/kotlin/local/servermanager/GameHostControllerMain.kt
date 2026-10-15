@@ -13,3 +13,14 @@ object GameHostControllerMain {
         Thread.sleep(600_000)
     }
 }
+
+/** Runs the real host entry point in its own JVM, as the installer-started service would. */
+object GameHostProcessMain {
+    @JvmStatic fun main(args:Array<String>) {
+        val service=GameHostService(Path.of(args[0]),args[1])
+        if(!service.start())return
+        // The command line must contain the marker the controller uses to recognise a host process.
+        Thread.sleep(600_000)
+    }
+}
+object GameHostControllerMainSleep {@JvmStatic fun main(args:Array<String>){Thread.sleep(600_000)}}

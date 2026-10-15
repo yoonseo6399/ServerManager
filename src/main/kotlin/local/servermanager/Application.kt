@@ -54,7 +54,12 @@ fun main(args: Array<String>) {
         }
         return
     }
-    if(args.any { it=="--runner" || it=="--runner-pair" || it=="--runner-status" }) {
+    if(args.contains("--game-host")) {
+        val home=args.firstOrNull {it.startsWith("--host-home=")}?.substringAfter('=') ?: error("--host-home=경로 가 필요합니다")
+        GameHostMain.run(java.nio.file.Path.of(home).toAbsolutePath().normalize(),RunnerAgent.version())
+        return
+    }
+    if(args.any { it=="--runner" || it=="--runner-pair" || it=="--runner-status" || it.startsWith("--runner-relay-consent=") }) {
         RunnerMain.run(args)
         return
     }
