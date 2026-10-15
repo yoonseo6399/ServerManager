@@ -398,11 +398,18 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     private fun llmChat(requestId:String,size:String,prompt:String,think:Boolean) {
         val response=try {
             check(llmAllowed) {"이 실행기는 Qwen 실행이 허용되지 않았습니다"}
-            check(llmBusy.compareAndSet(false,true)) {"이 실행기에서 다른 Qwen 요청이 진행 중입니다"}
+            // Probing is read-only and stays available while a chat runs; chat and unload are serialized so only one model is ever loaded.
+            val exclusive=size!="probe"
+            check(!exclusive || llmBusy.compareAndSet(false,true)) {"이 실행기에서 다른 Qwen 요청이 진행 중입니다"}
             try {
-                val answer=LocalLlm().chat(size,prompt,think)
-                RunnerMessage("llm-result",state="OK",token=requestId,detail=mapper.writeValueAsString(answer).also {require(it.length<=200*1024)})
-            } finally {llmBusy.set(false)}
+                val llm=LocalLlm()
+                val result:Any=when(size) {
+                    "probe" -> llm.probe()
+                    "unload" -> {llm.unloadQwen();llm.probe()}
+                    else -> llm.chat(size,prompt,think)
+                }
+                RunnerMessage("llm-result",state="OK",token=requestId,detail=mapper.writeValueAsString(result).also {require(it.length<=200*1024)})
+            } finally {if(exclusive)llmBusy.set(false)}
         } catch(e:Exception) {RunnerMessage("llm-result",state="ERROR",token=requestId,detail=(if(e is IllegalStateException||e is IllegalArgumentException)e.message else null)?.take(500) ?: "실행기의 Ollama 요청을 완료하지 못했습니다")}
         send(response)
     }

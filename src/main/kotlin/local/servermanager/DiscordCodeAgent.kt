@@ -39,6 +39,7 @@ class DiscordCodeAgent(private val config:()->DiscordConfig,private val current:
     private val key:String get()=System.getenv("GEMINI_API_KEY")?.takeIf {it.isNotBlank()} ?: storedKey().orEmpty()
     private val poolStore=settingsDirectory?.let {GeminiKeyPoolStore(it,{key.takeIf {value->value.isNotBlank()}})}
     private val mainSettings=settingsDirectory?.let {MainAgentSettings(it)}
+    private val qwen=settingsDirectory?.let {QwenSettings(it)}
     private val workspace=System.getenv("LUONNOTAR_AGENT_WORKSPACE")?.takeIf {it.isNotBlank()} ?: settingsDirectory?.resolve("workspace.txt")?.takeIf {it.isRegularFile()}?.readText()?.trim().orEmpty()
     private val testsEnabled=System.getenv("LUONNOTAR_AGENT_TESTS")=="true" || settingsDirectory?.resolve("tests-enabled")?.takeIf {it.isRegularFile()}?.readText()?.trim()=="true"
     private val model=System.getenv("LUONNOTAR_AGENT_MODEL")?.takeIf {it.isNotBlank()} ?: "gemini-3.8-flash"
@@ -58,7 +59,7 @@ class DiscordCodeAgent(private val config:()->DiscordConfig,private val current:
             return command
         }
         guild.upsertCommand(Commands.slash("local-llm","로컬 Qwen 일반 대화 (코드·도구 접근 없음)")
-            .addOptions(OptionData(OptionType.STRING,"model","Qwen 모델",true).addChoice("Qwen3 14B","14b").addChoice("Qwen3 30B","30b"),
+            .addOptions(OptionData(OptionType.STRING,"model","Qwen 모델 (생략하면 웹 설정의 모델)",false).addChoice("Qwen3 14B","14b").addChoice("Qwen3 30B","30b"),
                 OptionData(OptionType.STRING,"prompt","질문 또는 요청 (매번 독립 대화)",true).setMaxLength(6000),
                 OptionData(OptionType.BOOLEAN,"think","사고 출력 요청 (기본 꺼짐)",false))).queue({}, {})
         guild.upsertCommand(command("agent",true)).queue({}, {})
@@ -85,9 +86,11 @@ class DiscordCodeAgent(private val config:()->DiscordConfig,private val current:
                     if(!localBusy.compareAndSet(false,true)) {hook.editOriginal("다른 로컬 모델 요청이 진행 중입니다. 완료 후 요청하세요.").queue({}, {});return@queue}
                     try {worker.submit {
                         try {
-                            val size=event.getOption("model")!!.asString
+                            val setting=qwen?.config() ?: QwenConfig()
+                            val size=event.getOption("model")?.asString ?: setting.model
                             val prompt=event.getOption("prompt")!!.asString;val think=event.getOption("think")?.asBoolean==true
-                            val remote=RemoteLlm.chat(size,prompt,think)
+                            val remote=RemoteLlm.chat(size,prompt,think,setting.runnerId)
+                            check(remote!=null || setting.runnerId==null) {"웹 설정에서 지정한 실행기를 사용할 수 없습니다."}
                             val answer=remote?.answer ?: LocalLlm().chat(size,prompt,think)
                             val where=remote?.let {" · 실행기 ${it.runnerName.replace(Regex("[\\p{Cntrl}]")," ").take(40)}"} ?: ""
                             if(event.jda===current()) {
@@ -96,7 +99,7 @@ class DiscordCodeAgent(private val config:()->DiscordConfig,private val current:
                                 else hook.editOriginal(info+"\n전체 답변은 첨부 파일에 있습니다.").setAllowedMentions(emptyList())
                                     .setFiles(net.dv8tion.jda.api.utils.FileUpload.fromData(answer.text.toByteArray(Charsets.UTF_8),"qwen-answer.txt")).complete()
                             }
-                        } catch(_:Exception) {hook.editOriginal("Qwen 요청을 완료하지 못했습니다. Qwen을 실행하는 컴퓨터(실행기 또는 관리 앱)의 Ollama 실행·모델 태그·메모리와 3분 제한을 확인하세요.").setAllowedMentions(emptyList()).queue({}, {})}
+                        } catch(e:Exception) {hook.editOriginal((if(e is IllegalStateException)"${e.message.orEmpty().take(300)}\n" else "")+"Qwen 요청을 완료하지 못했습니다. Qwen을 실행하는 컴퓨터(실행기 또는 관리 앱)의 Ollama 실행·모델 태그·메모리와 3분 제한을 확인하세요.").setAllowedMentions(emptyList()).queue({}, {})}
                         finally {localBusy.set(false)}
                     }} catch(_:Exception) {localBusy.set(false);hook.editOriginal("실행기가 종료되었습니다.").queue({}, {})}
                     return@queue
