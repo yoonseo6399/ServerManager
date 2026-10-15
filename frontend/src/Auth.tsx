@@ -1,5 +1,7 @@
 import React,{memo,createContext,useContext,useEffect,useRef,useState} from 'react';
 import {ShieldCheck,KeyRound,LogIn} from 'lucide-react';
+import './assistant-panel.css';
+import {AssistantPanel} from './AssistantPanel';
 import {GoogleConnectionSettings} from './GoogleConnectionSettings';
 import {SystemLogPanel} from './SystemLogPanel';
 import {DesktopSettings} from './DesktopSettings';
@@ -88,7 +90,7 @@ export function SecurityPanel({instances,section='account'}:{instances:{config:{
  {auth.session.user?.owner&&section==='system'&&<><h2 className="spaced">Mac 자동 시작</h2><label className="check-label"><input type="checkbox" aria-label="Mac 로그인 시 자동 실행" disabled={busy||!startup?.supported} checked={startup?.enabled||false} onChange={e=>{const enabled=e.target.checked;setStartup(old=>old&&({...old,enabled}));run(async()=>{try{setStartup(await api('/admin/startup','PUT',{enabled}));}catch(error){setStartup(old=>old&&({...old,enabled:!enabled}));throw error;}},enabled?'다음 Mac 로그인부터 자동 실행합니다.':'자동 실행을 해제했습니다.');}}/>Mac 로그인 시 서버 관리자 자동 실행</label><p>{startup?.supported?'변경 사항은 다음 로그인부터 적용됩니다. Minecraft 서버는 자동으로 시작하지 않습니다.':'설치 패키지의 Server Manager 앱에서 설정할 수 있습니다.'}</p>{startup&&<p className="muted">데이터 위치: {startup.dataDirectory}</p>}
  <DesktopSettings/><SystemLogPanel/><h2 className="spaced">외부 접속 설정</h2><label className="security-label">공개 HTTPS URL<input readOnly value={auth.session.publicOrigin} placeholder="공개 관리 주소가 설정되지 않았습니다"/></label><p>외부 접속 주소를 변경하면 새 도메인에서 패스키를 다시 등록해야 합니다.</p>
  </>}
- {auth.session.user?.owner&&section==='ai'&&<><MainAgentSettings/><QwenSettings/><AgentKeySettings/></>}
+ {auth.session.user?.owner&&section==='ai'&&<><MainAgentSettings/><QwenSettings/><div className="assistant-panel"><AssistantPanel/></div><AgentKeySettings/></>}
  {auth.session.user?.owner&&section==='integrations'&&<><DiscordSettings instances={instances}/><WebDavSettings instances={instances}/></>}
  {section!=='account'&&!auth.session.user?.owner&&<p role="status">이 설정은 관리 웹 소유자만 사용할 수 있습니다.</p>}
  </section>;

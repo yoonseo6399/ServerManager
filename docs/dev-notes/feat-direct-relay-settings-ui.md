@@ -15,3 +15,8 @@
 - External-check uses typed status/detail and human labels instead of raw JSON; runner ID changes clear prior status/logs.
 - Manager updates optional detail now displays actual MANAGER_APP phases/wait reason/error/log from runtime API; old responses remain supported.
 - Final scoped validation: 7 menu/direct/runner/log cases passed; added manager detail case passed separately. TypeScript/Vite passed after final component changes. No production changes.
+
+## Assistant integration
+- Merged harness checkpoint82c4cef; mounted AssistantPanel only under owner AI menu. Scoped CSS wrapper corrects inherited flex layout for task review/inputs without modifying harness source.
+- Focused Playwright assistant tests3 passed: cloud-consent/review/final-approval separate and busy disables duplicate; policy SaveBar blocks discarded navigation and existing history returns to AI after account; regular direct #ai cannot mount admin controls.
+- TypeScript and Vite build passed. Inspected full-page screenshot test-results/assistant-reviewed.png (ignored): request form, before/after and final approval now ordered vertically with no overlap. Tests use mocked backend only; actual Qwen/Google/Discord remained untouched.
