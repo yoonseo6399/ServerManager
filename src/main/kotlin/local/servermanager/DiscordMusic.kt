@@ -13,11 +13,11 @@ import java.util.concurrent.RejectedExecutionException
 
 /** The member is fetched through REST before this policy is evaluated; channel IDs come from voice-state events. */
 object DiscordMusicAccess {
-    private val actions=setOf("play","pause","resume","skip","stop","queue","join","leave","previous")
+    private val actions=setOf("play","pause","resume","skip","stop","queue","join","leave","previous","remove","autoplay","repeat","save","load","playlists","delete","stats")
     fun allowed(config:DiscordConfig,guildId:String?,clientCurrent:Boolean,action:String,userChannelId:String?,botChannelId:String?):Boolean {
         if(!clientCurrent || !config.enabled || guildId==null || action !in actions) return false
         if((config.grants.none { it.guildId==guildId }) && (config.alerts.none { it.guildId==guildId }) && (config.superAdmins.none { it.guildId==guildId })) return false
-        if(action=="queue") return true
+        if(action in setOf("queue","playlists","stats")) return true
         return userChannelId!=null && (botChannelId==null || botChannelId==userChannelId)
     }
 
@@ -35,7 +35,8 @@ class DiscordMusic(
     private val config:()->DiscordConfig,
     private val currentClient:()->JDA?,
     private val playback:DiscordMusicPlayback,
-    directory:java.nio.file.Path
+    directory:java.nio.file.Path,
+    private val library:DiscordMusicLibraryStore
 ):AutoCloseable {
     private val panels=DiscordMusicPanel(DiscordMusicChannelStore(directory),playback,currentClient)
     private val workers=java.util.concurrent.ThreadPoolExecutor(3,3,0,java.util.concurrent.TimeUnit.SECONDS,
@@ -53,7 +54,16 @@ class DiscordMusic(
                 SubcommandData("channel","이 채널을 음악 전용 채널로 등록 (채널 관리자)").addOptions(
                     net.dv8tion.jda.api.interactions.commands.build.OptionData(OptionType.CHANNEL,"channel","생략하면 현재 채널",false)
                         .setChannelTypes(net.dv8tion.jda.api.entities.channel.ChannelType.TEXT)),
-                SubcommandData("unchannel","음악 전용 채널 등록 해제 (채널 관리자)")))
+                SubcommandData("unchannel","음악 전용 채널 등록 해제 (채널 관리자)"),
+                SubcommandData("repeat","현재 곡 한 곡 반복 켜기/끄기").addOption(OptionType.BOOLEAN,"enabled","생략하면 켜고 끄기를 전환",false),
+                SubcommandData("autoplay","완주 기록 기반 자동재생 설정").addOption(OptionType.BOOLEAN,"enabled","자동재생 켜기",true),
+                SubcommandData("stats","직접 등록한 곡의 완주 통계 보기"),
+                SubcommandData("save","현재 곡·대기열 또는 YouTube 플레이리스트를 저장")
+                    .addOption(OptionType.STRING,"name","저장할 이름 (40자 이내)",true)
+                    .addOption(OptionType.STRING,"url","생략하면 현재 곡과 대기열 저장",false),
+                SubcommandData("load","저장한 플레이리스트를 대기열에 추가").addOption(OptionType.STRING,"name","저장된 이름",true),
+                SubcommandData("playlists","서버에 저장된 플레이리스트 목록"),
+                SubcommandData("delete","저장한 플레이리스트 삭제 (작성자 또는 채널 관리자)").addOption(OptionType.STRING,"name","삭제할 이름",true)))
             .queue({}, {})
         panels.restore(jda,setOf(guildId))
     }
@@ -64,6 +74,9 @@ class DiscordMusic(
 
     private fun managementAllowed(guild:Guild,member:Member,channel:net.dv8tion.jda.api.entities.channel.concrete.TextChannel):Boolean =
         DiscordMusicChannelAccess.manage(config(),guild.id,member.roles.map {it.id}.toSet(),member.hasPermission(channel,Permission.MANAGE_CHANNEL))
+
+    private fun canManageLibrary(guild:Guild,member:Member):Boolean =
+        member.hasPermission(Permission.MANAGE_CHANNEL) || config().superAdmins.any {it.guildId==guild.id && member.roles.any {role -> role.id==it.roleId}}
 
     private fun execute(guild:Guild,member:Member,action:String,query:String):String {
         val channel=member.voiceState?.channel
@@ -79,12 +92,13 @@ class DiscordMusic(
             "stop" -> playback.stop(guild.id)
             "queue" -> playback.queue(guild.id)
             "leave" -> playback.leave(guild)
+            "repeat" -> playback.repeat(guild.id,when(query) {"on"->true;"off"->false;else->null})
             else -> "알 수 없는 음악 명령입니다."
         }
     }
 
     private fun work(action:String,job:()->Unit,rejected:()->Unit) {
-        if(action!="play" && action!="channel" && action!="unchannel") {job();return}
+        if(action !in setOf("play","channel","unchannel","save","load","delete","autoplay")) {job();return}
         try {workers.execute(job)} catch(_:RejectedExecutionException) {rejected()}
     }
 
@@ -98,7 +112,7 @@ class DiscordMusic(
         val guild=event.guild
         val jda=event.jda
         val action=event.subcommandName.orEmpty()
-        val query=event.getOption("query")?.asString.orEmpty()
+        val query=event.getOption("query")?.asString ?: event.getOption("enabled")?.asBoolean?.let { if(it) "on" else "off" }.orEmpty()
         if(guild==null || !DiscordMusicAccess.allowed(config(),guild.id,jda===currentClient(),"queue",null,null)) {
             event.reply("설정된 Discord 서버에서만 음악 명령을 사용할 수 있습니다.").setEphemeral(true).queue({}, {});return
         }
@@ -127,6 +141,44 @@ class DiscordMusic(
                                 else "\n일반 채팅을 받으려면 Developer Portal의 Message Content Intent를 켜고 봇을 재연결하세요."
                         }
                     }.getOrElse {if(it is IllegalStateException || it is IllegalArgumentException)it.message ?: "채널 등록 실패" else "채널 등록을 처리하지 못했습니다."}
+                    else if(action in setOf("save","load","playlists","delete","stats","autoplay")) runCatching {
+                        check(permitted(jda,guild,member,action)) {"같은 음성 채널에서 명령을 사용하세요."}
+                        val name=event.getOption("name")?.asString?.trim().orEmpty()
+                        when(action) {
+                            "save" -> {
+                                require(name.length in 1..40 && name.none(Char::isISOControl)) {"목록 이름은 1~40자로 입력하세요."}
+                                val url=event.getOption("url")?.asString?.trim()
+                                val tracks=if(url.isNullOrEmpty()) playback.savedQueue(guild.id) else {
+                                    require(DiscordMusicAccess.validQuery(url) && url.startsWith("https://")) {"YouTube 플레이리스트 HTTPS URL을 입력하세요."}
+                                    playback.inspectPlaylist(url)
+                                }
+                                check(tracks.isNotEmpty()) {"저장할 곡이 없습니다. 대기열 또는 공개 YouTube 플레이리스트 URL을 확인하세요."}
+                                check(permitted(jda,guild,member,action)) {"Discord 연결 또는 음성 채널이 변경되었습니다."}
+                                val saved=synchronized(library) {
+                                    val existing=library.playlist(guild.id,name)
+                                    check(existing==null || existing.ownerId==member.id || canManageLibrary(guild,member)) {"다른 사람이 저장한 목록은 작성자 또는 채널 관리자만 덮어쓸 수 있습니다."}
+                                    library.save(guild.id,name,tracks,existing?.ownerId ?: member.id)
+                                }
+                                "플레이리스트 ‘${saved.name}’에 ${saved.tracks.size}곡을 저장했습니다. /music load name:${saved.name}"
+                            }
+                            "load" -> {
+                                val saved=library.playlist(guild.id,name) ?: error("저장된 플레이리스트가 없습니다.")
+                                val channel=member.voiceState?.channel ?: error("음성 채널에 먼저 참여하세요.")
+                                check(guild.selfMember.hasPermission(channel,Permission.VOICE_CONNECT,Permission.VOICE_SPEAK)) {"음성 채널 연결·말하기 권한이 필요합니다."}
+                                playback.playSaved(guild,channel,saved.tracks,MusicRequester(member.effectiveName,member.effectiveAvatarUrl,member.id))
+                            }
+                            "delete" -> {
+                                synchronized(library) {
+                                    val saved=library.playlist(guild.id,name) ?: error("저장된 플레이리스트가 없습니다.")
+                                    check(saved.ownerId==member.id || canManageLibrary(guild,member)) {"작성자 또는 채널 관리자만 삭제할 수 있습니다."}
+                                    if(library.delete(guild.id,name)) "플레이리스트를 삭제했습니다." else "이미 삭제된 목록입니다."
+                                }
+                            }
+                            "playlists" -> library.playlists(guild.id).joinToString("\n") {"• ${it.name} (${it.tracks.size}곡)"}.ifEmpty {"저장된 플레이리스트가 없습니다."}
+                            "stats" -> library.stats(guild.id).take(15).mapIndexed {i,stat -> "${i+1}. ${stat.track.title.take(70)} — ${stat.completions}회 완주"}.joinToString("\n").ifEmpty {"완주 기록이 없습니다. 직접 등록하고 끝까지 재생한 곡만 집계합니다."}
+                            else -> playback.autoplay(guild.id,event.getOption("enabled")!!.asBoolean)
+                        }
+                    }.getOrElse {if(it is IllegalArgumentException || it is IllegalStateException) it.message ?: "음악 목록 처리 실패" else "음악 목록을 처리하지 못했습니다. 잠시 후 다시 시도하세요."}
                     else runAction(jda,guild,member,action,query)
                     if(jda===currentClient()) {
                         reply(result);panels.refresh(guild.id)
@@ -174,15 +226,39 @@ class DiscordMusic(
         val action=event.componentId.removePrefix("music:")
         if(guild==null || event.jda!==currentClient() || record==null ||
             !DiscordMusicChannelAccess.matches(record,guild.id,event.channel.id,event.messageId) ||
-            action !in setOf("resume","pause","stop","previous","skip")) {
+            (action !in setOf("resume","pause","stop","previous","skip","autoplay","repeat") && !action.startsWith("page:"))) {
             event.reply("현재 음악 패널에서 사용하세요.").setEphemeral(true).queue({}, {});return
         }
         event.deferReply(true).queue({hook ->
             guild.retrieveMemberById(event.user.id).useCache(false).queue({member ->
-                val result=runAction(event.jda,guild,member,action,"")
+                val result=if(action.startsWith("page:")) {
+                    if(permitted(event.jda,guild,member,"queue")) {
+                        panels.page(guild.id,action.substringAfter(":").toIntOrNull() ?: 0);"대기열 페이지를 바꿨습니다."
+                    } else "현재 서버에서 사용할 수 없습니다."
+                } else if(action=="autoplay") {
+                    if(permitted(event.jda,guild,member,"autoplay")) playback.autoplay(guild.id,!playback.snapshot(guild.id).autoplay) else "같은 음성 채널에서 명령을 사용하세요."
+                } else runAction(event.jda,guild,member,action,"")
                 hook.editOriginal(result).setAllowedMentions(emptyList()).queue({hook.deleteOriginal().queueAfter(3,java.util.concurrent.TimeUnit.SECONDS,{}, {})},{})
                 panels.refresh(guild.id)
             },{hook.editOriginal("현재 서버 멤버 정보를 확인하지 못했습니다.").queue({}, {})})
+        },{})
+    }
+
+    fun handleSelect(event:net.dv8tion.jda.api.events.interaction.component.StringSelectInteractionEvent) {
+        if(event.componentId!="music:remove")return
+        val guild=event.guild
+        val record=guild?.let {panels.get(it.id)}
+        if(guild==null || event.jda!==currentClient() || record==null ||
+            !DiscordMusicChannelAccess.matches(record,guild.id,event.channel.id,event.messageId)) {
+            event.reply("현재 음악 패널에서 사용하세요.").setEphemeral(true).queue({},{});return
+        }
+        event.deferReply(true).queue({hook ->
+            guild.retrieveMemberById(event.user.id).useCache(false).queue({member ->
+                val result=if(permitted(event.jda,guild,member,"remove")) playback.removeQueued(guild.id,event.values.take(25))
+                    else "봇과 같은 음성 채널에서 곡을 삭제하세요."
+                hook.editOriginal(result).setAllowedMentions(emptyList()).queue({hook.deleteOriginal().queueAfter(3,java.util.concurrent.TimeUnit.SECONDS,{}, {})},{})
+                panels.refresh(guild.id)
+            },{hook.editOriginal("멤버 정보를 확인하지 못했습니다.").queue({}, {})})
         },{})
     }
 
