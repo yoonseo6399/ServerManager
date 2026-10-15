@@ -165,7 +165,7 @@ data class RelayAgentStatus(val agentId:String,val epoch:Long,val connectedAt:Lo
 data class RelayHubStatus(val gameListening:Boolean,val gamePort:Int?,val secureListening:Boolean,val securePort:Int?,val generation:Long,
     val agents:List<RelayAgentStatus>,val routes:List<RelayRoute>,val streamsByRoute:Map<String,Int>,val rejects:Map<String,Long>,val lastBindError:String?)
 
-class DirectRelayHub(private val relayId:String,private val secret:ByteArray,private val clock:()->Long={System.currentTimeMillis()}):AutoCloseable {
+class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clock:()->Long={System.currentTimeMillis()}):AutoCloseable {
     private inner class Tunnel(val agentId:String,val epoch:Long,val channel:SecureChannel,val connectedAt:Long) {
         val players=ConcurrentHashMap<Int,Socket>();val opens=ConcurrentHashMap<Int,CountDownLatch>();val failed=ConcurrentHashMap<Int,String>()
         val readyReplies=ConcurrentHashMap<String,java.util.concurrent.CompletableFuture<Boolean>>()
@@ -177,6 +177,9 @@ class DirectRelayHub(private val relayId:String,private val secret:ByteArray,pri
     }
     private val io=Executors.newVirtualThreadPerTaskExecutor()
     private val tunnels=ConcurrentHashMap<String,Tunnel>()
+    @Volatile private var secret=secret.copyOf()
+    /** Established tunnels keep working; only new handshakes need tickets minted from the new secret. */
+    fun rotateSecret(next:ByteArray){secret=next.copyOf()}
     private val usedNonces=ConcurrentHashMap<String,Long>()
     private val rejects=ConcurrentHashMap<String,AtomicLong>()
     private val handshakeSlots=Semaphore(64)
@@ -210,6 +213,16 @@ class DirectRelayHub(private val relayId:String,private val secret:ByteArray,pri
             if(tunnels.remove(revoked.agentId,revoked))revoked.close()
         }
         return true
+    }
+    fun streamCount()=tunnels.values.sumOf {it.players.size}
+    /** Stop accepting new players now; established streams and tunnels finish naturally, then everything closes. */
+    fun drainAndClose(deadlineMillis:Long) {
+        runCatching {game?.close()}
+        Thread.ofVirtual().start {
+            val end=clock()+deadlineMillis
+            while(!closed && streamCount()>0 && clock()<end){try {Thread.sleep(200)} catch(_:InterruptedException){break}}
+            close()
+        }
     }
     fun status():RelayHubStatus {
         val p=policy
@@ -326,14 +339,27 @@ class DirectRelayAgent(private val endpoint:()->RelayEndpoint?,private val gameP
     @Volatile private var stopped=false
     @Volatile private var channel:SecureChannel?=null
     private var loop:Thread?=null
+    @Volatile private var draining=false
     @Synchronized fun start() {if(loop!=null)return;loop=Thread.ofVirtual().start {run()}}
     fun streamCount()=streams.size
+    /** Stop reconnecting; live streams finish naturally and the tunnel is closed once idle or after [deadlineMillis]. */
+    fun drain(deadlineMillis:Long) {
+        draining=true
+        Thread.ofVirtual().start {
+            val end=System.currentTimeMillis()+deadlineMillis
+            while(!stopped && channel!=null && streams.isNotEmpty() && System.currentTimeMillis()<end){try {Thread.sleep(200)} catch(_:InterruptedException){return@start}}
+            close()
+        }
+    }
     private fun run() {
         var failures=0
-        while(!stopped) {
+        while(!stopped && !draining) {
             state=RelayAgentState.CONNECTING
-            val target=runCatching {endpoint()}.getOrNull()
-            if(target==null){state=RelayAgentState.MANAGER_UNAVAILABLE;reason="관리 서버에서 중계 티켓을 받지 못했습니다. 새 연결은 복구 후 처리됩니다"}
+            val lookup=runCatching {endpoint()}
+            val denied=lookup.exceptionOrNull() as? DirectRelayRejected
+            val target=lookup.getOrNull()
+            if(denied!=null){state=RelayAgentState.REJECTED;reason=denied.reason}
+            else if(target==null){state=RelayAgentState.MANAGER_UNAVAILABLE;reason="관리 서버에서 중계 티켓을 받지 못했습니다. 새 연결은 복구 후 처리됩니다"}
             else try {
                 val socket=Socket();socket.connect(InetSocketAddress(target.host,target.port),5000);socket.soTimeout=10000;socket.tcpNoDelay=true
                 val tunnel=try {DirectRelayHandshake.client(socket,target.ticket)} catch(e:Exception){runCatching {socket.close()};throw e}
