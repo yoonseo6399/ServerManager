@@ -47,13 +47,13 @@ class DiscordCodeAgent(private val config:()->DiscordConfig,private val current:
     fun register(jda:JDA,guildId:String) {
         val guild=jda.getGuildById(guildId) ?: return
         fun command(name:String,main:Boolean):net.dv8tion.jda.api.interactions.commands.build.SlashCommandData {
-            val command=Commands.slash(name,if(main)"GPT 메인 작업 · 서브에이전트 분배·병합" else "Gemini 서브에이전트 직접 실행")
+            val command=Commands.slash(name,if(main)"메인 에이전트 작업 · 서브에이전트 분배·병합" else "Gemini 서브에이전트 직접 실행")
                 .addOptions(OptionData(OptionType.STRING,"task","작업 목표와 완료 조건",true).setMaxLength(3000),
                     OptionData(OptionType.STRING,"files",if(main)"선택: 파일 범위 제한 (생략하면 코드 전체)" else "파일 경로, 쉼표 구분 (새 파일도 가능)",!main).setMaxLength(1500),
                     OptionData(OptionType.BOOLEAN,"edit","코드 수정 및 검증 후 원본 반영 허용",false),
                     OptionData(OptionType.BOOLEAN,"build-files","Gradle·package.json 등 빌드 설정 수정 허용",false),
                     OptionData(OptionType.STRING,"agent","스레드에 표시할 에이전트 이름",false).setMaxLength(60))
-            if(main)command.addOptions(OptionData(OptionType.STRING,"model","OpenAI 모델 ID (생략하면 웹 설정)",false).setMaxLength(80),
+            if(main)command.addOptions(OptionData(OptionType.STRING,"model","메인 제공자 모델 ID (생략하면 웹 설정)",false).setMaxLength(80),
                 OptionData(OptionType.STRING,"reasoning","추론 강도 (모델별 지원 범위가 다름)",false).apply {listOf("auto","none","low","medium","high","xhigh","max").forEach {addChoice(it,it)}},
                 OptionData(OptionType.INTEGER,"parallel","동시 서브에이전트 수 (1~3)",false).setMinValue(1).setMaxValue(3))
             return command
@@ -108,7 +108,7 @@ class DiscordCodeAgent(private val config:()->DiscordConfig,private val current:
                 if(main && mainSettings?.let {it.ready(it.config())}!=true) {hook.editOriginal("AI 비서·에이전트에서 메인 제공자와 API 키를 설정하세요.").queue({}, {});return@queue}
                 if(!main && runCatching {poolStore?.credentials()?.isEmpty() ?: key.isBlank()}.getOrDefault(true)) {hook.editOriginal("Gemini API 키를 먼저 설정하세요.").queue({}, {});return@queue}
                 val accepted=if(main)mainBusy.compareAndSet(false,true) else subSlots.tryAcquire()
-                if(!accepted) {hook.editOriginal(if(main)"다른 GPT 메인 작업이 진행 중입니다." else "서브에이전트 3개가 실행 중입니다. 완료 후 요청하세요.").queue({}, {});return@queue}
+                if(!accepted) {hook.editOriginal(if(main)"다른 메인 에이전트 작업이 진행 중입니다." else "서브에이전트 3개가 실행 중입니다. 완료 후 요청하세요.").queue({}, {});return@queue}
                 try {worker.submit {
                     var starter:Message?=null;var stage="파일 검증"
                     try {
@@ -116,7 +116,7 @@ class DiscordCodeAgent(private val config:()->DiscordConfig,private val current:
                         val files=event.getOption("files")?.asString?.let {AgentPresentation.fileNames(it)} ?: emptyList()
                         val editable=event.getOption("edit")?.asBoolean==true
                         val buildFiles=event.getOption("build-files")?.asBoolean==true
-                        val agent=event.getOption("agent")?.asString?.trim()?.takeIf {it.isNotBlank()} ?: if(main)"GPT 메인" else "Gemini 서브에이전트"
+                        val agent=event.getOption("agent")?.asString?.trim()?.takeIf {it.isNotBlank()} ?: if(main)"메인 에이전트" else "Gemini 서브에이전트"
                         val selected=mainSettings?.config()?.let {it.copy(model=event.getOption("model")?.asString ?: it.model,reasoning=event.getOption("reasoning")?.asString ?: it.reasoning,parallelism=event.getOption("parallel")?.asInt ?: it.parallelism)}
                         if(main)mainSettings!!.validate(selected!!)
                         if(!main)AgentWorkspace(Path.of(workspace),files,editable,testsEnabled,editable,buildFiles)
@@ -182,7 +182,7 @@ class DiscordCodeAgent(private val config:()->DiscordConfig,private val current:
                                 }).run(task)
                                 successful=result.completed
                                 integrationRun?.let {finish(it,"통합",if(successful)"완료" else "미완료",successful)}
-                                send(AgentEvent("summary","${if(successful)"완료" else "미완료"} · GPT 호출 ${result.calls} · 토큰 ${result.tokens}\n원본 반영: ${result.published.joinToString().ifBlank {"없음"}}\n작업 보관: ${result.artifact}"))
+                                send(AgentEvent("summary","${if(successful)"완료" else "미완료"} · 메인 호출 ${result.calls} · 토큰 ${result.tokens}\n원본 반영: ${result.published.joinToString().ifBlank {"없음"}}\n작업 보관: ${result.artifact}"))
                             } else {
                                 val project=IsolatedAgentProject.create(Path.of(workspace),runs)
                                 val scope=AgentWorkspace(project.integration,files,editable,testsEnabled,editable,buildFiles)

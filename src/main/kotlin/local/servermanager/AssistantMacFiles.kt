@@ -57,10 +57,16 @@ internal class AssistantMacDirectory private constructor(private val fd:Int):Aut
     }
     private fun create(name:String,bytes:ByteArray,mode:Int) {
         name(name);val file=checked(libc.openat(fd,name,1 or CREATE or EXCLUSIVE or NOFOLLOW or CLOEXEC,0x180)) // 0600 until complete
+        var created:Stat?=null
         try {
+            created=stat(file)
             val buffer=Memory(bytes.size.coerceAtLeast(1).toLong());buffer.write(0,bytes,0,bytes.size);var written=0
             while(written<bytes.size) {val count=libc.write(file,buffer.share(written.toLong()),NativeLong((bytes.size-written).toLong())).toLong();check(count>0);written+=count.toInt()}
             checked(libc.fchmod(file,mode and 0x1ff));checked(libc.fsync(file))
+        } catch(e:Exception) {
+            // Best-effort cleanup of our own unpublished inode; never follow a replacement link.
+            runCatching {val original=created;val current=read(name).stat;if(original!=null && current.inode==original.inode && current.device==original.device)checked(libc.unlinkat(fd,name,0))}
+            throw e
         } finally {libc.close(file)}
     }
     fun apply(leaf:String,before:String,replacement:ByteArray):String {

@@ -1,4 +1,4 @@
-상태: macOS 파일 비서·소유자 승인·Discord 연결·Google 비공개 요약 구현; 28개 범위 테스트 통과, UI 연결 검증 진행 중
+상태: macOS 파일 비서·소유자 승인·Discord 연결·Google 비공개 요약 구현; 31개 범위 테스트 통과, UI 연결 검증 진행 중
 # feat/qwen-assistant-harness
 
 기준: origin/main 2bf9368 → origin/release/0.5.1 ad2bc9c fast-forward. 제공자 의존성 d8b615a를 272a93d로 cherry-pick. VERSION·릴리즈 문서는 작업 변경하지 않음.
@@ -25,3 +25,10 @@
 ## 인계
 UI 담당이 AssistantPanel을 AI 소유자 메뉴에 추가. Claude 담당 RunnerMain/Gateway/설치기/서비스 수명 코드는 건드리지 않음. DiscordBot에는 새 명령/버튼 전달과 선택 의존성만 추가. 다른 제공자 변경은 provider-agent 의존 커밋으로 분리.
 브랜치 예약 푸시는 자동 승인 검토가 이 특정 소스 전송의 명시적 승인을 요구하며 두 번 거절. 같은 작업의 우회 전송은 하지 않음; 부모가 최종 검토 후 공유 처리.
+
+## 완료 보완
+- 범위 테스트 최종 31개 통과(AssistantHarnessTest18 + AssistantAccessTest2 + AssistantGoogleTest3 + LocalLlmTest8). Google tests는 모의 broker/모의 Qwen으로 본인 계정만 조회·명시 동의·최대3개 snippet·토큰/전체본문/불필요 헤더 제외·일정의 주입 문장 무권한 데이터 처리를 검증. 실제 Google/Qwen 연결 성공을 의미하지 않음.
+- 메인 Discord 명령의 GPT 전용 문구를 제공자 중립 표현으로 변경.
+- macOS 사본 생성 실패 시 원본 inode를 확인하고 미게시 임시 inode 정리를 시도. 외부 교체 파일은 보존.
+- UI 담당이 checkpoint82c4cef를 병합해 소유자 AI 메뉴 연결과 브라우저 검증을 수행 중. 중복 브라우저 테스트는 실행하지 않음.
+- Native API 참고: Apple xnu `bsd/sys/fcntl.h`, `bsd/sys/stat.h`, SDK `sys/stdio.h`의 Darwin64 ABI/RENAME_SWAP; JNA5.17.0 Apache2.0/LGPL2.1 이중 라이선스. 메모리 배치와 실제 파일 동작은 macOS arm64 범위 테스트로 확인.
