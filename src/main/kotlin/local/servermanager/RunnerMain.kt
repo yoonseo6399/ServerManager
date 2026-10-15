@@ -612,7 +612,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     }
     private fun uploadStopped(id:String) {
         if(!dirty(id).exists() || processes[id]?.isAlive==true || orphanAlive(id) || sessionToken==null || !reserveUpload(id))return
-        try {
+        synchronized(operationLocks.computeIfAbsent(id){Any()}) { try {
             if(configs[id]?.syncEnabled()==false) {
                 check(!instanceRoot(id).resolve("upload.pending").exists()) {"이전 인계를 먼저 완료하세요"}
                 instanceRoot(id).resolve("exit.json").takeIf {it.exists()}?.let {exit->transferResponse(sendExitReport(id,exit.readText()),"서버 종료 보고 대기")}
@@ -647,7 +647,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             send(RunnerMessage("file-progress",id,detail=mapper.writeValueAsString(FolderImportProgress(if(e is RetryTransfer)"RETRYING" else "FAILED",message=e.message.orEmpty().take(500)))))
             send(RunnerMessage("state",id,"SYNC_FAILED",version(),e.message?.take(300) ?: "서버 파일 인계 실패"))
         }
-        finally { uploading.remove(id) }
+        finally { uploading.remove(id) } }
     }
     private fun uploadFiles(id:String,request:String?) {
             var lastProgress=0L

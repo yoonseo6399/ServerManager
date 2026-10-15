@@ -51,6 +51,28 @@ class RunnerReceiptRecoveryTest {
             assertEquals(manifest.files.getValue("world.dat").sha256,FileInventory.digest(base.resolve("world.dat")))
         } finally {server.stop(0)}
     }
+    @Test fun `stopped upload shares the start operation lock and retains dirty until verification completes`() {
+        val id="33333333-3333-3333-3333-333333333333";val receipt="44444444-4444-4444-4444-444444444444"
+        val folder=home.resolve("instances/$id").createDirectories();folder.resolve("server").createDirectory()
+        folder.resolve("dirty").writeText("${ProcessHandle.current().pid()}|0");folder.resolve("upload.pending").writeText(receipt)
+        val agent=RunnerAgent(home,RunnerIdentity("http://127.0.0.1:1","device","fixture","unused","MAC"))
+        field(agent,"sessionToken").set(agent,"fixture-session")
+        @Suppress("UNCHECKED_CAST") val locks=field(agent,"operationLocks").get(agent) as java.util.concurrent.ConcurrentHashMap<String,Any>
+        @Suppress("UNCHECKED_CAST") val uploading=field(agent,"uploading").get(agent) as Set<String>
+        val method=RunnerAgent::class.java.getDeclaredMethod("uploadStopped",String::class.java).also {it.isAccessible=true}
+        val finished=java.util.concurrent.CountDownLatch(1);val failure=AtomicReference<Throwable?>()
+        val thread=Thread {try{method.invoke(agent,id)}catch(e:Throwable){failure.set(e)}finally{finished.countDown()}}
+        synchronized(locks.computeIfAbsent(id){Any()}) {
+            thread.start()
+            val deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5)
+            while(id !in uploading && System.nanoTime()<deadline)Thread.sleep(5)
+            assertTrue(id in uploading)
+            assertFalse(finished.await(100,java.util.concurrent.TimeUnit.MILLISECONDS))
+            assertTrue(folder.resolve("dirty").exists());assertEquals(receipt,folder.resolve("upload.pending").readText())
+        }
+        assertTrue(finished.await(5,java.util.concurrent.TimeUnit.SECONDS));assertNull(failure.get())
+        assertFalse(id in uploading);assertTrue(folder.resolve("dirty").exists())
+    }
     @Test fun `idle reason is negotiated with old and new central versions while local report remains intact`() {
         for(protocol in listOf(0,1)) {
             val server=HttpServer.create(InetSocketAddress("127.0.0.1",0),0);var received:String?=null
