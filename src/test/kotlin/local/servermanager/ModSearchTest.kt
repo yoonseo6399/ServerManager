@@ -82,12 +82,14 @@ class ModSearchTest {
         assertTrue(ModSources.clientOnly(v,RinProject("p","p","p","unsupported")))
         assertFalse(ModSources.clientOnly(v,RinProject("p","p","p","optional")))
     }
-    @Test fun `unknown kept consumers block provider removal and trials instead of guessing no dependencies`() {
+    @Test fun `unknown mods only warn and never block unrelated mods while known dependencies stay protected`() {
         val g=graph(mod("private").copy(source=null),mod("lib"),mod("addon","lib"))
         assertFailsWith<IllegalArgumentException>{g.disable(setOf("lib.jar"))}
-        assertFailsWith<IllegalArgumentException>{g.disable(setOf("addon.jar"))}
-        assertFailsWith<IllegalArgumentException>{g.plan(setOf("addon.jar"),emptySet())}
+        assertEquals(setOf("addon.jar"),g.disable(setOf("addon.jar")))
         assertEquals(setOf("private.jar"),g.disable(setOf("private.jar")))
+        assertEquals(setOf("private.jar"),g.unknown)
+        assertEquals(setOf("lib.jar"),g.blockedReasons.keys)
+        assertEquals(listOf("addon.jar"),g.plan(setOf("addon.jar"),emptySet()).groups.flatMap {it.files})
     }
     @Test fun `exact dependency versions and version specific incompatibility cannot match another version`() {
         fun off(m:InstalledMod)=m.copy(filename=m.filename+".disabled",enabled=false)

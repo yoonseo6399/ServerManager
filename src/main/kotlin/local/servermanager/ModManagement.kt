@@ -94,7 +94,9 @@ class ModManagement(private val manager:ServerManager,private val catalog:Modrin
     fun preview(id:String,req:ModSelection):ModTogglePreview=locked(id) {
         check(!manager.runtime(id).diagnosticActive) {"진행 중인 검사를 먼저 중단하세요"}
         val snapshot=inventory(id,req.revision);require(req.files.isNotEmpty())
-        val (files,warnings)=if(!req.enabled)ModGraph(snapshot).disable(req.files) to emptyList() else ModGraph.enable(snapshot,req.files)
+        val graph=ModGraph(snapshot)
+        val (files,warnings)=if(!req.enabled)graph.disable(req.files) to (graph.unknown-req.files).sorted().let {u->if(u.isEmpty())emptyList() else listOf("Modrinth에서 찾지 못한 모드 ${u.size}개는 의존성을 확인하지 못해, 이 변경이 그 모드에 영향을 줄 수 있습니다: "+u.take(8).joinToString())}
+            else ModGraph.enable(snapshot,req.files)
         ModTogglePreview(req.revision,req.enabled,req.files.sorted(),files.sorted(),warnings)
     }
     fun toggle(id:String,req:ModSelection)=locked(id) {
@@ -231,7 +233,6 @@ class ModManagement(private val manager:ServerManager,private val catalog:Modrin
     }
     fun resume(id:String)=locked(id) {
         val s=session(id) ?: error("검사가 없습니다");check(s.phase=="PAUSED")
-        require(s.snapshot.mods.filter {it.enabled}.all {it.source!=null}) {"이전 검사에 Modrinth 의존성 정보가 없습니다. 검사를 종료하고 모드 목록을 다시 불러온 뒤 새 검사를 만드세요."}
         job(id){locked(id){
             check(files(id).revision==s.snapshot.revision) {"원본 모드가 변경됐습니다. 기존 검사를 종료하고 새 검사를 만드세요"}
             val home=root(id,s)
