@@ -146,6 +146,32 @@ class DirectRelayTest {
         assertTrue(agent.reason!!.contains("관리 서버"))
     }
 
+    @Test fun `coalesced handshake response and first encrypted frame loses no bytes`() {
+        val server=ServerSocket(0).track();val ticket=DirectRelayCrypto.issue(secret,relayId,agentId,1,60000)
+        val sent=java.util.concurrent.CompletableFuture<Unit>()
+        Thread.ofVirtual().start {
+            try {server.accept().use {peer ->
+                val captured=ByteArrayOutputStream()
+                val bufferedPeer=object:Socket(){override fun getInputStream()=peer.getInputStream();override fun getOutputStream():java.io.OutputStream=captured}
+                val channel=DirectRelayHandshake.server(bufferedPeer,secret){null}.first
+                channel.send(SecureChannel.DATA,7,"first-frame".toByteArray())
+                // Exactly one network write contains both the handshake and first application record.
+                peer.getOutputStream().write(captured.toByteArray());peer.getOutputStream().flush();sent.complete(Unit)
+                Thread.sleep(200)
+            }}catch(e:Exception){sent.completeExceptionally(e)}
+        }
+        Socket("127.0.0.1",server.localPort).use {peer ->
+            peer.soTimeout=2000
+            val channel=DirectRelayHandshake.client(peer,ticket)
+            assertEquals("first-frame",String(channel.receive()!!.payload))
+        }
+        sent.get(3,java.util.concurrent.TimeUnit.SECONDS)
+    }
+    @Test fun `idle read exception closes handed off player and releases stream`() {
+        val game=EchoGame().track();val hub=DirectRelayHub(relayId,secret,playerReadTimeoutMillis=100).track().also {it.listen(0,0,"127.0.0.1");it.applyPolicy(policy())}
+        val agent=agentFor(hub,game);connectedAgent(hub,agent)
+        player(hub).use {p->assertTrue(readAll(p,6).startsWith("echo:"));await("timeout cleans stream"){hub.streamCount()==0};assertEquals(-1,p.getInputStream().read())}
+    }
     @Test fun `tampered ciphertext frames are rejected by the secure channel`() {
         val server=ServerSocket(0).track();val a=Socket("127.0.0.1",server.localPort).track();val b=server.accept().track()
         val k1=DirectRelayCrypto.newSecret();val k2=DirectRelayCrypto.newSecret()

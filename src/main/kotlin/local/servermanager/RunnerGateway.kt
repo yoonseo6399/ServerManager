@@ -109,6 +109,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
     },{runner,frame->udpOutboxes[runner]?.offer(frame)==true})
     private val sockets=ConcurrentHashMap<Int,GameStream>()
     private val listeners=ConcurrentHashMap<String,ServerSocket>()
+    fun controllerRelayStreams()=sockets.isNotEmpty() || tcpRelays.values.any {it.busy()}
     private val streams=AtomicInteger(1)
     private val activeRoutes=ConcurrentHashMap<String,String>()
     private val handshakeSlots=java.util.concurrent.Semaphore(64)

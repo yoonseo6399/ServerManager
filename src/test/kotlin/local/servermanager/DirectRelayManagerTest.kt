@@ -162,13 +162,14 @@ class DirectRelayManagerTest {
 
     @Test fun `route switch is prepared first then committed and the old relay keeps existing streams`() {
         val w=world();enable(w);await("ready",tick=w.h::pump){w.h.manager.isReady(w.relay.id)}
+        val secondAddress=if(System.getProperty("os.name").startsWith("Mac"))java.net.NetworkInterface.getNetworkInterfaces().toList().flatMap {it.inetAddresses.toList()}.firstOrNull {it is java.net.Inet4Address && it.isSiteLocalAddress}?.hostAddress ?: "127.0.0.2" else "127.0.0.2"
         val second=RunnerNode(id(),Files.createTempDirectory("relay2"));w.h.devices[second.id]=device(second.id)
-        second.role=DirectRelayRunnerRole(second.dir,{m->w.h.toManager(second.id,m);true},{null},{false},second.consent,longArrayOf(50,100),"127.0.0.2")
+        second.role=DirectRelayRunnerRole(second.dir,{m->w.h.toManager(second.id,m);true},{null},{false},second.consent,longArrayOf(50,100),secondAddress)
         w.h.nodes[second.id]=second;closeables.add(AutoCloseable {second.role.close()});second.role.onSession()
-        assertFailsWith<IllegalArgumentException> {w.h.manager.prepare(second.id,RelayHostSpec("127.0.0.2","relay2.example.com"))} // no local consent yet
+        assertFailsWith<IllegalArgumentException> {w.h.manager.prepare(second.id,RelayHostSpec(secondAddress,"relay2.example.com"))} // no local consent yet
         second.consent.set(true,"test");second.role.tick()
         val live=player(w.h.gamePort);assertTrue(roundTrip(live,"before-switch"))
-        w.h.manager.prepare(second.id,RelayHostSpec("127.0.0.2","relay2.example.com"))
+        w.h.manager.prepare(second.id,RelayHostSpec(secondAddress,"relay2.example.com"))
         assertFailsWith<IllegalStateException> {w.h.manager.commit()} // hub/agent not up yet
         await("candidate ready",tick=w.h::pump){w.h.manager.isReady(second.id)}
         assertEquals("CANDIDATE_READY",w.h.manager.view().phase)
@@ -177,12 +178,23 @@ class DirectRelayManagerTest {
         assertEquals(second.id,w.h.store.config().relayRunnerId);assertTrue(w.h.store.config().retiring.containsKey(w.relay.id))
         assertTrue(roundTrip(live,"after-commit"),"existing connection survives until it ends naturally")
         // New connections to the new relay reach the game through the new path.
-        val viaNew=Socket();viaNew.connect(InetSocketAddress("127.0.0.2",w.h.gamePort),3000);viaNew.soTimeout=5000
+        val viaNew=Socket();viaNew.connect(InetSocketAddress(secondAddress,w.h.gamePort),3000);viaNew.soTimeout=5000
         viaNew.getOutputStream().write(handshake(host));viaNew.getOutputStream().flush();viaNew.getInputStream().readNBytes(handshake(host).size)
         assertTrue(roundTrip(viaNew,"new-path"));viaNew.close();live.close()
         assertTrue(w.echo.seen.any {it.contains("new-path")})
     }
 
+    @Test fun `temporary controller disconnect keeps tunnel authorization while real grant removal revokes it`() {
+        val w=world();enable(w);await("ready",tick=w.h::pump){w.h.manager.isReady(w.relay.id)}
+        player(w.h.gamePort).use {live ->
+            assertTrue(roundTrip(live,"before"))
+            w.h.offline.add(w.game.id);w.h.manager.onDisconnect(w.game.id);w.h.pump()
+            assertTrue(roundTrip(live,"offline"))
+            w.h.devices[w.game.id]=device(w.game.id) // persisted authorization is actually revoked
+            w.h.pump()
+            assertTrue(runCatching {live.getOutputStream().write(1);live.getInputStream().read()}.getOrDefault(-1)<0)
+        }
+    }
     @Test fun `cut blocks immediately and reports the impact`() {
         val w=world();enable(w);await("ready",tick=w.h::pump){w.h.manager.isReady(w.relay.id)}
         val live=player(w.h.gamePort);assertTrue(roundTrip(live,"hi"))
@@ -211,7 +223,7 @@ class DirectRelayManagerTest {
     }
 
     @Test fun `port conflict on the secure port is diagnosed separately`() {
-        val w=world();val blocker=ServerSocket(w.secure,1,java.net.InetAddress.getByName("0.0.0.0")).track()
+        val w=world();val blocker=ServerSocket().track().also {it.reuseAddress=false;it.bind(InetSocketAddress("127.0.0.1",w.secure),1)}
         enable(w);w.h.pump();Thread.sleep(200);w.h.pump()
         val view=w.h.manager.view().relays.single {it.runnerId==w.relay.id}
         assertEquals("CONFLICT",view.diagnostics.getValue("portConflict").status)

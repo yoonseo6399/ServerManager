@@ -187,7 +187,7 @@ class HostLifecycleTest {
         assertTrue(HostLifecycle.preflight(home).ok)
         val newer=Files.createTempDirectory("pf3");val n=GameHostService(newer,"0.9.0",protocol=2,minCompatible=2).also {closeables.add(it)};assertTrue(n.start())
         val idle=HostLifecycle.preflight(newer,protocol=1,minHost=1)
-        assertTrue(idle.ok);assertEquals("HOST_WILL_BE_REPLACED",idle.reason)
+        assertFalse(idle.ok);assertEquals("HOST_PROTOCOL_INCOMPATIBLE",idle.reason)
     }
 
     @Test fun `preflight refuses to come up healthy against an incompatible host that owns a live game`() {

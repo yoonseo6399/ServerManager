@@ -122,7 +122,7 @@ object DirectRelayHandshake {
         return DirectRelayCrypto.hmac(prk,"c2s".toByteArray()) to DirectRelayCrypto.hmac(prk,"s2c".toByteArray())
     }
     fun client(socket:Socket,ticket:RelayTicket):SecureChannel {
-        val out=DataOutputStream(socket.getOutputStream().buffered());val input=DataInputStream(socket.getInputStream().buffered())
+        val out=DataOutputStream(socket.getOutputStream().buffered());val input=DataInputStream(socket.getInputStream())
         val body=ticket.body.toByteArray();val (priv,pub)=DirectRelayCrypto.ephemeral()
         val nonce=ByteArray(16).also(SecureRandom()::nextBytes)
         val hello=java.nio.ByteBuffer.allocate(body.size+48).put(body).put(pub).put(nonce).array()
@@ -138,7 +138,7 @@ object DirectRelayHandshake {
     }
     /** [check] returns a reject reason for an authenticated but unacceptable ticket (expired, stale epoch, replayed, ...). */
     fun server(socket:Socket,relaySecret:ByteArray,check:(RelayTicketBody)->String?):Pair<SecureChannel,RelayTicketBody> {
-        val input=DataInputStream(socket.getInputStream().buffered());val out=DataOutputStream(socket.getOutputStream().buffered())
+        val input=DataInputStream(socket.getInputStream());val out=DataOutputStream(socket.getOutputStream().buffered())
         if(input.readInt()!=MAGIC)throw DirectRelayRejected("BAD_MAGIC")
         val length=input.readUnsignedShort();if(length !in 20..300)throw DirectRelayRejected("AUTH_FAILED")
         val body=ByteArray(length).also(input::readFully);val clientPub=ByteArray(32).also(input::readFully);val clientNonce=ByteArray(16).also(input::readFully)
@@ -165,7 +165,7 @@ data class RelayAgentStatus(val agentId:String,val epoch:Long,val connectedAt:Lo
 data class RelayHubStatus(val gameListening:Boolean,val gamePort:Int?,val secureListening:Boolean,val securePort:Int?,val generation:Long,
     val agents:List<RelayAgentStatus>,val routes:List<RelayRoute>,val streamsByRoute:Map<String,Int>,val rejects:Map<String,Long>,val lastBindError:String?)
 
-class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clock:()->Long={System.currentTimeMillis()}):AutoCloseable {
+class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clock:()->Long={System.currentTimeMillis()},private val playerReadTimeoutMillis:Int=60000):AutoCloseable {
     private inner class Tunnel(val agentId:String,val epoch:Long,val channel:SecureChannel,val connectedAt:Long) {
         val players=ConcurrentHashMap<Int,Socket>();val opens=ConcurrentHashMap<Int,CountDownLatch>();val failed=ConcurrentHashMap<Int,String>()
         val readyReplies=ConcurrentHashMap<String,java.util.concurrent.CompletableFuture<Boolean>>()
@@ -190,7 +190,7 @@ class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clo
     @Volatile private var bindError:String?=null
     private fun reject(reason:String){rejects.computeIfAbsent(reason){AtomicLong()}.incrementAndGet()}
     private fun bind(port:Int,address:String):ServerSocket? {
-        val server=ServerSocket();server.reuseAddress=false
+        val server=ServerSocket();server.reuseAddress=true
         return try {server.bind(InetSocketAddress(address,port),50);server}
         catch(e:Exception){server.close();bindError="포트 $port 를 열 수 없습니다: ${e.message}";reject("PORT_BIND_FAILED");null}
     }
@@ -292,6 +292,7 @@ class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clo
                 var released=false
                 fun release(){if(!released){released=true;handshakeSlots.release()}}
                 var handed=false
+                var cleanup:(()->Unit)?=null
                 try {
                     player.soTimeout=5000
                     val handshake=MinecraftHandshake.read(player.getInputStream())
@@ -301,20 +302,21 @@ class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clo
                     if(tunnel.players.size>=200){reject("TOO_MANY_STREAMS");return@submit}
                     val stream=tunnel.ids.getAndIncrement();val latch=CountDownLatch(1)
                     tunnel.opens[stream]=latch;tunnel.players[stream]=player
+                    cleanup={tunnel.end(stream,true)}
                     try {
                         tunnel.channel.send(SecureChannel.OPEN,stream,route.instanceId.toByteArray())
                         if(!latch.await(3,TimeUnit.SECONDS)){reject("OPEN_TIMEOUT");tunnel.end(stream,true);return@submit}
                         tunnel.failed.remove(stream)?.let {reject("AGENT_$it");tunnel.players.remove(stream);return@submit}
                     } finally {tunnel.opens.remove(stream)}
                     handed=true;release()
-                    player.soTimeout=60000
+                    player.soTimeout=playerReadTimeoutMillis
                     tunnel.channel.send(SecureChannel.DATA,stream,handshake.bytes)
                     val input=player.getInputStream();val buffer=ByteArray(32*1024)
                     while(true) {val count=input.read(buffer);if(count<0)break;tunnel.channel.send(SecureChannel.DATA,stream,buffer,0,count)}
                     tunnel.end(stream,true)
                 } catch(e:DirectRelayRejected){reject(e.reason)}
                 catch(e:Exception){if(!handed)reject("HANDSHAKE_REJECTED")}
-                finally {release();if(!handed)runCatching {player.close()}}
+                finally {release();runCatching {cleanup?.invoke()};runCatching {player.close()}}
             }
         }
     }

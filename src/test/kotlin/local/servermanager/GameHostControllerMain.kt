@@ -24,3 +24,11 @@ object GameHostProcessMain {
     }
 }
 object GameHostControllerMainSleep {@JvmStatic fun main(args:Array<String>){Thread.sleep(600_000)}}
+
+object DetachedHostLauncherFixture {
+    @JvmStatic fun main(args:Array<String>) {
+        val java=Path.of(System.getProperty("java.home"),"bin","java").toString()
+        check(GameHostMain.spawnDetached(Path.of(args[0]),java,args[1],false))
+        println("HOST_STARTED");System.out.flush()
+    }
+}

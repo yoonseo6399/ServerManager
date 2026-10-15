@@ -121,13 +121,13 @@ class DirectRelayManager(val store:DirectRelayStore,private val world:RelayWorld
     }
     private fun relayUsable(id:String)=world.runner(id)!=null && world.connected(id) && consents[id]?.allowed==true
     private fun routesFor(relay:String):List<Triple<String,String,List<String>>> =
-        if(cuts.containsKey(relay))emptyList() else world.routes().filter {(instance,runner,_)->world.runner(runner)?.allowedInstanceIds?.contains(instance)==true && world.connected(runner)}
+        if(cuts.containsKey(relay))emptyList() else world.routes().filter {(instance,runner,_)->world.runner(runner)?.allowedInstanceIds?.contains(instance)==true}
     private fun secret(relay:String)=secrets.computeIfAbsent(relay){DirectRelayCrypto.newSecret()}
 
     /** Pushes desired relay/agent state to the runners. Safe to call repeatedly; unchanged payloads are not resent. */
     @Synchronized fun reconcile() {
         val c=config();val active=relays()
-        val routes=world.routes().filter {(instance,runner,_)->world.runner(runner)?.allowedInstanceIds?.contains(instance)==true && world.connected(runner)}
+        val routes=world.routes().filter {(instance,runner,_)->world.runner(runner)?.allowedInstanceIds?.contains(instance)==true}
         val agentIds=routes.map {it.second}.toSet()
         // Relay hosts
         (active.keys+reports.keys.filter {reports[it]?.hostActive==true}).forEach {relay->

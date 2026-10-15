@@ -70,6 +70,7 @@ class HostedRelayTest {
         // Every control layer goes away (both updates at once). The hosts keep the game, the hub and the tunnel.
         clients.values.forEach {it.close()};clients.clear()
         Thread.sleep(1500)
+        assertEquals("RELAY_SERVICE_ACTIVE",HostLifecycle.replaceIfIdle(relayHome),"pure relay host remains alive even with no local game")
         assertTrue(roundTrip(live,"during-update"),"existing player connection survives with no controller attached")
         val during=Socket("127.0.0.1",gamePort).apply {soTimeout=8000};during.getOutputStream().write(handshake(host));during.getOutputStream().flush()
         assertTrue(runCatching {during.getInputStream().readNBytes(handshake(host).size).size}.getOrDefault(0)>0,"approved tunnel still serves new players while the manager side is away")

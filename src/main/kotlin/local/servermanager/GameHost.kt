@@ -204,14 +204,15 @@ class GameHostService(private val home:Path,private val version:String,private v
     fun anyAlive()=games.values.any {it.alive()}
     fun controllerAttached()=controller?.socket?.isClosed==false
 
-    private fun handle(c:Controller,m:JsonNode) {
+    @Volatile private var replacementPrepared=false
+    @Synchronized private fun handle(c:Controller,m:JsonNode) {
         val req=m.path("req").asText("")
         fun ok(extra:Map<String,Any?> =emptyMap()){c.send(mapOf("t" to "ok","req" to req)+extra)}
         fun fail(reason:String,extra:Map<String,Any?> =emptyMap()){c.send(mapOf("t" to "error","req" to req,"reason" to reason)+extra)}
         when(m.path("t").asText()) {
             "pong" -> {}
             "status" -> ok(mapOf("instances" to statuses()))
-            "start" -> start(c,m,::ok,::fail)
+            "start" -> if(replacementPrepared)fail("HOST_REPLACEMENT_PENDING") else start(c,m,::ok,::fail)
             "attach" -> {
                 val id=m.path("id").asText();val after=m.path("afterSeq").asLong(0)
                 val game=games[id] ?: return fail("NO_SUCH_INSTANCE")
@@ -249,11 +250,17 @@ class GameHostService(private val home:Path,private val version:String,private v
                 if(game.pid!=m.path("pid").asLong() || game.alive() || game.exitCode==null && game.managed)return fail("NOT_EXITED")
                 game.exitAcked=true;games.remove(game.id,game);persist();ok()
             }
+            "prepare-replacement" -> {
+                if(anyAlive())return fail("GAME_RUNNING")
+                if(relayRole!=null)return fail("RELAY_SERVICE_ACTIVE")
+                replacementPrepared=true;ok(mapOf("prepared" to true))
+            }
             "relay" -> {
+                if(replacementPrepared)return fail("HOST_REPLACEMENT_PENDING")
                 val message=runCatching {mapper.readValue(m.path("body").asText(),RunnerMessage::class.java)}.getOrNull() ?: return
                 relay().onMessage(message)
             }
-            "relay-session" -> relay().onSession()
+            "relay-session" -> if(replacementPrepared)fail("HOST_REPLACEMENT_PENDING") else relay().onSession()
             "relay-busy" -> ok(mapOf("busy" to (relayRole?.busy()==true)))
             else -> fail("UNKNOWN_COMMAND")
         }
@@ -457,7 +464,8 @@ class GameHostClient private constructor(private val socket:Socket,private val r
     /** Direct-relay control traffic (manager messages for the relay role that lives in the host). */
     fun relayForward(json:String)=send(mapOf("t" to "relay","body" to json))
     fun relaySession()=send(mapOf("t" to "relay-session"))
-    fun relayBusy():Boolean=runCatching {request(mapOf("t" to "relay-busy")).path("busy").asBoolean()}.getOrDefault(false)
+    fun relayBusy():Boolean=runCatching {request(mapOf("t" to "relay-busy")).path("busy").asBoolean(true)}.getOrDefault(true)
+    fun prepareReplacement():Boolean=request(mapOf("t" to "prepare-replacement")).path("prepared").asBoolean(false)
     /** Detach without touching any game. The host immediately accepts the next controller. */
     override fun close(){runCatching {socket.close()}}
 }

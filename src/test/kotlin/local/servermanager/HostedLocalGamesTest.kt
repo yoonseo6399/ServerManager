@@ -32,6 +32,14 @@ class HostedLocalGamesTest {
         await("console reaches the manager"){events(first,id).any {it.startsWith("Done (")}}
         await("running"){first.view(id)["state"]=="RUNNING"}
         assertEquals(pid,first.view(id)["pid"])
+        val lifecycle=DesktopLifecycle(first,org.mockito.Mockito.mock(org.springframework.context.ConfigurableApplicationContext::class.java))
+        assertTrue(lifecycle.updateDecision().apply,"hosted game must not block manager app replacement")
+        assertEquals("HOST_PROTOCOL_INCOMPATIBLE",lifecycle.updateDecision(2,3).waitReason)
+        first.runtime(id).fileTransfer=FolderImportProgress("COMPLETE")
+        assertTrue(lifecycle.updateDecision().apply,"completed progress is history, not an active transfer")
+        first.runtime(id).fileTransfer=FolderImportProgress("UPLOADING")
+        assertEquals("TRANSFER_ACTIVE",lifecycle.updateDecision().waitReason)
+        first.runtime(id).fileTransfer=null
         first.command(id,"list");await("echo from the hosted game"){events(first,id).contains("echo:list")}
         // Manager shuts down (update/restart). The game must not be stopped.
         first.shutdown();(first.localLauncher as AutoCloseable).close();first.localLauncher=null

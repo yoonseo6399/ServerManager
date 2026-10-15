@@ -33,6 +33,7 @@ dependencies {
     testImplementation("org.springframework.security:spring-security-test")
 }
 tasks.test {
+    dependsOn(tasks.bootJar) // Packaged-host/runner fixtures must use this source, including on a clean CI checkout.
     useJUnitPlatform()
     // Tests must never inherit the live profile, even when launched from its working directory.
     environment("SERVER_MANAGER_DATA", layout.buildDirectory.dir("test-profile").get().asFile.absolutePath)

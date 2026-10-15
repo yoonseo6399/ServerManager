@@ -79,7 +79,9 @@
 - `waitReason`: LEGACY_GAME_RUNNING(최초 분리는 다음 정상 종료 뒤), GAME_RUNNING(상주 서비스 교체는 유휴 때), HOST_PROTOCOL_INCOMPATIBLE, HOST_UNREACHABLE, RELAY_STREAMS_ACTIVE, SERVER_PREPARING, TRANSFER_ACTIVE, TRANSFER_NOT_RESUMABLE, DIRTY_HANDOFF_PENDING, APPLY_WHEN_SAFE, HOST_REPLACED_WHEN_IDLE.
 - `hostMode.mode`: SERVICE(게임을 상주 서비스가 소유) / PENDING_NORMAL_STOP(이전 방식 게임이 정상 종료될 때까지 보류, `legacyGames` 목록) / LEGACY(개발 실행·운영자 해제·시작 실패, `reason` 표시).
 - 로그는 실행기 디스크에 남아 재접속 후에도 읽을 수 있고 비밀 값은 `[redacted]`로 치환된다. 구버전 실행기는 `available:false`.
-- `MANAGER_APP` 행은 자리만 제공한다(관리 앱 자체 업데이트의 상태 연결은 후속 작업).
+- 관리 앱 자체 상태는 `GET /api/admin/updates`의 `detail: UpdateDetail`로 제공한다. `MANAGER_APP`의 실제 단계·대기 사유·내구성 로그가 포함된다. 실행기별 상태의 MANAGER_APP 기본 행은 해당 실행기의 관리 앱 상태를 의미하지 않는다.
+- 관리 앱 교체는 입증된 상주 게임/직접 중계 연결만 유지한다. 이전 방식 게임·중앙 TCP stream·진단·설치·전송·미완료 handoff는 대기한다. 저장 위치 변경에는 완전 유휴 조건을 적용한다.
+- 호스트 자체 교체는 인증된 유휴 준비 확인을 필요로 한다. 이미 relay role이 활성화된 호스트의 교체는 연결 수0이어도 보수적으로 보류하며, 호환 불가 기존 호스트의 유휴 상태를 확인하지 못하면 새 제어 계층 시작을 실패시켜 롤백한다.
 
 ## 3. 상주 서비스 프로토콜 (참고)
 - 진입점 `--game-host --host-home=<경로>`, 루프백 TCP, 줄 단위 JSON, 서버 챌린지 → HMAC 증명(`host/endpoint.json`은 0600). 프로토콜 `GameHostProtocol.VERSION=1`, `MIN_COMPATIBLE=1`.

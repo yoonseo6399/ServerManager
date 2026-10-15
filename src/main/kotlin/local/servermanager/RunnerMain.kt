@@ -78,15 +78,19 @@ object RunnerMain {
                     UpdateCoordinator(home).update(UpdateComponents.RUNNER_CONTROL,RunnerAgent.version(),null,"FAILED",error=preflight.detail ?: preflight.reason)
                     System.err.println("상주 게임 서비스 연결 확인 실패: ${preflight.reason}");kotlin.system.exitProcess(3)
                 }
-                if(preflight.reason=="HOST_WILL_BE_REPLACED")HostLifecycle.replaceIfIdle(home)
-                System.getenv("SERVER_MANAGER_RUNNER_READY_FILE")?.let { Path.of(it).writeText("ready") }
+                if(preflight.reason=="HOST_WILL_BE_REPLACED"){val refusal=HostLifecycle.replaceIfIdle(home);if(refusal!=null){System.err.println("상주 서비스 교체 보류: $refusal");kotlin.system.exitProcess(3)}}
+                fun ready(){System.getenv("SERVER_MANAGER_RUNNER_READY_FILE")?.let { Path.of(it).writeText("ready") }}
                 var agent:RunnerAgent?=null
                 var currentId:String?=null
                 Runtime.getRuntime().addShutdownHook(Thread { agent?.shutdownGracefully() })
                 while(true) {
                     val identity=if(identityFile.exists()) runCatching { mapper.readValue<RunnerIdentity>(identityFile.readText()) }.getOrNull() else null
-                    if(identity==null) { Thread.sleep(10000);continue }
-                    if(currentId!=identity.id) { agent=RunnerAgent(home,identity);currentId=identity.id }
+                    if(identity==null) { ready();Thread.sleep(10000);continue }
+                    if(currentId!=identity.id) {
+                        val next=RunnerAgent(home,identity)
+                        try {next.initializeController(::ready)} catch(e:Exception) {System.err.println("상주 서비스 초기화 실패: ${e.javaClass.simpleName}");kotlin.system.exitProcess(3)}
+                        agent=next;currentId=identity.id
+                    }
                     try { agent!!.connectLoop() }
                     catch(e:Exception) { System.err.println("중앙 서버 연결 대기: ${e.javaClass.simpleName}");Thread.sleep(5000) }
                     if(agent!!.restartForUpdate()) kotlin.system.exitProcess(75)
@@ -235,7 +239,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         val legacy=if(root.exists())root.listDirectoryEntries().filter {it.isDirectory() && it.name !in owned && orphanAlive(it.name)}.map {it.name} else emptyList()
         hostModeState=hostMode.evaluate(legacy)
         if(hostModeState.mode!="SERVICE"){candidate.close();return}
-        if(candidate.connection()==null){hostModeState=hostMode.fallback("상주 서비스를 시작하지 못해 이전 방식으로 실행합니다: ${candidate.lastError}");return}
+        if(candidate.connection()==null){check(GameHostClient.readEndpoint(home)?.let {ProcessHandle.of(it.pid).map {p->p.isAlive}.orElse(false)}!=true) {"기존 상주 서비스와 통신하지 못해 제어 계층 시작을 중단합니다."};hostModeState=hostMode.fallback("상주 서비스를 시작하지 못해 이전 방식으로 실행합니다: ${candidate.lastError}");return}
         hosted=candidate
         candidate.onRelay {body->runCatching {send(mapper.readValue<RunnerMessage>(body))}}
         owned.forEach {id->
@@ -253,16 +257,14 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             watch(id,config,process,CrashReports.snapshot(serverDir(id)),fresh=false)
         }
     }
-    private fun currentJarPath():String? {
-        val location=runCatching {RunnerAgent::class.java.protectionDomain.codeSource.location.toURI()}.getOrNull() ?: return null
-        return runCatching {Path.of(location)}.getOrNull()?.takeIf {it.isRegularFile() && it.toString().endsWith(".jar")}?.toString()
-    }
+    private fun currentJarPath()=GameHostMain.packagedJar(RunnerAgent::class.java)
     /** Hosted games are not killed by a control-layer shutdown; only the console position is remembered. */
     private fun detachHosted() {
         processes.forEach {(id,p)->(p as? HostedProcess)?.savePosition(instanceRoot(id).resolve("console.seq"))}
         hosted?.close()
     }
     fun hostStatus()=hosted?.hostStatus() ?: emptyList()
+    fun initializeController(ready:()->Unit={}) {initHost();ready()}
     fun connectLoop() {
         initHost()
         closed=CountDownLatch(1)
@@ -363,7 +365,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     fun restartForUpdate():Boolean=synchronized(lifecycle) {
         val service=updater ?: return false
         if(service.busy() || !service.pending())return false
-        val target=service.status().latest
+        val target=service.status().latest ?: pendingProps()?.getProperty("version")
         if(tcpRelay?.busy()==true || directRelay.busy())return waitingFor(service,"RELAY_STREAMS_ACTIVE").let {false}
         val root=home.resolve("instances")
         val dirs=if(root.exists())root.listDirectoryEntries().filter {it.isDirectory()} else emptyList()
