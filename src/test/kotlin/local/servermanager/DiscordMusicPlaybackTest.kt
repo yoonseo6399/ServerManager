@@ -370,4 +370,23 @@ class DiscordMusicPlaybackTest {
         assertNull(playback.snapshot(guild.id).current)
         playback.close()
     }
+
+    @Test fun `repeat replays the finished track and stops after being turned off`() {
+        val rig=Rig();val playback=DiscordMusicPlayback(rig.manager,DiscordMusicLibraryStore());val (guild,channel)=rig.guild("12345678901234567")
+        val one=rig.track("One")
+        rig.load(playback,guild,channel,"one") {it.trackLoaded(one)}
+        rig.load(playback,guild,channel,"two") {it.trackLoaded(rig.track("Two"))}
+        playback.autoplay(guild.id,false)
+        assertEquals("먼저 음성 채널에 연결하세요.",playback.repeat("missing",null))
+        assertContains(playback.repeat(guild.id,null),"켰습니다")
+        assertTrue(playback.snapshot(guild.id).repeat)
+        rig.listeners.single().onTrackEnd(rig.players.single(),one,AudioTrackEndReason.FINISHED)
+        assertEquals("One",playback.snapshot(guild.id).current?.title)
+        assertEquals(listOf("Two"),playback.snapshot(guild.id).queue.map {it.title})
+        playback.skip(guild.id)
+        assertEquals("Two",playback.snapshot(guild.id).current?.title)
+        assertContains(playback.repeat(guild.id,false),"껐습니다")
+        assertFalse(playback.snapshot(guild.id).repeat)
+        playback.close()
+    }
 }

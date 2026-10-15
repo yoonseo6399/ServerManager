@@ -75,7 +75,7 @@ class DiscordMusicPanelTest {
 
     @Test fun `missing IDs omit removal menu and short page limits selection count`() {
         val noIds=MusicSnapshot(null,List(30) { MusicTrackView("Track $it",null,null,0) },false,null,null)
-        assertEquals(2,DiscordMusicPanel.componentRows(noIds,0).size)
+        assertEquals(3,DiscordMusicPanel.componentRows(noIds,0).size)
         val two=MusicSnapshot(null,List(26) { MusicTrackView("Track $it",null,null,0,id="id-$it") },false,null,null)
         val select=DiscordMusicPanel.componentRows(two,1)[1].components.single().asStringSelectMenu()
         assertEquals(1,select.options.size)

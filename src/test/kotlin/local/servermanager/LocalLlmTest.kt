@@ -36,4 +36,64 @@ class LocalLlmTest {
         for(url in listOf("http://192.168.1.2:11434","https://localhost:11434","http://user:password@localhost:11434","http://localhost:11434/other"))assertFails {LocalLlm(URI(url))}
         assertFails {LocalLlm().chat("70b","question")}
     }
+
+    private class FakeOllama(var loaded:MutableList<String>,val installed:List<String>,val stuck:Boolean=false) {
+        val calls=java.util.concurrent.CopyOnWriteArrayList<String>()
+        val server=HttpServer.create(InetSocketAddress("127.0.0.1",0),0)
+        private fun reply(ex:com.sun.net.httpserver.HttpExchange,body:String) {val bytes=body.toByteArray();ex.sendResponseHeaders(200,bytes.size.toLong());ex.responseBody.use {it.write(bytes)}}
+        init {
+            server.createContext("/api/version") {reply(it,"""{"version":"0.12.0"}""")}
+            server.createContext("/api/tags") {reply(it,"""{"models":[${installed.joinToString(",") {n->"""{"name":"$n","size":9000000000}"""}}]}""")}
+            server.createContext("/api/ps") {reply(it,"""{"models":[${loaded.joinToString(",") {n->"""{"name":"$n"}"""}}]}""")}
+            server.createContext("/api/generate") {ex->
+                val req=jacksonObjectMapper().readTree(ex.requestBody.readAllBytes());calls+="unload:"+req.path("model").asText()
+                assertEquals(0,req.path("keep_alive").asInt())
+                if(!stuck)loaded.remove(req.path("model").asText())
+                reply(ex,"""{"done":true}""")
+            }
+            server.createContext("/api/chat") {ex->
+                val req=jacksonObjectMapper().readTree(ex.requestBody.readAllBytes());calls+="chat:"+req.path("model").asText()+" loaded="+loaded.joinToString("+")
+                reply(ex,"""{"done":true,"message":{"content":"ok"},"eval_count":1}""")
+            }
+            server.start()
+        }
+        fun llm()=LocalLlm(URI("http://127.0.0.1:${server.address.port}"))
+        fun stop()=server.stop(0)
+    }
+
+    @Test fun `probe reports installed tags and loaded models and tolerates a missing Ollama`() {
+        val ollama=FakeOllama(mutableListOf("qwen3:30b"),listOf("qwen3:14b","llama3:8b"))
+        try {
+            val status=ollama.llm().probe()
+            assertTrue(status.reachable);assertEquals("0.12.0",status.version)
+            assertEquals(mapOf("14b" to true,"30b" to false),status.installed)
+            assertEquals(listOf("qwen3:30b"),status.loaded);assertContains(status.message,"30B")
+        } finally {ollama.stop()}
+        val down=LocalLlm(URI("http://127.0.0.1:1")).probe()
+        assertFalse(down.reachable);assertEquals(mapOf("14b" to false,"30b" to false),down.installed)
+    }
+
+    @Test fun `switching models unloads the other Qwen model first but leaves unrelated models alone`() {
+        val ollama=FakeOllama(mutableListOf("qwen3:30b","llama3:8b"),listOf("qwen3:14b","qwen3:30b"))
+        try {
+            assertEquals("ok",ollama.llm().chat("14b","질문").text)
+            assertEquals(listOf("unload:qwen3:30b","chat:qwen3:14b loaded=llama3:8b"),ollama.calls.toList())
+        } finally {ollama.stop()}
+    }
+
+    @Test fun `unloading fails closed when the old model stays resident`() {
+        val ollama=FakeOllama(mutableListOf("qwen3:30b"),listOf("qwen3:14b","qwen3:30b"),stuck=true)
+        try {
+            assertFails {ollama.llm().chat("14b","질문")}
+            assertTrue(ollama.calls.none {it.startsWith("chat:")})
+        } finally {ollama.stop()}
+    }
+
+    @Test fun `unloadQwen frees every Qwen model and reports what it freed`() {
+        val ollama=FakeOllama(mutableListOf("qwen3:14b","other:1"),listOf("qwen3:14b"))
+        try {
+            assertEquals(listOf("qwen3:14b"),ollama.llm().unloadQwen())
+            assertEquals(listOf("other:1"),ollama.loaded)
+        } finally {ollama.stop()}
+    }
 }
