@@ -9,3 +9,9 @@
 - RunnerUpdateStatus: 실제 update-status 컴포넌트/대기사유/에러/host mode/지속 로그, after cursor 재조회; 500건 제한. 오프라인/구형 available:false 구분. MANAGER_APP placeholder는 성공 상태처럼 표시하지 않음.
 - 검증: TypeScript tsc -b + Vite build 통과; Playwright settings config 6개 통과 (기존 4 + 준비/전환/차단확인/미허용/미검증/409 충돌 + 오프라인/대기사유/로그 cursor 이어읽기).
 - 실제 다중 컴퓨터 중계·공유기·Google OAuth·Windows 실행은 미검증. 운영 앱/게임 변경 없음. AssistantPanel 연결은 해당 담당자 완료 이후 통합 필요.
+
+## Review follow-up
+- Explicit dirty draft: clean polling adopts full config and revision, edits preserve original snapshot/revision, save/reset and completed mutations refresh baseline. Buttons/inputs block overlapping mutations. Added OFF→address save→prepare enabled=true clean→commit→next save correct revision regression.
+- External-check uses typed status/detail and human labels instead of raw JSON; runner ID changes clear prior status/logs.
+- Manager updates optional detail now displays actual MANAGER_APP phases/wait reason/error/log from runtime API; old responses remain supported.
+- Final scoped validation: 7 menu/direct/runner/log cases passed; added manager detail case passed separately. TypeScript/Vite passed after final component changes. No production changes.
