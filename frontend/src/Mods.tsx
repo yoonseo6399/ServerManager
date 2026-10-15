@@ -1,6 +1,6 @@
 import {useBackClose} from './nav';
 import {useEffect,useRef,useState} from 'react';
-import {Check,ChevronLeft,ChevronRight,FlaskConical,Pause,Play,Power,PowerOff,RefreshCw,Search,ShieldCheck,Square,X} from 'lucide-react';
+import {Check,ChevronLeft,ChevronRight,FlaskConical,Pause,Play,Power,PowerOff,Search,ShieldCheck,Square,X} from 'lucide-react';
 import {api} from './http';
 import './mods.css';
 
@@ -20,14 +20,16 @@ export function ModsPanel({id,loader,state,canManage,onChanged,onConsole}:{id:st
  const [historyOpen,setHistoryOpen]=useState(false),[historyPage,setHistoryPage]=useState(0);
  const inventoryRevision=useRef<string|null>(null);
  const [preview,setPreview]=useState<Preview|null>(null),[note,setNote]=useState(''),[logTrial,setLogTrial]=useState<number|null>(null);
- const alive=useRef(true);const endpoint=`/instances/${id}/mods`;
+ const alive=useRef(true),autoListed=useRef(false),canManageRef=useRef(canManage);canManageRef.current=canManage;const endpoint=`/instances/${id}/mods`;
  useBackClose(!!preview,()=>setPreview(null),'mod-preview');useBackClose(logTrial!==null,()=>setLogTrial(null),'mod-trial-logs');
- const load=async()=>{let result=await api<Page>(endpoint);if(result.inventoryRevision!==inventoryRevision.current){result=await api<Page>(endpoint+'?inventory=true');inventoryRevision.current=result.inventoryRevision;}if(alive.current)setData(old=>({...result,inventory:result.inventory||old?.inventory||null}));};
- useEffect(()=>{alive.current=true;load().catch(e=>setError(e.message));let timer:ReturnType<typeof setTimeout>;let stopped=false;const poll=async()=>{try{if(!document.hidden)await load();}catch{}finally{if(!stopped)timer=setTimeout(poll,1500);}};timer=setTimeout(poll,1500);return()=>{alive.current=false;stopped=true;clearTimeout(timer);};},[id]);
+ const load=async()=>{let result=await api<Page>(endpoint);if(result.inventoryRevision!==inventoryRevision.current){result=await api<Page>(endpoint+'?inventory=true');inventoryRevision.current=result.inventoryRevision;}if(alive.current)setData(old=>({...result,inventory:result.inventory||old?.inventory||null}));return result;};
+ useEffect(()=>{alive.current=true;autoListed.current=false;load().then(r=>{if(alive.current&&canManageRef.current&&!r.inventoryRevision&&!(r.job&&r.job.phase==='WORKING')){autoListed.current=true;return api(endpoint+'/refresh','POST').then(()=>load());}}).catch(e=>setError(e.message));let timer:ReturnType<typeof setTimeout>;let stopped=false;const poll=async()=>{try{if(!document.hidden)await load();}catch{}finally{if(!stopped)timer=setTimeout(poll,1500);}};timer=setTimeout(poll,1500);return()=>{alive.current=false;stopped=true;clearTimeout(timer);};},[id]);
  const action=async(path:string,body?:unknown)=>{if(sending)return;setSending(true);setError('');try{await api(endpoint+path,'POST',body);await load();await onChanged();}catch(e){setError((e as Error).message);}finally{if(alive.current)setSending(false);}};
  const inv=data?.inventory,session=data?.diagnostic,current=session?.trials.at(-1);
  const working=sending||!!data?.job&&!['COMPLETE','FAILED'].includes(data.job.phase);
  const running=busyStates.includes(state),stopped=!running;
+ const wasRunning=useRef(running);
+ useEffect(()=>{if(wasRunning.current&&!running&&canManage&&inv&&!working)api(endpoint+'/refresh','POST').then(()=>load()).catch(e=>setError(e.message));wasRunning.current=running;},[running]);
  const locked=working||running||!canManage||!!data?.active;
  const dependencies=new Set(inv?.dependencyFiles||[]);
  const mods=inv?.mods||[],missing=inv?.missing||{};
@@ -44,7 +46,8 @@ export function ModsPanel({id,loader,state,canManage,onChanged,onConsole}:{id:st
  const verdict=(value:string,trial=current)=>{if(trial)action('/diagnostic/verdict',{trial:trial.number,verdict:value,note});};
  if(!['Fabric','Forge','NeoForge'].includes(loader))return <section className="settings-panel"><h2>모드 관리</h2><p>Fabric·Forge·NeoForge 서버에서 사용할 수 있습니다.</p></section>;
  return <section className="mods-panel">
-  <div className="mods-heading"><div><h2>모드 관리와 문제 모드 찾기</h2><p>Modrinth에서 확인한 의존성으로 모드를 켜고 끄고, 의심 모드를 골라 문제 원인을 좁혀보세요.</p></div><button disabled={working||running||!canManage} onClick={()=>action('/refresh')}><RefreshCw size={16}/> 모드 목록 불러오기</button></div>
+  <div className="mods-heading"><div><h2>모드 관리와 문제 모드 찾기</h2><p>Modrinth에서 확인한 의존성으로 모드를 켜고 끄고, 의심 모드를 골라 문제 원인을 좁혀보세요.</p></div></div>
+  {running&&<p className="notice" role="status">서버가 실행 중이라 모드를 볼 수만 있습니다. 변경하려면 서버를 정지하세요.</p>}
   {error&&<div className="alert error-banner" role="alert">{error}<button onClick={()=>setError('')}>닫기</button></div>}
   {data?.job&&<div className={'mod-job '+data.job.phase.toLowerCase()} role="status"><span className={working?'mod-spinner':''}/><span>{data.job.message}{data.job.files>0&&` · ${data.job.files.toLocaleString()}개 · ${(data.job.bytes/1048576).toFixed(1)} MiB`}</span></div>}
   {inv?.warnings.length? <details className="mod-warnings"><summary>검사 주의사항 {inv.warnings.length}개</summary>{inv.warnings.map((w,i)=><p key={i}>{w}</p>)}</details>:null}
@@ -70,7 +73,7 @@ export function ModsPanel({id,loader,state,canManage,onChanged,onConsole}:{id:st
    {running&&!['RUNNING','STARTING'].includes(state)&&<p role="status" className="muted">정상 종료와 파일 인계가 끝나면 다음 조합을 준비할 수 있습니다.</p>}
    <details className="mod-history" open={historyOpen} onToggle={e=>setHistoryOpen(e.currentTarget.open)}><summary>시도 이력 ({session.trials.length}) · 판정 수정 및 로그</summary>{historyOpen&&session.trials.slice(historyPage*25,(historyPage+1)*25).map(t=><div key={t.number}><span>#{t.number} · {t.round}차 · {verdictLabel[t.verdict||'']||'미판정'} · {t.note}</span><div className="actions"><button onClick={()=>setLogTrial(t.number)}>보관 로그</button>{t.started&&<button disabled={working||running||!canManage||!data?.active||t.round!==session.round} title="현재 탐색 차수의 판정만 수정할 수 있습니다" onClick={()=>{const answer=prompt('수정 판정: PASS / FAIL / INVALID',t.verdict||'INVALID');if(answer&&['PASS','FAIL','INVALID'].includes(answer))verdict(answer,t);}}>판정 수정</button>}</div></div>)}{historyOpen&&session.trials.length>25&&<div className="actions"><button disabled={!historyPage} onClick={()=>setHistoryPage(historyPage-1)}>이전 이력</button><span>{historyPage+1} / {Math.ceil(session.trials.length/25)}</span><button disabled={(historyPage+1)*25>=session.trials.length} onClick={()=>setHistoryPage(historyPage+1)}>다음 이력</button></div>}</details>
   </div>}
-  {!inv?<div className="mods-empty"><Search size={30}/><p>서버를 정지한 뒤 모드 목록을 불러오세요.</p><small>파일 해시로 Modrinth에서 모드 정보와 의존성을 찾아 서버별로 저장합니다.</small></div>:<div className="mods-browser">
+  {!inv?<div className="mods-empty">{working||autoListed.current||!data?<span className="mod-spinner"/>:<Search size={30}/>}<p>{working||autoListed.current||!data?'모드 목록을 불러오는 중입니다…':canManage?'모드 목록을 불러오지 못했습니다. 다시 열어 보세요.':'아직 불러온 모드 목록이 없습니다. 관리자가 한 번 열면 표시됩니다.'}</p><small>파일 해시로 Modrinth에서 모드 정보와 의존성을 찾아 서버별로 저장합니다.</small></div>:<div className="mods-browser">
    <div className="mods-sidebar" role="group" aria-label="모드 필터">
     <h3>보기</h3>
     {filters.map(f=><button key={f.id} className={'mods-filter-item'+(filter===f.id?' active':'')} aria-pressed={filter===f.id} onClick={()=>{setFilter(f.id);setPage(0);}}><span>{f.label}</span><span className="count">{f.count}</span></button>)}

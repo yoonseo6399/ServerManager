@@ -15,7 +15,7 @@ test('actual backend persists Modrinth constraints and toggles only selected con
   sources[createHash('sha512').update(bytes).digest('hex')]={projectId:name,slug:name,title:name,versionId:'v-'+name,versionNumber:'1',environment:'client_and_server',clientOnly:false,dependencies:deps.map(projectId=>({projectId,type:'required',versionId:'v-'+projectId}))};
  }
  await writeFile(root+'/mod-sources.json',JSON.stringify({sources,notFound:{},projects:{}}));
- await page.reload();await page.getByRole('button',{name:'모드 · 문제 찾기',exact:true}).click();await page.getByRole('button',{name:'모드 목록 불러오기',exact:true}).click();
+ await page.reload();await page.getByRole('button',{name:'모드 · 문제 찾기',exact:true}).click();
  await expect(page.getByRole('switch',{name:'main.jar 비활성화',exact:true})).toBeVisible();await expect(page.getByRole('switch',{name:'lib.jar 비활성화',exact:true})).toBeDisabled();
  await expect(page.locator('.mod-card').filter({hasText:'lib.jar'}).first()).toContainText('사용 중: main.jar');
  const before=await api('/instances/'+id+'/mods?inventory=true');
