@@ -66,7 +66,7 @@ object ModInventory {
             if(active.groupBy {it.sha512}.any {it.value.size>1})add("내용이 같은 모드 JAR가 중복됩니다")
             active.mapNotNull {it.source}.groupBy {it.projectId}.filter {it.value.size>1}.values.sortedBy {it.first().title}.forEach {add("같은 모드가 여러 파일로 켜져 있습니다: ${it.first().title}")}
             val unknown=mods.count {it.source==null}
-            if(unknown>0)add("Modrinth에서 찾지 못한 모드 ${unknown}개는 의존성을 확인하지 못합니다. 직접 받은 파일이거나 다른 사이트의 모드일 수 있습니다")
+            if(unknown>0)add("Modrinth에서 찾지 못한 모드 ${unknown}개는 의존성을 확인하지 못하지만 그대로 켜고 끌 수 있습니다. 직접 받은 파일이거나 다른 사이트의 모드일 수 있습니다")
         }
         val graph=ModGraph(snapshot.copy(mods=mods))
         val names=lookup.cache.projects.filterKeys {id->mods.any {m->m.source?.projectId==id || m.source?.dependencies?.any {it.projectId==id}==true}}

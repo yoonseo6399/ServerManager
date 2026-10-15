@@ -3,7 +3,7 @@ package local.servermanager
 /** Exact Modrinth versions are authoritative. An unknown file is never proof of no dependencies. */
 class ModGraph(snapshot:ModInventorySnapshot) {
     val active=snapshot.mods.filter {it.enabled}.associateBy {it.filename}
-    private val unknown=active.values.filter {it.source==null}.map {it.filename}.toSet()
+    val unknown=active.values.filter {it.source==null}.map {it.filename}.toSet()
     private val needs=active.mapValues {(_,m)->m.source?.dependencies.orEmpty().filter {it.type=="required"}.associateWith {d->
         active.values.filter {matches(it,d)}.map {it.filename}.toSet()
     }}
@@ -14,7 +14,6 @@ class ModGraph(snapshot:ModInventorySnapshot) {
     val blockedReasons:Map<String,String> get()=active.keys.mapNotNull {f->
         val reason=when {
             f in dependencyFiles->"필수 의존성입니다. 사용 중: "+dependencyReasons.getValue(f).joinToString()
-            (unknown-f).isNotEmpty()->"다른 활성 모드의 의존성을 확인할 수 없습니다: "+(unknown-f).sorted().take(8).joinToString()+". Modrinth 연결을 확인하세요."
             else->null
         }
         reason?.let {f to it}
@@ -34,7 +33,7 @@ class ModGraph(snapshot:ModInventorySnapshot) {
         require(files.isNotEmpty() && files.all {it in active}) {"비활성화할 활성 모드를 선택하세요"}
         val blocked=files.intersect(dependencyFiles)
         require(blocked.isEmpty()) {"필수 의존성 모드는 비활성화할 수 없습니다: "+blocked.sorted().joinToString(" · "){"$it (사용 중: ${dependencyReasons.getValue(it).joinToString()})"}}
-        require((unknown-files).isEmpty()) {"다른 활성 모드의 의존성이 미확인입니다: "+(unknown-files).sorted().joinToString()+". Modrinth 연결을 확인하세요."}
+        // Mods Modrinth could not identify only produce a warning; their own dependencies are simply unknown.
         // Unrelated pre-existing missing dependencies must not prevent removing a leaf mod.
         return files
     }
@@ -61,8 +60,8 @@ class ModGraph(snapshot:ModInventorySnapshot) {
             while(changed) {
                 changed=false
                 for(file in result.toList()) {
-                    val source=disabled.getValue(file).source ?: error("$file: Modrinth 의존성을 확인한 뒤 활성화하세요")
-                    for(dep in source.dependencies.filter {it.type=="required"}) {
+                    val source=disabled.getValue(file).source
+                    for(dep in source?.dependencies.orEmpty().filter {it.type=="required"}) {
                         val proposed=enabled+result.map(disabled::getValue)
                         if(proposed.any {matches(it,dep)})continue
                         val candidates=disabled.values.filter {it.filename !in result && matches(it,dep)}
@@ -72,12 +71,12 @@ class ModGraph(snapshot:ModInventorySnapshot) {
                 }
             }
             validateCombination(enabled+result.map(disabled::getValue))
-            return result to emptyList()
+            val unverified=result.filter {disabled.getValue(it).source==null}.sorted()
+            return result to if(unverified.isEmpty())emptyList() else listOf("Modrinth에서 찾지 못한 모드는 필수 의존성을 확인하지 못했습니다: "+unverified.joinToString())
         }
     }
     fun plan(suspects:Set<String>,keep:Set<String>):ModSearchPlan {
         require(suspects.isNotEmpty() && suspects.all {it in active}) {"검사할 의심 모드를 선택하세요"}
-        require(unknown.isEmpty()) {"의존성이 미확인인 활성 모드가 있어 안전한 검사를 만들 수 없습니다: "+unknown.sorted().joinToString()+". Modrinth 연결을 확인하세요."}
         validateEnabled()
         val fixed=closure(keep+dependencyFiles)
         val candidates=(suspects-fixed).sorted()
