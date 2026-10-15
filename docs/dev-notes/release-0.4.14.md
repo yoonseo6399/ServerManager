@@ -1,4 +1,4 @@
-상태: 로컬 0.4.14 후보·설치 패키지 검증 완료; GitHub 연결의 쓰기 요청 403으로 게시 대기
+상태: 로컬 검증 완료; GitHub CLI 인증 복구 후 0.4.14 게시 검증 진행 중
 # 0.4.14 candidate handoff
 
 ## Scope
@@ -18,10 +18,11 @@
 - Mac universal manager PKG and four Mac/Windows CLI/UI runner ZIPs generated. Packaged JAR hashes and pinned public key match source/build. Local package generation used bundled modern Python because system Python lacks tarfile extraction filters.
 - No actual Qwen inference, live Discord call, external multi-computer routing or Windows runtime test. Memory and inference throughput remain unmeasured.
 
-## Publication blocker
+## Previous publication blocker (resolved for CLI)
 - Local HTTPS git push: could not read Username (no credential).
 - Connected GitHub branch creation: 403 Resource not accessible by integration. Metadata reports the account can push, but the active integration write request is denied.
-- No public v0.4.14 release or tag has been created. No published assets were replaced.
+- GitHub CLI browser login completed as repository owner yoonseo6399; credential is stored in the system keyring and Git authentication is configured. The earlier integration denial does not prevent CLI publishing.
+- Prepublication check: public latest v0.4.13; no existing release/0.4.14 branch or v0.4.14 tag. No published assets were replaced.
 - dist packages are UNSIGNED CANDIDATES with CHECKSUMS-UNSIGNED.txt, not a signed update set. No private release key was read/generated. Existing GitHub Actions release workflow signs using its configured UPDATE_SIGNING_KEY secret after tag push.
 
 ## Resume publication after write access is restored
