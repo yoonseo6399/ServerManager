@@ -81,7 +81,19 @@ class ModManagement(private val manager:ServerManager,private val catalog:Modrin
             finally {manager.releaseMods(id)}
         }} catch(e:Exception){manager.releaseMods(id);throw e}
     }
-    fun refresh(id:String)=locked(id) {loader(id);job(id,manager.runtime(id).diagnosticActive){publishInventory(id,scan(id,true))}}
+    fun refresh(id:String)=locked(id) {
+        loader(id)
+        if(manager.modsViewOnly(id))viewJob(id) else job(id,manager.runtime(id).diagnosticActive){publishInventory(id,scan(id,true))}
+    }
+    /** Read-only listing while the server is busy: nothing is reserved, so every edit stays blocked by the normal reservation checks. */
+    private fun viewJob(id:String) {
+        check(jobs[id]?.phase!="WORKING") {"모드 목록을 불러오는 중입니다"}
+        jobs[id]=ModJob("WORKING","모드 목록을 불러오고 있습니다")
+        executor.submit {
+            try {publishInventory(id,scan(id));jobs[id]=ModJob("COMPLETE","모드 목록을 불러왔습니다")}
+            catch(e:Exception){jobs[id]=ModJob("FAILED",e.message?.take(500) ?: "모드 목록을 불러오지 못했습니다")}
+        }
+    }
     fun link(id:String,req:ModLinkRequest)=locked(id) {
         check(!manager.runtime(id).diagnosticActive) {"진행 중인 검사를 먼저 종료하세요"}
         val snapshot=inventory(id,req.revision);require(snapshot.mods.any {it.filename==req.filename})
