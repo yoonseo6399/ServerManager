@@ -176,7 +176,7 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
         event.replyChoices(choices.map { Command.Choice(it.first,it.second) }).queue({}, {})
     }
     override fun onSlashCommandInteraction(event:SlashCommandInteractionEvent) {
-        if(event.name in setOf("agent","sub-agent","agent-keys")) {codeAgent.handle(event);return}
+        if(event.name in setOf("agent","sub-agent","agent-keys","local-llm")) {codeAgent.handle(event);return}
         if(event.name=="music") {
             if(!musicAudioReady) event.reply("음악 오디오 기능을 시작하지 못했습니다. 서버 관리자에게 오디오 설정을 확인해 달라고 요청하세요.").setEphemeral(true).queue({}, {})
             else music?.handle(event) ?: event.reply("음악 기능을 시작하지 못했습니다. 서버 관리자에게 오디오 설정을 확인해 달라고 요청하세요.").setEphemeral(true).queue({}, {})

@@ -27,7 +27,7 @@ import javax.crypto.spec.SecretKeySpec
 import kotlin.io.path.*
 
 data class GameNetworkConfig(val enabled:Boolean=false,val port:Int=6399,@get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_DEFAULT) val sableUdpEnabled:Boolean=false,val baseDomain:String="",val targetHost:String="",
-    val defaultInstanceId:String?=null,val defaultHostname:String="",val labels:Map<String,String> = emptyMap(),val cloudflareEnabled:Boolean=false,val zoneId:String="")
+    val relayRunnerId:String?=null,val defaultInstanceId:String?=null,val defaultHostname:String="",val labels:Map<String,String> = emptyMap(),val cloudflareEnabled:Boolean=false,val zoneId:String="")
 data class GameNetworkView(val config:GameNetworkConfig,val revision:Long,val tokenConfigured:Boolean)
 data class GameNetworkSave(val config:GameNetworkConfig,val revision:Long,val token:String?=null,val clearToken:Boolean=false)
 private data class GameNetworkDisk(val config:GameNetworkConfig=GameNetworkConfig(),val revision:Long=0,val encryptedToken:String?=null,val installationId:String=UUID.randomUUID().toString())
@@ -46,6 +46,7 @@ object GameDomains {
         return ids.filter { GameDomains.hostname(config,it)==resolvedHost }.singleOrNull()
     }
     fun validate(config:GameNetworkConfig,ids:Set<String>) {
+        require(config.relayRunnerId==null || (config.enabled && !config.sableUdpEnabled && runCatching {UUID.fromString(config.relayRunnerId)}.isSuccess)) {"실행기 TCP 중계에는 공유 중계가 필요하며 Sable UDP와 함께 사용할 수 없습니다"}
         require(!config.sableUdpEnabled || config.enabled) {"Sable UDP 중계에는 공유 TCP 중계가 필요합니다"}
         require(config.port in 1024..65535)
         if(config.baseDomain.isNotEmpty())host(config.baseDomain)
@@ -57,7 +58,7 @@ object GameDomains {
         config.labels.values.forEach { require(host(it)==it && !it.contains('.')) { "하위 도메인 이름은 영문 소문자·숫자·하이픈으로 입력하세요" } }
         if(config.baseDomain.isNotEmpty())require(ids.map { hostname(config,it) }.distinct().size==ids.size) { "서버 하위 도메인은 서로 달라야 합니다" }
         if(config.defaultHostname.isNotBlank())require(ids.none { it!=config.defaultInstanceId && hostname(config,it)==host(config.defaultHostname) }) { "기존 주소가 다른 서버의 하위 도메인과 겹칩니다" }
-        require(!config.cloudflareEnabled || (config.enabled && config.targetHost.isNotBlank() && config.zoneId.matches(Regex("[a-f0-9]{32}")))) { "Cloudflare Zone ID와 중앙 Mac의 DNS only 호스트를 입력하세요" }
+        require(!config.cloudflareEnabled || (config.enabled && config.targetHost.isNotBlank() && config.zoneId.matches(Regex("[a-f0-9]{32}")))) { "Cloudflare Zone ID와 중계 컴퓨터의 DNS only 호스트를 입력하세요" }
         if(config.targetHost.isNotEmpty()) {
             require(!ids.any { hostname(config,it)==host(config.targetHost) } && host(config.baseDomain)!=host(config.targetHost)) { "중계 대상 호스트가 생성할 주소와 같으면 DNS가 순환합니다" }
         }
@@ -150,11 +151,12 @@ class CloudflareDns(private val token:String,private val zone:String,private val
 }
 
 @Service
-class GameNetwork(private val manager:ServerManager) {
+class GameNetwork(private val manager:ServerManager,private val runners:RunnerRegistry?=null) {
     val store=GameNetworkStore(manager.root.resolve("security/game-network"))
     @Volatile final var dnsMessage="Cloudflare 자동 DNS 미설정";private set
     @Volatile private var lastSnapshot=""
     @Volatile private var lastAttempt=0L
+    @Volatile var relayMessage="중앙 Mac 중계"
     fun config()=store.config()
     fun ids()=manager.list().map { (it["config"] as Instance).id }.toSet()
     fun address(id:String):String?=config().takeIf { it.enabled }?.let { GameDomains.hostname(it,id) }
@@ -169,7 +171,7 @@ class GameNetwork(private val manager:ServerManager) {
         lastAttempt=System.currentTimeMillis()
         try {
             val client=CloudflareDns(store.token() ?: error("Cloudflare 토큰이 없습니다"),config.zoneId)
-            val address=java.net.InetAddress.getAllByName(config.targetHost).firstOrNull { it is java.net.Inet4Address && !it.isAnyLocalAddress && !it.isLoopbackAddress && !it.isSiteLocalAddress && !it.isLinkLocalAddress }?.hostAddress ?: error("중앙 Mac의 공개 IPv4 DNS only 호스트를 확인하세요")
+            val address=java.net.InetAddress.getAllByName(config.targetHost).firstOrNull { it is java.net.Inet4Address && !it.isAnyLocalAddress && !it.isLoopbackAddress && !it.isSiteLocalAddress && !it.isLinkLocalAddress }?.hostAddress ?: error("중계 컴퓨터의 공개 IPv4 DNS only 호스트를 확인하세요")
             val snapshot=revision.toString()+ids.sorted().joinToString()+address
             if(!force && snapshot==lastSnapshot)return
             val names=ids.associateWith { GameDomains.hostname(config,it) }
@@ -186,6 +188,7 @@ class GameNetwork(private val manager:ServerManager) {
     }
     fun save(request:GameNetworkSave):GameNetworkView=manager.withIdle {
         if(!request.config.enabled)require(manager.list().map {(it["config"] as Instance).port}.distinct().size==manager.list().size) { "독립 포트 모드로 바꾸려면 서버마다 다른 내부 포트를 지정하세요" }
+        request.config.relayRunnerId?.let {id->require(runners?.active(id)!=null && runners.tcpRelaySupported(id)) {"중계 수신을 허용한 온라인 실행기를 선택하세요"}}
         store.save(request,ids())
     }.also { lastSnapshot="";lastAttempt=0 }
     fun domain(id:String,label:String):GameNetworkView=manager.withStopped(id) {
@@ -199,7 +202,7 @@ class GameNetwork(private val manager:ServerManager) {
 @RestController
 @RequestMapping("/api/admin/game-network")
 class GameNetworkApi(private val network:GameNetwork) {
-    @GetMapping fun get()=ResponseEntity.ok().header("Cache-Control","no-store").body(mapOf("settings" to network.store.view(),"dnsMessage" to network.dnsMessage))
+    @GetMapping fun get()=ResponseEntity.ok().header("Cache-Control","no-store").body(mapOf("settings" to network.store.view(),"dnsMessage" to network.dnsMessage,"relayMessage" to network.relayMessage))
     @PutMapping fun save(@RequestBody request:GameNetworkSave,req:HttpServletRequest):GameNetworkView { freshDesktop(req);return network.save(request) }
 }
 

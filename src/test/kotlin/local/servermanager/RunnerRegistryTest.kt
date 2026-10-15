@@ -50,7 +50,9 @@ class RunnerRegistryTest {
             assertFails {registry.requestUpdate(admin.id,runner.id,false)}
             registry.requestUpdate(viewer.id,runner.id,false)
             assertEquals("REQUESTED",registry.views(viewer.id).single().update?.phase)
-            registry.disconnected(runner.id);assertFails {registry.requestUpdate(viewer.id,runner.id,false)}
+            registry.tcpRelayCapability(runner.id,true);assertTrue(registry.tcpRelaySupported(runner.id))
+            assertTrue(registry.views(viewer.id).single().tcpRelaySupported)
+            registry.disconnected(runner.id);assertFalse(registry.tcpRelaySupported(runner.id));assertFails {registry.requestUpdate(viewer.id,runner.id,false)}
             registry.seen(runner.id,"0.4.0-beta.8");assertFails {registry.requestUpdate(viewer.id,runner.id,false)}
             registry.allow(viewer.id,runner.id,"a",false)
             assertFalse(registry.canAssign(admin.id,"a",runner.id))

@@ -25,7 +25,7 @@ import kotlin.io.path.*
 data class RunnerDevice(val id:String,val name:String,val platform:String,val registeredBy:String,val publicKey:String,
     val createdAt:String,var version:String="unknown",var enabled:Boolean=true,var allowedInstanceIds:Set<String> = emptySet())
 data class RunnerView(val id:String,val name:String,val platform:String,val registeredBy:String,val createdAt:String,
-    val version:String,val enabled:Boolean,val allowedInstanceIds:Set<String>,val online:Boolean,val lastSeen:String?,val update:RunnerUpdateStatus?=null,val remoteUpdateSupported:Boolean=false,val registeredByName:String="",val canGrant:Boolean=false)
+    val version:String,val enabled:Boolean,val allowedInstanceIds:Set<String>,val online:Boolean,val lastSeen:String?,val update:RunnerUpdateStatus?=null,val remoteUpdateSupported:Boolean=false,val registeredByName:String="",val canGrant:Boolean=false,val tcpRelaySupported:Boolean=false)
 data class RunnerPairRequest(val code:String,val publicKey:String,val platform:String,val version:String)
 data class RunnerEnrollmentRequest(val name:String)
 private data class PendingRunner(val codeHash:String,val userId:String,val name:String,val expiresAt:Long)
@@ -41,6 +41,9 @@ class RunnerRegistry(private val manager:ServerManager,private val auth:AuthStor
     private val heartbeat=mutableMapOf<String,Long>()
     private val nonces=mutableMapOf<String,Long>()
     private val updates=mutableMapOf<String,RunnerUpdateStatus>()
+    private val tcpRelays=mutableSetOf<String>()
+    @Synchronized fun tcpRelayCapability(id:String,enabled:Boolean) {if(enabled && active(id)!=null)tcpRelays.add(id) else tcpRelays.remove(id)}
+    @Synchronized fun tcpRelaySupported(id:String)=id in tcpRelays && online(id)
     init {
         require(!Files.isSymbolicLink(directory) && !Files.isSymbolicLink(file))
         directory.createDirectories()
@@ -102,12 +105,12 @@ class RunnerRegistry(private val manager:ServerManager,private val auth:AuthStor
         heartbeat[id]=System.currentTimeMillis()
         devices[id]?.let { if(it.version!=version && version.length in 1..80) { it.version=version;updates.remove(id);persist() } }
     }
-    @Synchronized fun disconnected(id:String) { heartbeat.remove(id) }
+    @Synchronized fun disconnected(id:String) { heartbeat.remove(id);tcpRelays.remove(id) }
     @Synchronized fun online(id:String)=active(id)!=null && (heartbeat[id]?.let { System.currentTimeMillis()-it<45_000 } ?: false)
     @Synchronized fun views(userId:String):List<RunnerView> {
         val user=auth.account(userId) ?: return emptyList()
         return devices.values.filter { user.managesAllServers() || it.registeredBy==userId || it.allowedInstanceIds.any { id -> user.permissions[id]=="ADMIN" } }
-            .map { RunnerView(it.id,it.name,it.platform,it.registeredBy,it.createdAt,it.version,it.enabled,it.allowedInstanceIds,online(it.id),heartbeat[it.id]?.let { ms->Instant.ofEpochMilli(ms).toString() },updates[it.id],remoteUpdateSupported(it.id),auth.account(it.registeredBy)?.displayName ?: "삭제된 계정",(it.registeredBy==userId || user.managesAllServers())) }
+            .map { RunnerView(it.id,it.name,it.platform,it.registeredBy,it.createdAt,it.version,it.enabled,it.allowedInstanceIds,online(it.id),heartbeat[it.id]?.let { ms->Instant.ofEpochMilli(ms).toString() },updates[it.id],remoteUpdateSupported(it.id),auth.account(it.registeredBy)?.displayName ?: "삭제된 계정",(it.registeredBy==userId || user.managesAllServers()),tcpRelaySupported(it.id)) }
     }
     @Synchronized fun connected(id:String){updates.remove(id)}
     @Synchronized fun remoteUpdateSupported(id:String)=active(id)!=null && updates[id]?.phase?.let {it!="UNSUPPORTED"}==true
