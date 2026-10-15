@@ -356,6 +356,12 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         if(contentType!=null) builder.header("Content-Type",contentType)
         return try {client.send(builder.method(method,body).build(),HttpResponse.BodyHandlers.ofByteArray())}catch(e:java.io.IOException){throw RetryTransfer("중앙 서버 연결이 끊겼습니다. 연결 복구 후 이어받습니다") }
     }
+    private fun awaitTransfer(id:String,message:String,waiting:()->Unit={},allowMissing:Boolean=false,request:()->HttpResponse<ByteArray>):HttpResponse<ByteArray> {
+        val response=try {TransferWait().await(::updateCheckpoint,waiting,request)}catch(e:java.io.IOException){throw RetryTransfer(e.message ?: message)}
+        if(!allowMissing || response.statusCode()!=404)transferResponse(response,message)
+        return response
+    }
+    private fun protocolPath(path:String)=path+(if('?' in path)"&" else "?")+"protocol=2"
     private fun fastTransfer(id:String):Boolean {
         val response=http("GET","/api/runners/transfer/$id/capabilities")
         if(response.statusCode()==404)return false
@@ -496,14 +502,9 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             send(RunnerMessage("file-progress",id,detail=mapper.writeValueAsString(value.copy(direction="TO_RUNNER"))))
         }
         progress(FolderImportProgress("SCANNING",message="실행기로 받을 파일을 대조하고 있습니다"),true)
-        val deadline=System.nanoTime()+java.util.concurrent.TimeUnit.MINUTES.toNanos(30)
-        var response=http("GET","/api/runners/transfer/$id/manifest")
-        while(response.statusCode()==503 && System.nanoTime()<deadline) {
-            progress(FolderImportProgress("SCANNING",message="관리 서버에서 파일 무결성을 검증하고 있습니다. 검증 완료 후 이어받습니다"),true)
-            Thread.sleep(5000)
-            response=http("GET","/api/runners/transfer/$id/manifest")
-        }
-        transferResponse(response,"서버 파일 목록 검증 대기")
+        val response=awaitTransfer(id,"서버 파일 목록 검증 대기",{
+            progress(FolderImportProgress("SCANNING",message="관리 서버에서 파일 무결성을 검증하고 있습니다. 검증 완료 후 이어받습니다"))
+        }) {http("GET",protocolPath("/api/runners/transfer/$id/manifest"))}
         val manifest=mapper.readValue<RunnerFileManifest>(response.body())
         DeltaTransfer.validate(manifest,serverDir(id))
         val stage=diagnosticRoot(id)?.resolve("stage-${UUID.randomUUID()}")?.createDirectories() ?: folders.stage(id)
@@ -620,13 +621,13 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             val receipt=instanceRoot(id).resolve("upload.pending")
             if(receipt.exists()) {
                 val transfer=receipt.readText().trim();require(UUID.fromString(transfer).toString()==transfer)
-                val result=http("GET","/api/runners/transfer/$id/transfer-state?transferId=$transfer")
+                val result=awaitTransfer(id,"파일 반영 확인 대기",allowMissing=true) {http("GET",protocolPath("/api/runners/transfer/$id/transfer-state?transferId=$transfer"))}
                 // Old managers have no receipt endpoint; they retain the previous behavior.
                 if(result.statusCode()!=404) {
                     transferResponse(result,"파일 반영 확인 대기")
                     if(mapper.readTree(result.body()).path("state").asText()=="COMPLETE") {
-                        transferResponse(http("POST","/api/runners/transfer/$id/commit?transferId=$transfer"),"반영 완료 확인 대기")
-                        val response=http("GET","/api/runners/transfer/$id/manifest");transferResponse(response,"파일 반영 검증 대기")
+                        awaitTransfer(id,"반영 완료 확인 대기") {http("POST",protocolPath("/api/runners/transfer/$id/commit?transferId=$transfer"))}
+                        val response=awaitTransfer(id,"파일 반영 검증 대기") {http("GET",protocolPath("/api/runners/transfer/$id/manifest"))}
                         val central=mapper.readValue<RunnerFileManifest>(response.body())
                         check(FileInventory.collect(serverDir(id)).let {(f,d)->RunnerFileManifest(f,d)}==central) {"반영 완료 후 파일이 변경됐습니다. 로컬 파일을 보존하고 확인하세요"}
                         if(diagnosticRoot(id)==null)folders.published(id,central)
@@ -655,16 +656,20 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                 send(RunnerMessage(if(request==null)"file-progress" else "import-progress",id,detail=mapper.writeValueAsString(value),token=request))
             }
             progress(FolderImportProgress("SCANNING",message="원래 폴더의 파일·해시를 검사하고 있습니다"),true)
-            val snapshot=if(request!=null)FileInventory.snapshot(serverDir(id)) else null
+            val snapshot=FileInventory.snapshot(serverDir(id))
             val (files,dirs)=FileInventory.collect(serverDir(id)) {count,bytes->updateCheckpoint();progress(FolderImportProgress("SCANNING",count,bytes))}
             val manifest=RunnerFileManifest(files,dirs)
-            val capability=http("GET","/api/runners/transfer/$id/transfer-state?transferId=00000000-0000-0000-0000-000000000000")
+            val capability=awaitTransfer(id,"이어받기 지원 확인 대기",allowMissing=true) {http("GET",protocolPath("/api/runners/transfer/$id/transfer-state?transferId=00000000-0000-0000-0000-000000000000"))}
             val resumable=if(capability.statusCode()==404)false else {transferResponse(capability,"이어받기 지원 확인 대기");true}
             val body=mutableMapOf<String,Any>("manifest" to manifest)
             if(request!=null)body["importRequest"]=request
             if(resumable)body["resumeProtocol"]=1
-            val response=http("POST","/api/runners/transfer/$id/begin",HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(body)),"application/json")
-            transferResponse(response,"파일 인계 시작 대기")
+            check(FileInventory.snapshot(serverDir(id))==snapshot) {"파일 검사 중 원본이 변경됐습니다. 받은 파일은 보존했습니다"}
+            val encoded=mapper.writeValueAsBytes(body)
+            val response=awaitTransfer(id,"파일 인계 준비 대기",{
+                progress(FolderImportProgress("SCANNING",files.size,files.values.sumOf {it.size},message="중앙 파일 검증 대기 · 원본 해시 결과를 재사용합니다"))
+            }) {http("POST",protocolPath("/api/runners/transfer/$id/begin"),HttpRequest.BodyPublishers.ofByteArray(encoded),"application/json")}
+            check(FileInventory.snapshot(serverDir(id))==snapshot) {"전송 대기 중 원본이 변경됐습니다. 원본 파일을 보존하고 확인하세요"}
             val plan=mapper.readValue<RunnerTransferPlan>(response.body())
             if(request==null)atomicText(instanceRoot(id).resolve("upload.pending"),plan.transferId)
             val total=if(plan.totalFiles>0)plan.totalBytes else plan.changedFiles.sumOf {files.getValue(it).size};val totalFiles=if(plan.totalFiles>0)plan.totalFiles else plan.changedFiles.size
@@ -701,8 +706,9 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                 check(FileInventory.snapshot(serverDir(id))==snapshot) { "가져오는 동안 원래 파일이 변경됐습니다. 중앙 파일은 교체하지 않았습니다. 서버가 정지됐는지 확인하고 다시 시도하세요" }
             }
             progress(FolderImportProgress("VERIFYING",completed,uploaded,totalFiles,total,"관리 서버에서 해시 검증·반영 중입니다. 대용량 폴더는 시간이 걸릴 수 있습니다"),true)
-            val done=http("POST","/api/runners/transfer/$id/commit?transferId=${plan.transferId}")
-            transferResponse(done,"서버 파일 반영 확인 대기")
+            awaitTransfer(id,"서버 파일 반영 확인 대기",{
+                progress(FolderImportProgress("VERIFYING",completed,uploaded,totalFiles,total,"중앙 검증·반영 중 · 받은 파일은 재전송하지 않습니다"))
+            }) {http("POST",protocolPath("/api/runners/transfer/$id/commit?transferId=${plan.transferId}"))}
             instanceRoot(id).resolve("upload.pending").deleteIfExists()
             if(diagnosticRoot(id)==null)folders.published(id,manifest)
     }

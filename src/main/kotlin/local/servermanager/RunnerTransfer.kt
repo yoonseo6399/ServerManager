@@ -235,13 +235,18 @@ class RunnerTransfer(private val manager:ServerManager,private val registry:Runn
 @RestController
 @RequestMapping("/api/runners/transfer")
 class RunnerTransferApi(private val transfer:RunnerTransfer,private val gateway:RunnerGateway,private val manager:ServerManager) {
+    private val tasks=TransferTasks()
+    @jakarta.annotation.PreDestroy fun close(){tasks.close()}
+    private fun pending(protocol:Int):ResponseEntity<Void> = ResponseEntity.status(if(protocol>=2)202 else 503).header("Retry-After","5").header("X-SM-Transfer-State","VERIFYING").header("Cache-Control","no-store").build()
+    private fun taskKey(id:String,runner:String,operation:String,request:String)=TransferTasks.Key(id,runner,manager.profileDir(id).toAbsolutePath().toString(),operation,request)
+
     private fun check(runnerId:String,token:String?,instanceId:String) {
         if(!gateway.authorized(runnerId,token) || manager.instance(instanceId).runnerId!=runnerId)
             throw ResponseStatusException(HttpStatus.FORBIDDEN,"실행기 연결 또는 서버 배정을 확인하세요")
     }
     @GetMapping("/{instanceId}/capabilities") fun capabilities(@PathVariable instanceId:String,
         @RequestHeader("X-SM-Runner-Id") runnerId:String,@RequestHeader("X-SM-Session",required=false) token:String?):Map<String,Int> {
-        check(runnerId,token,instanceId);return mapOf("resumeProtocol" to 1,"batchProtocol" to 1,"parallel" to TransferBatch.PARALLEL,"exitReasonProtocol" to 1)
+        check(runnerId,token,instanceId);return mapOf("resumeProtocol" to 1,"batchProtocol" to 1,"parallel" to TransferBatch.PARALLEL,"exitReasonProtocol" to 1,"asyncTransferProtocol" to 2)
     }
     @PutMapping("/{instanceId}/batch") fun batch(@PathVariable instanceId:String,@RequestParam transferId:String,req:jakarta.servlet.http.HttpServletRequest,
         @RequestHeader("X-SM-Runner-Id") runnerId:String,@RequestHeader("X-SM-Session",required=false) token:String?):Map<String,Boolean> {
@@ -256,16 +261,19 @@ class RunnerTransferApi(private val transfer:RunnerTransfer,private val gateway:
         check(runnerId,token,instanceId);manager.remoteExited(instanceId,runnerId,report);return mapOf("ok" to true)
     }
     @GetMapping("/{instanceId}/transfer-state") fun state(@PathVariable instanceId:String,@RequestParam transferId:String,
-        @RequestHeader("X-SM-Runner-Id") runnerId:String,@RequestHeader("X-SM-Session",required=false) token:String?):Map<String,String> {
-        check(runnerId,token,instanceId);return mapOf("state" to transfer.transferState(runnerId,instanceId,transferId))
+        @RequestHeader("X-SM-Runner-Id") runnerId:String,@RequestHeader("X-SM-Session",required=false) token:String?,@RequestParam(defaultValue="1") protocol:Int=1):Any {
+        check(runnerId,token,instanceId)
+        if(tasks.busy(instanceId))return pending(protocol)
+        return mapOf("state" to transfer.transferState(runnerId,instanceId,transferId))
     }
     @GetMapping("/{instanceId}/import-state") fun importState(@PathVariable instanceId:String,@RequestParam request:String,
         @RequestHeader("X-SM-Runner-Id") runnerId:String,@RequestHeader("X-SM-Session",required=false) token:String?):Map<String,String> {
         check(runnerId,token,instanceId);return mapOf("state" to manager.folderImportState(instanceId,runnerId,request))
     }
-    @GetMapping("/{instanceId}/manifest") fun manifest(@PathVariable instanceId:String,@RequestHeader("X-SM-Runner-Id") runnerId:String,@RequestHeader("X-SM-Session",required=false) token:String?):ResponseEntity<RunnerFileManifest> {
+    @GetMapping("/{instanceId}/manifest") fun manifest(@PathVariable instanceId:String,@RequestHeader("X-SM-Runner-Id") runnerId:String,@RequestHeader("X-SM-Session",required=false) token:String?,@RequestParam(defaultValue="1") protocol:Int=1):ResponseEntity<*> {
         check(runnerId,token,instanceId)
-        val manifest=transfer.preparedInventory(instanceId) ?: return ResponseEntity.status(503).header("Retry-After","5").header("Cache-Control","no-store").build()
+        if(tasks.busy(instanceId))return pending(protocol)
+        val manifest=transfer.preparedInventory(instanceId) ?: return pending(protocol)
         return ResponseEntity.ok().header("Cache-Control","no-store").body(manifest)
     }
     @GetMapping("/{instanceId}/file") fun file(@PathVariable instanceId:String,@RequestParam path:String,@RequestParam offset:Long,
@@ -275,10 +283,20 @@ class RunnerTransferApi(private val transfer:RunnerTransfer,private val gateway:
         return ResponseEntity.ok().header("Cache-Control","no-store").body(bytes)
     }
     @PostMapping("/{instanceId}/begin") fun begin(@PathVariable instanceId:String,@RequestBody request:RunnerTransferBegin,
-        @RequestHeader("X-SM-Runner-Id") runnerId:String,@RequestHeader("X-SM-Session",required=false) token:String?):Any {
+        @RequestHeader("X-SM-Runner-Id") runnerId:String,@RequestHeader("X-SM-Session",required=false) token:String?,@RequestParam(defaultValue="1") protocol:Int=1):Any {
         check(runnerId,token,instanceId)
-        val prepared=transfer.preparedInventory(instanceId) ?: return ResponseEntity.status(503).header("Retry-After","5").header("Cache-Control","no-store").build<Void>()
-        val plan=transfer.begin(runnerId,instanceId,request.manifest,request.importRequest,request.resumeProtocol,prepared)
+        val encoded=com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().writeValueAsBytes(request)
+        val hash=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(encoded))
+        val key=taskKey(instanceId,runnerId,"begin",hash)
+        val plan=tasks.poll(key,consume=true) {
+            val deadline=System.nanoTime()+java.util.concurrent.TimeUnit.MINUTES.toNanos(30)
+            var prepared=transfer.preparedInventory(instanceId)
+            while(prepared==null) {
+                check(System.nanoTime()<deadline) {"중앙 파일 검증 대기 시간이 초과됐습니다"}
+                Thread.sleep(1000);prepared=transfer.preparedInventory(instanceId)
+            }
+            transfer.begin(runnerId,instanceId,request.manifest,request.importRequest,request.resumeProtocol,prepared)
+        } ?: return pending(protocol)
         // Older runner ObjectMappers reject unknown fields. Their wire shape must
         // stay exact even though the manager internally restores full counters.
         return if(request.resumeProtocol==0)mapOf("transferId" to plan.transferId,"changedFiles" to plan.changedFiles) else plan
@@ -288,7 +306,10 @@ class RunnerTransferApi(private val transfer:RunnerTransfer,private val gateway:
         check(runnerId,token,instanceId);transfer.upload(runnerId,instanceId,transferId,path,offset,bytes);return mapOf("ok" to true)
     }
     @PostMapping("/{instanceId}/commit") fun commit(@PathVariable instanceId:String,@RequestParam transferId:String,
-        @RequestHeader("X-SM-Runner-Id") runnerId:String,@RequestHeader("X-SM-Session",required=false) token:String?):Map<String,Boolean> {
-        check(runnerId,token,instanceId);transfer.commit(runnerId,instanceId,transferId);return mapOf("committed" to true)
+        @RequestHeader("X-SM-Runner-Id") runnerId:String,@RequestHeader("X-SM-Session",required=false) token:String?,@RequestParam(defaultValue="1") protocol:Int=1):Any {
+        check(runnerId,token,instanceId)
+        return tasks.poll(taskKey(instanceId,runnerId,"commit",transferId)) {
+            transfer.commit(runnerId,instanceId,transferId);mapOf("committed" to true)
+        } ?: pending(protocol)
     }
 }

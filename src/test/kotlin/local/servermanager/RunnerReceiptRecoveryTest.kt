@@ -22,14 +22,15 @@ class RunnerReceiptRecoveryTest {
         base.resolve("world.dat").writeBytes(ByteArray(2*1024*1024){(it%251).toByte()})
         folder.resolve("dirty").writeText("${ProcessHandle.current().pid()}|0");folder.resolve("upload.pending").writeText(transfer)
         val manifest=FileInventory.collect(base).let {(f,d)->RunnerFileManifest(f,d)}
-        val requests=java.util.concurrent.CopyOnWriteArrayList<String>();var pending=true
+        val requests=java.util.concurrent.CopyOnWriteArrayList<String>();var pending=true;var verifying=1
         val server=HttpServer.create(InetSocketAddress("127.0.0.1",0),0)
         server.createContext("/") {req->
             requests.add(req.requestMethod+" "+req.requestURI.path)
             assertEquals("device",req.requestHeaders.getFirst("X-SM-Runner-Id"));assertEquals("fixture-session",req.requestHeaders.getFirst("X-SM-Session"))
-            val status=if(req.requestURI.path.endsWith("/manifest")&&pending)503 else 200
+            val status=if(req.requestURI.path.endsWith("/manifest")) {if(pending)503 else if(verifying-->0)202 else 200} else 200
             val body=when {req.requestURI.path.endsWith("/manifest")->jacksonObjectMapper().writeValueAsBytes(manifest);req.requestURI.path.endsWith("/transfer-state")->"{\"state\":\"COMPLETE\"}".toByteArray();else->"{}".toByteArray()}
-            if(status==503)req.responseHeaders.add("Retry-After","5")
+            if(status==503)req.responseHeaders.add("Retry-After","60")
+            if(status==202)req.responseHeaders.add("Retry-After","1")
             req.sendResponseHeaders(status,body.size.toLong());req.responseBody.use {it.write(body)}
         }
         server.start()
@@ -45,7 +46,7 @@ class RunnerReceiptRecoveryTest {
             assertTrue(messages.any {it.contains("HTTP 503") && it.contains("RETRYING")})
             pending=false;upload.invoke(agent,id)
             assertFalse(folder.resolve("dirty").exists());assertFalse(folder.resolve("upload.pending").exists())
-            assertEquals(2,requests.count {it.endsWith("/manifest")});assertFalse(requests.any {it.endsWith("/begin")})
+            assertEquals(3,requests.count {it.endsWith("/manifest")});assertFalse(requests.any {it.endsWith("/begin")})
             assertTrue(messages.any {it.contains("STOPPED")&&it.contains("이미 완료된 파일 인계")})
             assertEquals(manifest.files.getValue("world.dat").sha256,FileInventory.digest(base.resolve("world.dat")))
         } finally {server.stop(0)}

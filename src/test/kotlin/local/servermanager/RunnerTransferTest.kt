@@ -15,7 +15,11 @@ class RunnerTransferTest {
         val (transfer,_,manager)=fixture();val gateway=mock(RunnerGateway::class.java)
         `when`(gateway.authorized("runner","session")).thenReturn(true)
         while(transfer.preparedInventory("instance")==null)Thread.sleep(5)
-        val reply=RunnerTransferApi(transfer,gateway,manager).begin("instance",RunnerTransferBegin(RunnerFileManifest(emptyMap(),emptySet())),"runner","session")
+        val api=RunnerTransferApi(transfer,gateway,manager)
+        var reply=api.begin("instance",RunnerTransferBegin(RunnerFileManifest(emptyMap(),emptySet())),"runner","session")
+        val deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5)
+        while(reply is org.springframework.http.ResponseEntity<*> && System.nanoTime()<deadline){Thread.sleep(5);reply=api.begin("instance",RunnerTransferBegin(RunnerFileManifest(emptyMap(),emptySet())),"runner","session")}
+        api.close()
         val mapper=com.fasterxml.jackson.module.kotlin.jacksonObjectMapper()
         val parsed=mapper.readValue(mapper.writeValueAsBytes(reply),LegacyPlan::class.java)
         assertTrue(parsed.changedFiles.isEmpty())
@@ -36,6 +40,35 @@ class RunnerTransferTest {
         `when`(manager.instance("instance")).thenReturn(Instance("instance","test",loaderVersion="21.1.252",port=25565,memoryMb=512,javaPath="java",runnerId="runner"))
         `when`(registry.active("runner")).thenReturn(RunnerDevice("runner","Mac","MAC","user","key","now",allowedInstanceIds=setOf("instance")))
         return Fixture(RunnerTransfer(manager,registry),base,manager,registry)
+    }
+
+    @Test fun `slow commit returns pending promptly with quick receipt polling and commits once`() {
+        val (transfer,base,manager)=fixture();val gateway=mock(RunnerGateway::class.java)
+        `when`(gateway.authorized("runner","session")).thenReturn(true)
+        val worker=temp.resolve("async-worker").createDirectory();worker.resolve("new.txt").writeText("new")
+        val (files,dirs)=FileInventory.collect(worker)
+        val plan=transfer.begin("runner","instance",RunnerFileManifest(files,dirs))
+        transfer.upload("runner","instance",plan.transferId,"new.txt",0,"new".toByteArray())
+        val entered=java.util.concurrent.CountDownLatch(1);val release=java.util.concurrent.CountDownLatch(1)
+        doAnswer {entered.countDown();check(release.await(5,java.util.concurrent.TimeUnit.SECONDS));null}.`when`(manager).remoteCommitted("instance","runner")
+        val api=RunnerTransferApi(transfer,gateway,manager)
+        try {
+            val pending=api.commit("instance",plan.transferId,"runner","session",2) as org.springframework.http.ResponseEntity<*>
+            assertEquals(202,pending.statusCode.value());assertTrue(entered.await(5,java.util.concurrent.TimeUnit.SECONDS))
+            val start=System.nanoTime()
+            assertEquals(202,(api.state("instance",plan.transferId,"runner","session",2) as org.springframework.http.ResponseEntity<*>).statusCode.value())
+            assertEquals(503,(api.state("instance",plan.transferId,"runner","session") as org.springframework.http.ResponseEntity<*>).statusCode.value())
+            assertEquals(202,api.manifest("instance","runner","session",2).statusCode.value())
+            assertTrue(System.nanoTime()-start<java.util.concurrent.TimeUnit.SECONDS.toNanos(1))
+            release.countDown()
+            val deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5)
+            var done=api.commit("instance",plan.transferId,"runner","session",2)
+            while(done is org.springframework.http.ResponseEntity<*> && System.nanoTime()<deadline){Thread.sleep(5);done=api.commit("instance",plan.transferId,"runner","session",2)}
+            assertEquals(mapOf("committed" to true),done)
+            assertEquals(done,api.commit("instance",plan.transferId,"runner","session",2))
+            verify(manager,times(1)).remoteCommitted("instance","runner")
+            assertEquals("new",base.resolve("new.txt").readText())
+        }finally{release.countDown();api.close()}
     }
 
     @Test fun `only changed file chunks are requested and deletion is preserved`() {
@@ -217,7 +250,7 @@ class RunnerTransferTest {
             val until=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5)
             var response=api.manifest("instance","runner","session")
             while(response.statusCode.value()==503 && System.nanoTime()<until){Thread.sleep(5);response=api.manifest("instance","runner","session")}
-            assertEquals(200,response.statusCode.value());assertEquals(emptyMap(),response.body!!.files)
+            assertEquals(200,response.statusCode.value());assertEquals(emptyMap(),(response.body as RunnerFileManifest).files)
             manager.runtime("instance").state="RUNNING"
             assertFailsWith<IllegalStateException>{api.manifest("instance","runner","session")}
         }finally{release.countDown();transfer.close()}
