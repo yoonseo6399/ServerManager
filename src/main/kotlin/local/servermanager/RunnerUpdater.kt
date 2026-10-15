@@ -59,6 +59,7 @@ class RunnerUpdater(private val home:Path,private val current:String,
                         while(true) { val n=input.read(buffer);if(n<0)break;total+=n;require(total<=limit);output.write(buffer,0,n);val now=System.nanoTime();if(now-lastReport>500_000_000){publish(RunnerUpdateStatus("DOWNLOADING",version,total,limit));lastReport=now} }
                         require(total==limit)
                     } }
+                    publish(RunnerUpdateStatus("VERIFYING",version,limit,limit))
                     require(SignedUpdates.validFile(temp,properties)) { "실행기 업데이트 해시 불일치" }
                     Files.move(temp,jar,ATOMIC_MOVE,REPLACE_EXISTING)
                 } finally { temp.deleteIfExists() }

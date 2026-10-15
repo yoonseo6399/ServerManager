@@ -44,6 +44,16 @@ public class RunnerSetupTest {
             RunnerSetup.install(source,target,home,false,services,s->{});
             check(configured.get()==1 && auto.equals(List.of(false)),"configure auto OFF");
             check(Files.readString(target.resolve("runner-home.txt")).equals(home.toString()),"scheduled custom home");
+            check(!RunnerSetup.relayAllowed(home) && RunnerSetup.Options.parse(new String[]{}).relay()==null,"TCP relay consent defaults to OFF");
+            check(RunnerSetup.Options.parse(new String[]{"--allow-tcp-relay"}).relay()==Boolean.TRUE && RunnerSetup.Options.parse(new String[]{"--deny-tcp-relay"}).relay()==Boolean.FALSE,"relay consent options");
+            RunnerSetup.writeRelayConsent(home,true,"installer");
+            check(RunnerSetup.relayAllowed(home) && Files.readString(home.resolve("direct-relay.json")).contains("\"allowed\":true"),"relay consent recorded");
+            RunnerSetup.install(source,target,home,false,services,s->{});
+            check(RunnerSetup.relayAllowed(home),"reinstall keeps relay consent");
+            RunnerSetup.writeRelayConsent(home,false,"installer");check(!RunnerSetup.relayAllowed(home),"relay consent withdrawn");
+            Path legacyHome=Files.createTempDirectory(temp,"legacy-relay");Files.writeString(legacyHome.resolve("tcp-relay-enabled"),"true");
+            check(RunnerSetup.relayAllowed(legacyHome),"legacy relay marker is shown as allowed");
+            RunnerSetup.writeRelayConsent(legacyHome,false,"installer");check(!RunnerSetup.relayAllowed(legacyHome),"unchecking overrides the legacy marker");
             Files.writeString(source.resolve("version.txt"),"next");
             try(FileChannel lock=FileChannel.open(home.resolve("runner.lock"),StandardOpenOption.WRITE);FileLock held=lock.lock()) {
                 rejects(()->RunnerSetup.install(source,target,home,true,services,s->{}),"active runner");
