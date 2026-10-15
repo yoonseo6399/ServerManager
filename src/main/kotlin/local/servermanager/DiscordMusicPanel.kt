@@ -131,9 +131,6 @@ class DiscordMusicPanel(
             val page=requestedPage.coerceIn(0,last)
             val rows=mutableListOf(ActionRow.of(Button.success("music:resume","▶ 재생"),Button.secondary("music:pause","⏸ 일시정지"),
                 Button.danger("music:stop","⏹ 정지"),Button.secondary("music:previous","⏮ 이전"),Button.secondary("music:skip","⏭ 다음")))
-            rows+=ActionRow.of(
-                if(snapshot.autoplay) Button.success("music:autoplay","📻 자동재생 ON") else Button.secondary("music:autoplay","📻 자동재생 OFF"),
-                if(snapshot.repeat) Button.success("music:repeat","🔂 한 곡 반복 ON") else Button.secondary("music:repeat","🔂 한 곡 반복 OFF"))
             val start=page*25
             val selectable=snapshot.queue.take(100).drop(start).take(25).mapIndexedNotNull { index,track ->
                 track.id?.takeIf { it.isNotBlank() && it.length<=100 }?.let { id ->
@@ -149,6 +146,9 @@ class DiscordMusicPanel(
             if(last>0) rows+=ActionRow.of(
                 Button.secondary("music:page:${page-1}","◀ 이전 페이지").withDisabled(page==0),
                 Button.secondary("music:page:${page+1}","다음 페이지 ▶").withDisabled(page>=last))
+            rows+=ActionRow.of(
+                if(snapshot.autoplay) Button.success("music:autoplay","📻 자동재생 ON") else Button.secondary("music:autoplay","📻 자동재생 OFF"),
+                if(snapshot.repeat) Button.success("music:repeat","🔂 한 곡 반복 ON") else Button.secondary("music:repeat","🔂 한 곡 반복 OFF"))
             return rows
         }
 
