@@ -507,3 +507,16 @@ Built from the v0.4.12 tag on branches `feat/back-navigation` and `feat/mods-vie
 - Mods: `ServerManager.modsViewOnly` + `ModManagement.viewJob` list mods without reserving files while the server is busy; edits keep going through the reservation checks. The list loads automatically on opening the tab (admins only) and once more when the server stops.
 - Validation: nav and mods browser tests, Kotlin compile, ModSearchTest locally; full `./gradlew test` runs in the tag workflow. The existing `save-bar` and first `roles-sync` Playwright tests time out before and after these changes.
 - Not covered: no Kotlin test for the read-only scan itself (ModManagementTest cannot run on the Windows development PC because of Java path and symlink permission).
+
+## 2026-10-15 — 0.4.14 local Qwen chat and optional runner TCP ingress
+
+Release candidate is based on published v0.4.13, with only the local LLM/relay feature commit cherry-picked. The unrelated Discord music work on main remains excluded, as in 0.4.13. Existing nav.ts and Back/Forward behavior are preserved without new implementation.
+
+- `/local-llm` model 14b/30b: fresh Discord super-admin role check, ephemeral plain chat, no workspace/tools, no cloud fallback; Ollama loopback HTTP `/api/chat`, explicit think, bounded context/output/time, one local request, keep_alive=0.
+- Registered runner TCP ingress is locally opted in via tcp-relay-enabled or RUNNER_TCP_RELAY_ENABLED=true and advertised on the current authenticated WSS session. Owner selects it in game-network settings; manager listener becomes loopback. Opaque negative-ID relay streams feed the existing hostname router and authorized game runner. Manager remains in the traffic path. UDP is excluded in remote relay mode.
+- Existing game start/stop semantics remain; relay recovery never starts/stops Minecraft. Active relay streams defer runner updater restart.
+- Local feature scope tests and UI selector test passed. Full integrated validation is recorded in the candidate's final handoff note.
+- Actual Qwen inference, Discord interactions, multi-computer public ingress and Windows runtime remain unverified. No production application switch performed.
+- GitHub write unavailable: git HTTPS has no credential and connected GitHub App returns 403 Resource not accessible by integration for branch creation. Publishing is pending restored write access. Existing release workflow already performs package signing with its repository secret; no new signing key is created.
+
+Final local candidate verification: 262 backend cases (255 pass, 7 skip), TypeScript/Vite build, new relay UI test, isolated app startup and installer/bootstrap checks passed. Existing nav suite has 2 pass / 1 fail; identical failure at nav.spec.ts:31 also reproduces on untouched public v0.4.13. Navigation source was not changed, per user direction. Mac manager and four runner packages were built as unsigned candidates; actual Qwen/Discord/public multi-computer/Windows operation remains unverified. Publication is not complete: active GitHub integration rejected branch write with HTTP403 and local git has no credential. See docs/dev-notes/release-0.4.14.md before resuming.
