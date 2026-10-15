@@ -184,6 +184,8 @@ class ServerManager {
         r.modBusy=true
     }}
     fun releaseMods(id:String){runtime(id).modBusy=false}
+    /** True while edits are impossible (running, transferring, another mod job). The mod list can still be read without reserving files. */
+    fun modsViewOnly(id:String):Boolean=runCatching {reserveMods(id);releaseMods(id)}.isFailure
     fun diagnosticContext(id:String,sid:String?) {val r=runtime(id);synchronized(r){
         check(r.modBusy && r.process?.isAlive!=true && !root.resolve(id).resolve("remote-lease").exists())
         val marker=root.resolve(id).resolve("diagnostic.active");val guard=root.resolve(id).resolve("import.pending")

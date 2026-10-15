@@ -130,6 +130,8 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     private val textBuffer=StringBuilder()
     private val binaryBuffer=ByteArrayOutputStream()
     private val sendLock=Any()
+    private val tcpRelayAllowed=System.getenv("RUNNER_TCP_RELAY_ENABLED")=="true" || home.resolve("tcp-relay-enabled").let {it.isRegularFile() && it.readText().trim()=="true"}
+    @Volatile private var tcpRelay:TcpRelayPeer?=null
     @Volatile private var sessionToken:String?=null
     private val processes=ConcurrentHashMap<String,Process>()
     private val gameStreams=ConcurrentHashMap<Int,Socket>()
@@ -223,6 +225,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             closed.await(10,TimeUnit.SECONDS)
         }
         sable.disconnect();streamInstances.clear();sableRegistrations.values.forEach {it.complete(false)};sableRegistrations.clear()
+        tcpRelay?.close();tcpRelay=null
         sessionToken=null;connection.set(null)
         gameStreams.values.forEach { runCatching { it.close() } };gameStreams.clear()
     }
@@ -243,7 +246,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     private fun updateCheckpoint(){if(updatePauseRequested)throw RetryTransfer("서명된 실행기 업데이트를 위해 전송을 잠시 중지했습니다. 재연결 후 이어받습니다")}
     fun restartForUpdate():Boolean=synchronized(lifecycle) {
         val service=updater ?: return false
-        if(service.busy() || !service.pending())return false
+        if(service.busy() || !service.pending() || tcpRelay?.busy()==true)return false
         val root=home.resolve("instances")
         val dirs=if(root.exists())root.listDirectoryEntries().filter {it.isDirectory()} else emptyList()
         if(processes.values.any {it.isAlive} || preparing.isNotEmpty() || dirs.any {orphanAlive(it.name)}){service.phase("WAITING");return false}
@@ -256,21 +259,30 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         processes.values.forEach { runCatching { it.waitFor() } }
         installationProcesses.values.forEach {runCatching {it.waitFor()}}
         if(!updatePauseRequested)home.resolve("instances").takeIf { it.exists() }?.let { root -> Files.list(root).use { paths -> paths.filter { it.resolve("dirty").exists() }.forEach { dir -> uploadStopped(dir.fileName.toString()) } } }
-        sable.close();workers.shutdown()
+        tcpRelay?.close();sable.close();workers.shutdown()
     }
-    override fun onOpen(webSocket:WebSocket) { webSocket.request(1) }
+    override fun onOpen(webSocket:WebSocket) { connection.set(webSocket);webSocket.request(1) }
     override fun onText(webSocket:WebSocket,data:CharSequence,last:Boolean):CompletionStage<*> {
         synchronized(textBuffer) {
             if(textBuffer.length+data.length>256*1024){textBuffer.setLength(0);webSocket.abort();return CompletableFuture.completedFuture(null)}
             textBuffer.append(data)
             if(last) {
                 val raw=textBuffer.toString();textBuffer.setLength(0)
+                if(connection.get()!==webSocket){webSocket.request(1);return CompletableFuture.completedFuture(null)}
                 runCatching { mapper.readValue<RunnerMessage>(raw) }.getOrNull()?.let { message ->
                     when(message.type) {
                         "sable-config" -> {sable.enabled=message.state=="ON"}
                         "sable-registered" -> message.token?.let {sableRegistrations[it]?.complete(message.state=="OK")}
 
-                        "session" -> { sessionToken=message.token;reportUpdate();recoverStates() }
+                        "session" -> { sessionToken=message.token;tcpRelay?.close();tcpRelay=if(tcpRelayAllowed)TcpRelayPeer(::send,::sendBinary) else null
+                            send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));reportUpdate();recoverStates() }
+                        "relay-config" -> {
+                            val port=message.detail?.toIntOrNull()
+                            val ok=tcpRelayAllowed && (message.state=="OFF" || port in 1024..65535) && runCatching {tcpRelay?.listen(if(message.state=="ON")port else null);true}.getOrDefault(false)
+                            send(RunnerMessage("relay-status",state=if(ok && message.state=="ON")"READY" else if(ok)"OFF" else "FAILED"))
+                        }
+                        "relay-opened" -> message.streamId?.takeIf {it<0}?.let {tcpRelay?.ready(it)}
+                        "relay-closed" -> message.streamId?.takeIf {it<0}?.let {tcpRelay?.end(it)}
                         "update-request" -> if(message.detail in setOf("WHEN_IDLE","PAUSE_TRANSFER")) {
                             requestUpdate(message.detail=="PAUSE_TRANSFER")
                         }
@@ -301,7 +313,12 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             if(last) {
                 val frame=ByteBuffer.wrap(binaryBuffer.toByteArray());binaryBuffer.reset()
                 if(frame.remaining()>=4) {
-                    val stream=gameStreams[frame.int]
+                    val id=frame.int
+                    if(id<0) {
+                        if(connection.get()===webSocket)tcpRelay?.receive(id,ByteArray(frame.remaining()).also(frame::get))
+                        webSocket.request(1);return CompletableFuture.completedFuture(null)
+                    }
+                    val stream=gameStreams[id]
                     if(stream!=null) {
                         val chunk=ByteArray(frame.remaining());frame.get(chunk)
                         runCatching { stream.getOutputStream().write(chunk);stream.getOutputStream().flush() }.onFailure { gameStreams.entries.removeIf { it.value===stream };runCatching { stream.close() } }

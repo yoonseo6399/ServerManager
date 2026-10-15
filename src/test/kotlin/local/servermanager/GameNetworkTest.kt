@@ -17,6 +17,14 @@ class GameNetworkTest {
         assertTrue(mapper.readTree(mapper.writeValueAsString(GameNetworkConfig(enabled=true,sableUdpEnabled=true))).path("sableUdpEnabled").asBoolean())
         assertFails {GameDomains.validate(GameNetworkConfig(sableUdpEnabled=true),emptySet())}
     }
+    @Test fun `remote relay requires shared TCP and rejects UDP or malformed runner IDs`() {
+        val id="12345678-1234-1234-1234-123456789abc"
+        val config=GameNetworkConfig(enabled=true,baseDomain="server.example.com",relayRunnerId=id)
+        GameDomains.validate(config,emptySet())
+        assertFails {GameDomains.validate(config.copy(enabled=false),emptySet())}
+        assertFails {GameDomains.validate(config.copy(sableUdpEnabled=true),emptySet())}
+        assertFails {GameDomains.validate(config.copy(relayRunnerId="bad"),emptySet())}
+    }
     private fun config()=GameNetworkConfig(enabled=true,baseDomain="server.example.com",targetHost="gateway.example.com",defaultInstanceId="a",defaultHostname="playground.example.com",labels=mapOf("a" to "alpha","b" to "beta"))
     @Test fun `server domains distinguish instances and preserve only explicit legacy alias`() {
         val c=config();GameDomains.validate(c,setOf("a","b"))

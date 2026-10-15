@@ -1,4 +1,5 @@
 import {SaveBar,navigateWithUnsaved} from './SaveBar';
+import {useViewHistory,useBackClose,type View} from './nav';
 import React, { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Server, Terminal, Folder, Settings, Plus, Play, Square, Download, Upload, ChevronRight, FileText, ArrowUp, RefreshCw, Trash2, Pencil, Box, Circle } from 'lucide-react';
@@ -28,7 +29,6 @@ function App(){
  const auth=useAuth();
  const [instances,setInstances]=useState<Instance[]>([]),[selected,setSelected]=useState(''),[tab,setTab]=useState(['runners','network'].includes(window.location.hash.slice(1))?window.location.hash.slice(1):'console');
  useEffect(()=>{const open=()=>{if(['#runners','#network'].includes(window.location.hash))setTab(window.location.hash.slice(1));};window.addEventListener('hashchange',open);return()=>window.removeEventListener('hashchange',open);},[]);
- useEffect(()=>{if(['runners','network'].includes(tab))history.replaceState(null,'','#'+tab);else if(['#runners','#network'].includes(window.location.hash))history.replaceState(null,'',window.location.pathname+window.location.search);},[tab]);
  const [error,setError]=useState(''),[notice,setNotice]=useState(''),[showCreate,setShowCreate]=useState(false),[busy,setBusy]=useState(false);
  const [javaPath,setJavaPath]=useState('');
  const [addresses,setAddresses]=useState<GameAddresses|null>(null);
@@ -53,11 +53,25 @@ function App(){
  const notify=(text:string)=>{setNotice(text);setTimeout(()=>setNotice(''),4000);};
  const action=async(fn:()=>Promise<unknown>,message?:string)=>{setBusy(true);setError('');try{await fn();await reload();if(message)notify(message);}catch(e){setError(String((e as Error).message));}finally{setBusy(false);}};
  useEffect(()=>{reload().catch(e=>setError(e.message));api<{javaPath:string}>('/health').then(h=>{setJavaPath(h.javaPath);});let stopped=false;let timer:ReturnType<typeof setTimeout>;const poll=async()=>{try{if(!document.hidden)await reload();}catch{}finally{if(!stopped)timer=setTimeout(poll,2000);}};timer=setTimeout(poll,2000);return()=>{stopped=true;clearTimeout(timer);};},[]);
- useEffect(()=>{current.current=selected;setFolder('');setEditor(null);},[selected]);
+ const restoreFolder=useRef<string|null>(null);
+ useEffect(()=>{current.current=selected;setFolder(restoreFolder.current??'');restoreFolder.current=null;setEditor(null);},[selected]);
  useEffect(()=>{if(active)setSettings({...active.config});},[selected,active?.config.port,active?.config.memoryMb,active?.config.name,active?.config.javaPath]);
  const loadFiles=async()=>{if(!selected)return;const rows=await api<Entry[]>(`/instances/${selected}/files?path=${encodeURIComponent(folder)}`);setEntries(rows);};
  useEffect(()=>{if(tab==='files')loadFiles().catch(e=>setError(e.message));},[tab,selected,folder,active?.state==='STOPPED',active?.folderImport?.phase==='COMPLETE']);
  const endpoint=(suffix:string)=>`/instances/${selected}/${suffix}`;
+ const instancesRef=useRef<Instance[]>([]);instancesRef.current=instances;
+ const nav=useViewHistory({selected,tab,folder,editor:editor?.path??null},(v:View)=>{
+  const known=instancesRef.current.some(i=>i.config.id===v.selected);
+  const target=known?v.selected:current.current;
+  if(target!==current.current)restoreFolder.current=v.folder;else setFolder(v.folder);
+  if(known)setSelected(v.selected);
+  setTab(v.tab);setShowCreate(false);setShowPack(false);
+  if(!v.editor){setEditor(null);return;}
+  if(editor?.path===v.editor&&target===current.current)return;
+  api<{content:string;revision:string}>(`/instances/${target}/text?path=${encodeURIComponent(v.editor)}`).then(data=>setEditor({path:v.editor!,...data})).catch(e=>{setError(String((e as Error).message));setEditor(null);nav.cancelRestore();});
+ });
+ useBackClose(showCreate,()=>setShowCreate(false),'create-server');
+ useBackClose(showPack,()=>setShowPack(false),'import-pack');
  const operation=(name:string)=>action(()=>api(endpoint(name),'POST'));
  const openFile=(f:Entry)=>{if(f.directory){setFolder(f.path);setEditor(null);}else action(async()=>{const data=await api<{content:string;revision:string}>(endpoint('text')+'?path='+encodeURIComponent(f.path));setEditor({path:f.path,...data});});};
  const fileRows=useMemo(()=>entries.slice(visibleFilePage*100,(visibleFilePage+1)*100).map(f=><div className="file-row" key={f.path} draggable={canManage&&!running&&!busy} onDragStart={e=>{e.dataTransfer.setData('application/x-servermanager-path',f.path);e.dataTransfer.effectAllowed='move';}} onDragOver={e=>{if(f.directory)e.preventDefault();}} onDrop={e=>{if(f.directory)drop(e,f.path);}}><button className="file-name" onClick={()=>openFile(f)}>{f.directory?<Folder size={18}/>:<FileText size={18}/>} {f.name}</button><span className="muted">{f.directory?'—':f.size<1024?f.size+' B':(f.size/1024).toFixed(1)+' KB'}</span><div className="file-actions">{!f.directory&&<a title="다운로드" href={'/api'+endpoint('download')+'?path='+encodeURIComponent(f.path)}><Download size={14}/></a>}<button title="이동 또는 이름 변경" disabled={running||!canManage} onClick={()=>{const to=prompt('server/ 기준 새 경로',f.path);if(to&&to!==f.path)action(async()=>{await api(endpoint('move'),'POST',{from:f.path,to});setEditor(null);await loadFiles();});}}><Pencil size={14}/></button><button title="삭제" disabled={running||!canManage} onClick={()=>{if(confirm(`${f.name}을 휴지통으로 이동할까요?`))action(async()=>{await api(endpoint('files')+'?path='+encodeURIComponent(f.path),'DELETE');setEditor(null);await loadFiles();});}}><Trash2 size={14}/></button></div></div>),[entries,canManage,running,busy,selected,folder,visibleFilePage]);

@@ -40,6 +40,25 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
     private val mapper=jacksonObjectMapper()
     private val sessions=ConcurrentHashMap<String,WebSocketSession>()
     private val tokens=ConcurrentHashMap<String,String>()
+    private val tcpRelays=ConcurrentHashMap<String,TcpRelayPeer>()
+    private fun syncTcpRelay(id:String) {
+        val config=network?.config() ?: return
+        if(!registry.tcpRelaySupported(id)) {
+            tcpRelays.remove(id)?.close()
+            if(registry.active(id)==null) {send(id,RunnerMessage("relay-config",state="OFF"));runCatching {sessions[id]?.close(CloseStatus.POLICY_VIOLATION)}}
+            if(config.relayRunnerId==id)network.relayMessage="선택한 실행기가 오프라인이거나 TCP 중계 수신을 허용하지 않았습니다"
+            return
+        }
+        val enabled=config.enabled && config.relayRunnerId==id && activeRoutes.isNotEmpty()
+        if(enabled)tcpRelays.computeIfAbsent(id) {TcpRelayPeer({send(id,it)},{stream,bytes,count->sendBinary(id,stream,bytes,count)})}
+        else tcpRelays.remove(id)?.close()
+        send(id,RunnerMessage("relay-config",state=if(enabled)"ON" else "OFF",detail=config.port.toString()))
+    }
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelay=5000) fun syncTcpRelays() {
+        sessions.keys.forEach {syncTcpRelay(it)}
+        if(network?.config()?.relayRunnerId==null)network?.relayMessage="중앙 Mac 중계"
+        network?.config()?.relayRunnerId?.let {if(!connected(it))network.relayMessage="중계 실행기 오프라인"}
+    }
     private data class PendingWorkspace(val runner:String,val instance:String,val future:java.util.concurrent.CompletableFuture<com.fasterxml.jackson.databind.JsonNode>)
     private val workspaceRequests=ConcurrentHashMap<String,PendingWorkspace>()
     private val workspaceSlots=java.util.concurrent.Semaphore(32)
@@ -59,7 +78,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
     private var sharedListener:ServerSocket?=null
     private val io=Executors.newCachedThreadPool()
     private data class GameStream(val id:Int,val runnerId:String,val instanceId:String,val socket:Socket,val opened:CountDownLatch=CountDownLatch(1))
-    @jakarta.annotation.PreDestroy fun closeDatagrams(){sable.close();udpOutboxes.values.forEach {it.close()};udpOutboxes.clear();udpSessions.values.forEach {runCatching {it.close()}};udpSessions.clear()}
+    @jakarta.annotation.PreDestroy fun closeDatagrams(){tcpRelays.values.forEach {it.close()};tcpRelays.clear();sable.close();udpOutboxes.values.forEach {it.close()};udpOutboxes.clear();udpSessions.values.forEach {runCatching {it.close()}};udpSessions.clear()}
     @PostConstruct fun attach() { manager.attachRemoteController(this) }
     override fun afterConnectionEstablished(session:WebSocketSession) {
         val id=session.attributes["runnerId"] as? String ?: run { session.close(CloseStatus.POLICY_VIOLATION);return }
@@ -71,6 +90,8 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
             udpOutboxes.put(id,DatagramOutbox {frame->runCatching {decorated.sendMessage(BinaryMessage(frame));true}.getOrDefault(false)})?.close()
             return
         }
+        tcpRelays.remove(id)?.close()
+        registry.tcpRelayCapability(id,false)
         registry.connected(id)
         sessions.put(id,session)?.takeIf { it!==session }?.let { previous ->
             sockets.values.filter {it.runnerId==id}.forEach {closeStream(it,false)}
@@ -90,6 +111,18 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
         if(message.payload.length>256*1024) { session.close(CloseStatus.TOO_BIG_TO_PROCESS);return }
         val event=runCatching { mapper.readValue<RunnerMessage>(message.payload) }.getOrNull() ?: return
         when(event.type) {
+            "relay-capability" -> {
+                registry.tcpRelayCapability(id,event.state=="TCP_V1")
+                if(event.state=="TCP_V1")tcpRelays.computeIfAbsent(id) {TcpRelayPeer({send(id,it)},{stream,bytes,count->sendBinary(id,stream,bytes,count)})}
+                syncTcpRelay(id)
+            }
+            "relay-status" -> if(network?.config()?.relayRunnerId==id)network.relayMessage=when(event.state) {"READY"->"실행기 TCP 중계 준비 완료";"OFF"->"실행기 TCP 중계 대기 · 게임 서버 정지";else->"실행기 TCP 포트를 열지 못했습니다. 로컬 수신 허용·포트 충돌을 확인하세요"}
+            "relay-open" -> event.streamId?.takeIf {it<0}?.let {stream->
+                val config=network?.config()
+                if(config?.enabled==true && config.relayRunnerId==id && registry.tcpRelaySupported(id) && activeRoutes.isNotEmpty())tcpRelays[id]?.open(stream,config.port)
+                else send(id,RunnerMessage("relay-closed",streamId=stream))
+            }
+            "relay-closed" -> event.streamId?.takeIf {it<0}?.let {tcpRelays[id]?.end(it)}
             "sable-register" -> {
                 val stream=event.streamId;val instance=event.instanceId;val token=event.token
                 val accepted=stream!=null && instance!=null && token!=null && network?.config()?.sableUdpEnabled==true &&
@@ -160,6 +193,10 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
         val buffer=message.payload
         if(buffer.remaining()<4 || buffer.remaining()>65540)return
         val streamId=buffer.int
+        if(streamId<0) {
+            if(network?.config()?.relayRunnerId==id && registry.tcpRelaySupported(id))tcpRelays[id]?.receive(streamId,ByteArray(buffer.remaining()).also(buffer::get))
+            return
+        }
         val stream=sockets[streamId]?.takeIf { it.runnerId==id } ?: return
         val bytes=ByteArray(buffer.remaining());buffer.get(bytes)
         runCatching { stream.socket.getOutputStream().write(bytes);stream.socket.getOutputStream().flush() }.onFailure { closeStream(stream,true) }
@@ -168,6 +205,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
         val id=session.attributes["runnerId"] as? String ?: return
         if(session.attributes["sableUdp"]==true){if(udpSessions.remove(id,session)){udpOutboxes.remove(id)?.close();sable.removeRunner(id)};return}
         if(sessions.remove(id,session)) {
+            tcpRelays.remove(id)?.close()
             udpOutboxes.remove(id)?.close();udpSessions.remove(id)?.let {runCatching {it.close()}};sable.removeRunner(id)
             tokens.remove(id);registry.disconnected(id);manager.remoteDisconnected(id)
             workspaceRequests.values.filter {it.runner==id}.forEach {it.future.completeExceptionally(IllegalStateException("실행기가 연결 해제됐습니다. 파일을 다시 확인하세요"))}
@@ -215,7 +253,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
         check(activeRoutes.none { (id,runner)->runner==runnerId && id!=instance.id && manager.instance(id).port==instance.port }) { "이 실행기의 내부 게임 포트를 다른 서버가 사용 중입니다" }
         if(sharedListener?.isClosed!=false) {
             val listener=ServerSocket();listener.reuseAddress=false
-            try {listener.bind(InetSocketAddress("0.0.0.0",config.port),50)}
+            try {listener.bind(InetSocketAddress(if(config.relayRunnerId==null)"0.0.0.0" else "127.0.0.1",config.port),50)}
             catch(e:Exception){listener.close();throw IllegalStateException("공유 게임 포트 ${config.port}를 열 수 없습니다")}
             sharedListener=listener
             io.submit {
@@ -238,6 +276,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
         }
         if(config.sableUdpEnabled)sable.listen(config.port)
         activeRoutes[instance.id]=runnerId
+        config.relayRunnerId?.let {syncTcpRelay(it)}
     }
     private fun openRelay(instance:Instance,runnerId:String) {
         if(network?.config()?.enabled==true){openSharedRelay(instance,runnerId);return}
@@ -328,6 +367,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
     override fun command(instance:Instance,value:String) { check(send(requireRunner(instance),RunnerMessage("command",instanceId=instance.id,command=value))) { "실행기에 콘솔 명령을 전달하지 못했습니다" } }
     @Synchronized override fun completed(instance:Instance) {
         activeRoutes.remove(instance.id)
+        network?.config()?.relayRunnerId?.let {syncTcpRelay(it)}
         if(activeRoutes.isEmpty()){sharedListener?.close();sharedListener=null;sable.close()}
         sableStates.remove(instance.id)
         listeners.remove(instance.id)?.close()
