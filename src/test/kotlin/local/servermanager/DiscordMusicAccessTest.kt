@@ -20,7 +20,7 @@ class DiscordMusicAccessTest {
     ) = DiscordMusicAccess.allowed(config, guildId, clientCurrent, action, userChannelId, botChannelId)
 
     @Test fun `music commands fail closed without an enabled current guild connection`() {
-        for (action in listOf("play", "pause", "resume", "skip", "stop", "queue", "join", "leave")) {
+        for (action in listOf("play", "pause", "resume", "skip", "stop", "queue", "join", "leave", "remove", "save", "load", "delete", "autoplay", "playlists", "stats")) {
             assertFalse(allowed(action, config = enabled.copy(enabled = false)))
             assertFalse(allowed(action, guildId = null))
             assertFalse(allowed(action, clientCurrent = false))
@@ -29,14 +29,16 @@ class DiscordMusicAccessTest {
     }
 
     @Test fun `queue is readable outside voice while controls require users voice channel`() {
-        assertTrue(allowed("queue", userChannelId = null, botChannelId = null))
-        for (action in listOf("play", "pause", "resume", "skip", "stop", "join", "leave")) {
+        for(action in listOf("queue","playlists","stats")) {
+            assertTrue(allowed(action, userChannelId = null, botChannelId = null))
+        }
+        for (action in listOf("play", "pause", "resume", "skip", "stop", "join", "leave", "remove", "save", "load", "delete", "autoplay")) {
             assertFalse(allowed(action, userChannelId = null, botChannelId = null), action)
         }
     }
 
     @Test fun `connected bot accepts only same voice channel controls`() {
-        for (action in listOf("play", "pause", "resume", "skip", "stop", "join", "leave")) {
+        for (action in listOf("play", "pause", "resume", "skip", "stop", "join", "leave", "remove", "save", "load", "delete", "autoplay")) {
             assertTrue(allowed(action), action)
             assertFalse(allowed(action, userChannelId = otherVoice), action)
         }

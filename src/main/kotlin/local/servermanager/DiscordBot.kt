@@ -81,7 +81,11 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
     }
     @Volatile private var client:JDA?=null
     private val codeAgent=DiscordCodeAgent({view().config},{client},{AgentApiKeyStore(manager.root.resolve("security/agent")).read()},manager.root.resolve("security/agent"))
-    private val music by lazy { runCatching { DiscordMusic({view().config},{client},DiscordMusicPlayback(),manager.root.resolve("security/discord")) }.getOrNull() }
+    private val music by lazy { runCatching { run {
+        val directory=manager.root.resolve("security/discord")
+        val library=DiscordMusicLibraryStore(directory)
+        DiscordMusic({view().config},{client},DiscordMusicPlayback(library),directory,library)
+    } }.getOrNull() }
     @Volatile private var musicAudioReady=false
     @Volatile private var message="봇 토큰을 입력하고 연동을 켜세요."
     @Volatile private var connecting=false
@@ -199,7 +203,11 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
         }, {})
     }
     override fun onButtonInteraction(event:ButtonInteractionEvent) {
-        if(event.componentId.startsWith("music:")) {music?.handleButton(event);return}
+        if(event.componentId.startsWith("music:")) {
+            if(musicAudioReady)music?.handleButton(event)
+            else event.reply("음악 오디오 기능을 시작하지 못했습니다. 봇 오디오 설정을 확인하세요.").setEphemeral(true).queue({}, {})
+            return
+        }
         if(event.jda!==client || !event.componentId.startsWith("sm:")) return
         val parts=event.componentId.split(':')
         val guild=event.guild
@@ -217,8 +225,14 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
             }, { hook.editOriginal("현재 서버 역할을 확인하지 못했습니다. 잠시 후 다시 시도하세요.").queue({}, {}) })
         }, {})
     }
+    override fun onStringSelectInteraction(event:net.dv8tion.jda.api.events.interaction.component.StringSelectInteractionEvent) {
+        if(event.componentId.startsWith("music:")) {
+            if(musicAudioReady)music?.handleSelect(event)
+            else event.reply("음악 오디오 기능을 시작하지 못했습니다. 봇 오디오 설정을 확인하세요.").setEphemeral(true).queue({}, {})
+        }
+    }
     override fun onMessageReceived(event:net.dv8tion.jda.api.events.message.MessageReceivedEvent) {
-        if(event.jda===client)music?.handleMessage(event)
+        if(event.jda===client && musicAudioReady)music?.handleMessage(event)
     }
     fun execute(guild:String,roles:Set<String>,user:String,requestId:String,id:String,action:String,actor:StartActor?=null):String = desktop.gate.read {
         if(desktop.stopping) "관리 앱 업데이트 중입니다. 잠시 후 다시 시도하세요."
