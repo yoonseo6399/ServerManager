@@ -1,4 +1,4 @@
-상태: 로컬 검증 완료; GitHub CLI 인증 복구 후 0.4.14 게시 검증 진행 중
+상태: 0.4.14 정식 게시 완료; 공개 파일 9개 해시·고정 공개키 서명·latest 확인 완료
 # 0.4.14 candidate handoff
 
 ## Scope
@@ -31,3 +31,12 @@
 3. Wait for signed release workflow and installer checks. Inspect failed jobs; never call an unpublished or failing workflow a completed release.
 4. Verify the public release and all nine names/sizes/hashes, latest/non-prerelease, manifest signature and pinned public key.
 5. Follow docs/WORKFLOW.md to merge the validated release into main without dropping main's unrelated work. Do not apply it to a running production app without checking live state and user scope.
+
+## Published outcome
+- Public stable/latest: https://github.com/yoonseo6399/ServerManager/releases/tag/v0.4.14 (release 413734507).
+- Immutable source/tag: a4d64b7aaea6c4dcbbe46f56739ed729467cd91b.
+- Mac + Windows installer checks 38726999074 PASS on the exact source; duplicate tag-triggered installer run 38727727189 cancelled to avoid repeating the same checks.
+- Signed release workflow 38727727053 PASS (full backend tests, frontend build, runner setup, packaging/signing/publication).
+- All 9 public assets downloaded: exact names, sizes and GitHub SHA256 digests matched; SHA256SUMS entries matched. Manifest Ed25519 signature verified against the existing pinned public key. Published JAR app-version=0.4.14; all four runner ZIPs contain that exact JAR. Public latest/non-prerelease confirmed.
+- Public JAR SHA256: 592b247964f518f6c61756ab825e4f99e1dd2f247d299b5b780954d534c12a9c.
+- This follow-up documents publication; the published tag and assets were not modified. Actual Qwen inference, live Discord and public multi-computer game ingress remain unverified. No production app/runner/game lifecycle actions.
