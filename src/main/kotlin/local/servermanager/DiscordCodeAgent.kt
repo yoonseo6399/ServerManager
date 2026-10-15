@@ -86,14 +86,17 @@ class DiscordCodeAgent(private val config:()->DiscordConfig,private val current:
                     try {worker.submit {
                         try {
                             val size=event.getOption("model")!!.asString
-                            val answer=LocalLlm().chat(size,event.getOption("prompt")!!.asString,event.getOption("think")?.asBoolean==true)
+                            val prompt=event.getOption("prompt")!!.asString;val think=event.getOption("think")?.asBoolean==true
+                            val remote=RemoteLlm.chat(size,prompt,think)
+                            val answer=remote?.answer ?: LocalLlm().chat(size,prompt,think)
+                            val where=remote?.let {" · 실행기 ${it.runnerName.replace(Regex("[\\p{Cntrl}]")," ").take(40)}"} ?: ""
                             if(event.jda===current()) {
-                                val info="Qwen3 $size · ${"%.1f".format(java.util.Locale.ROOT,answer.seconds)}초 · 출력 ${answer.tokens}토큰"+(if(answer.limited)" · 출력 한도 도달: 답변이 미완성일 수 있습니다." else "")
+                                val info="Qwen3 $size$where · ${"%.1f".format(java.util.Locale.ROOT,answer.seconds)}초 · 출력 ${answer.tokens}토큰"+(if(answer.limited)" · 출력 한도 도달: 답변이 미완성일 수 있습니다." else "")
                                 if(answer.text.length<=1600)hook.editOriginal("$info\n\n${answer.text}").setAllowedMentions(emptyList()).complete()
                                 else hook.editOriginal(info+"\n전체 답변은 첨부 파일에 있습니다.").setAllowedMentions(emptyList())
                                     .setFiles(net.dv8tion.jda.api.utils.FileUpload.fromData(answer.text.toByteArray(Charsets.UTF_8),"qwen-answer.txt")).complete()
                             }
-                        } catch(_:Exception) {hook.editOriginal("로컬 모델 요청을 완료하지 못했습니다. Ollama 실행·모델 태그·메모리와 3분 제한을 확인하세요.").setAllowedMentions(emptyList()).queue({}, {})}
+                        } catch(_:Exception) {hook.editOriginal("Qwen 요청을 완료하지 못했습니다. Qwen을 실행하는 컴퓨터(실행기 또는 관리 앱)의 Ollama 실행·모델 태그·메모리와 3분 제한을 확인하세요.").setAllowedMentions(emptyList()).queue({}, {})}
                         finally {localBusy.set(false)}
                     }} catch(_:Exception) {localBusy.set(false);hook.editOriginal("실행기가 종료되었습니다.").queue({}, {})}
                     return@queue

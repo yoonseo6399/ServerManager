@@ -131,6 +131,8 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     private val binaryBuffer=ByteArrayOutputStream()
     private val sendLock=Any()
     private val tcpRelayAllowed=System.getenv("RUNNER_TCP_RELAY_ENABLED")=="true" || home.resolve("tcp-relay-enabled").let {it.isRegularFile() && it.readText().trim()=="true"}
+    private val llmAllowed=System.getenv("RUNNER_LLM_ENABLED")=="true" || home.resolve("llm-enabled").let {it.isRegularFile() && it.readText().trim()=="true"}
+    private val llmBusy=java.util.concurrent.atomic.AtomicBoolean()
     @Volatile private var tcpRelay:TcpRelayPeer?=null
     @Volatile private var sessionToken:String?=null
     private val processes=ConcurrentHashMap<String,Process>()
@@ -275,7 +277,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                         "sable-registered" -> message.token?.let {sableRegistrations[it]?.complete(message.state=="OK")}
 
                         "session" -> { sessionToken=message.token;tcpRelay?.close();tcpRelay=if(tcpRelayAllowed)TcpRelayPeer(::send,::sendBinary) else null
-                            send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));reportUpdate();recoverStates() }
+                            send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));send(RunnerMessage("llm-capability",state=if(llmAllowed)"OLLAMA_V1" else "OFF"));reportUpdate();recoverStates() }
                         "relay-config" -> {
                             val port=message.detail?.toIntOrNull()
                             val ok=tcpRelayAllowed && (message.state=="OFF" || port in 1024..65535) && runCatching {tcpRelay?.listen(if(message.state=="ON")port else null);true}.getOrDefault(false)
@@ -286,6 +288,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                         "update-request" -> if(message.detail in setOf("WHEN_IDLE","PAUSE_TRANSFER")) {
                             requestUpdate(message.detail=="PAUSE_TRANSFER")
                         }
+                        "llm-request" -> if(message.token!=null)workers.submit {llmChat(message.token,message.state.orEmpty(),message.command.orEmpty(),message.detail=="THINK")}
                         "workspace" -> if(message.instanceId!=null && message.token!=null && message.detail!=null)workers.submit {workspace(message.instanceId,message.token,message.detail)}
                         "install" -> if(message.instanceId!=null && message.token!=null && message.detail!=null)workers.submit {installServer(message.instanceId,message.token,message.detail)}
                         "start" -> if(message.instanceId!=null && message.detail!=null) workers.submit { beginStart(message.instanceId,message.detail) }
@@ -391,6 +394,18 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                 check(processes[id]?.isAlive!=true && !orphanAlive(id) && !dirty(id).exists()) {"서버를 정상 종료한 뒤 파일을 변경하세요"}
                 if(serverDir(id).resolve("server.properties").exists())folders.checkWorldStopped(id)
             }}}!!
+    /** Ollama runs on this computer only; the manager never gets a way to choose the endpoint or a model tag. */
+    private fun llmChat(requestId:String,size:String,prompt:String,think:Boolean) {
+        val response=try {
+            check(llmAllowed) {"이 실행기는 Qwen 실행이 허용되지 않았습니다"}
+            check(llmBusy.compareAndSet(false,true)) {"이 실행기에서 다른 Qwen 요청이 진행 중입니다"}
+            try {
+                val answer=LocalLlm().chat(size,prompt,think)
+                RunnerMessage("llm-result",state="OK",token=requestId,detail=mapper.writeValueAsString(answer).also {require(it.length<=200*1024)})
+            } finally {llmBusy.set(false)}
+        } catch(e:Exception) {RunnerMessage("llm-result",state="ERROR",token=requestId,detail=(if(e is IllegalStateException||e is IllegalArgumentException)e.message else null)?.take(500) ?: "실행기의 Ollama 요청을 완료하지 못했습니다")}
+        send(response)
+    }
     private fun workspace(id:String,requestId:String,raw:String) {
         val response=try {synchronized(operationLocks.computeIfAbsent(id){Any()}) {
             var reserved=false

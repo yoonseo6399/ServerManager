@@ -9,6 +9,13 @@ import java.net.http.HttpResponse
 import java.time.Duration
 import java.util.concurrent.TimeUnit
 
+/** Set by [RunnerGateway]: sends Qwen chat to a connected runner that opted in with RUNNER_LLM_ENABLED. Null result means no such runner. */
+object RemoteLlm {
+    data class Result(val answer:LocalLlm.Answer,val runnerName:String)
+    @Volatile var provider:((String,String,Boolean)->Result?)?=null
+    fun chat(size:String,prompt:String,think:Boolean):Result?=provider?.invoke(size,prompt,think)
+}
+
 /** Plain chat only: no project files, tool execution, or provider fallback. */
 class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http://127.0.0.1:11434")) {
     private val mapper=jacksonObjectMapper()
