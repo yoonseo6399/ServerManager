@@ -66,6 +66,10 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
         } catch(e:Exception) {Status(false,null,emptyList(),emptyList(),tags,tags.mapValues {false},"Ollama에 연결하지 못했습니다. 실행 여부와 OLLAMA_URL을 확인하세요.")}
     }
     fun chat(size:String,prompt:String,think:Boolean=false):Answer {
+        check(inference.tryAcquire()) {"다른 로컬 모델 요청이 진행 중입니다."}
+        try {return chatLocked(size,prompt,think)} finally {inference.release()}
+    }
+    private fun chatLocked(size:String,prompt:String,think:Boolean):Answer {
         require(size in SIZES && prompt.isNotBlank() && prompt.length<=6000)
         val model=tag(size)
         unloadQwen(model)
@@ -90,8 +94,23 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
     }
 
     companion object {
+        private val inference=java.util.concurrent.Semaphore(1)
         val SIZES=listOf("14b","30b")
         fun tag(size:String):String = System.getenv(if(size=="14b")"OLLAMA_MODEL_14B" else "OLLAMA_MODEL_30B") ?: "qwen3:$size"
         private fun qwenTags()=SIZES.map(::tag)
+    }
+}
+
+/** One inference request across chat, the file harness and private Google summaries. */
+object QwenRequests {
+    data class Reply(val answer:LocalLlm.Answer,val runnerName:String?)
+    private val slot=java.util.concurrent.Semaphore(1)
+    fun chat(size:String,prompt:String,think:Boolean=false,runnerId:String?=null):Reply {
+        check(slot.tryAcquire()) {"다른 Qwen 요청이 진행 중입니다."}
+        try {
+            val remote=RemoteLlm.chat(size,prompt,think,runnerId)
+            check(remote!=null || runnerId==null) {"선택한 실행기를 사용할 수 없습니다."}
+            return Reply(remote?.answer ?: LocalLlm().chat(size,prompt,think),remote?.runnerName)
+        } finally {slot.release()}
     }
 }

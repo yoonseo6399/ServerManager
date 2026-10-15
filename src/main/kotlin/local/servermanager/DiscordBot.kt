@@ -60,7 +60,7 @@ class DiscordAlerts {
 data class DiscordBotStatus(val state:String, val message:String, val inviteUrl:String?, val guilds:List<Map<String,String>>)
 
 @Service
-class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, private val desktop:DesktopLifecycle,private val remoteFiles:RemoteFiles=RemoteFiles(manager)):ListenerAdapter() {
+class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, private val desktop:DesktopLifecycle,private val remoteFiles:RemoteFiles=RemoteFiles(manager),private val assistant:AssistantHarness?=null,private val assistantIdentity:AssistantIdentity?=null,private val assistantGoogle:AssistantGoogle?=null):ListenerAdapter() {
     private val settings=DiscordSettingsStore(manager.root.resolve("security/discord"))
     private val panels=DiscordPanelStore(manager.root.resolve("security/discord"))
     private val lifecycle=Executors.newSingleThreadExecutor()
@@ -81,6 +81,7 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
     }
     @Volatile private var client:JDA?=null
     private val codeAgent=DiscordCodeAgent({view().config},{client},{AgentApiKeyStore(manager.root.resolve("security/agent")).read()},manager.root.resolve("security/agent"))
+    private val assistantCommands=if(assistant!=null && assistantIdentity!=null)DiscordAssistant(assistant,assistantIdentity,{view().config},{client},assistantGoogle) else null
     private val music by lazy { runCatching { run {
         val directory=manager.root.resolve("security/discord")
         val library=DiscordMusicLibraryStore(directory)
@@ -164,6 +165,7 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
                     SubcommandData("restart","내 역할에 허용된 서버 재시작").addOptions(OptionData(OptionType.STRING,"server","Minecraft 서버",true).setAutoComplete(true)))
             guild.upsertCommand(command).queue({}, { if(jda===client) message="명령 등록 실패: 봇 초대 권한과 서버 ID를 확인하세요." })
             codeAgent.register(jda,id)
+            assistantCommands?.register(jda,id)
             music?.register(jda,id)
         }
     }
@@ -180,6 +182,7 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
         event.replyChoices(choices.map { Command.Choice(it.first,it.second) }).queue({}, {})
     }
     override fun onSlashCommandInteraction(event:SlashCommandInteractionEvent) {
+        if(event.name in setOf("assistant","assistant-link","assistant-google")) {assistantCommands?.handle(event);return}
         if(event.name in setOf("agent","sub-agent","agent-keys","local-llm")) {codeAgent.handle(event);return}
         if(event.name=="music") {
             if(!musicAudioReady) event.reply("음악 오디오 기능을 시작하지 못했습니다. 서버 관리자에게 오디오 설정을 확인해 달라고 요청하세요.").setEphemeral(true).queue({}, {})
@@ -203,6 +206,7 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
         }, {})
     }
     override fun onButtonInteraction(event:ButtonInteractionEvent) {
+        if(event.componentId.startsWith("as:")) {assistantCommands?.button(event);return}
         if(event.componentId.startsWith("music:")) {
             if(musicAudioReady)music?.handleButton(event)
             else event.reply("음악 오디오 기능을 시작하지 못했습니다. 봇 오디오 설정을 확인하세요.").setEphemeral(true).queue({}, {})
@@ -412,7 +416,7 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
             rows.filter { it.id !in keep }.forEach { it.delete().queue({}, { if(client!=null) message="전용 채널 정리 실패: 메시지 관리 권한을 확인하세요." }) }
         }, { if(client!=null) message="전용 채널을 읽지 못했습니다. 메시지 기록 보기 권한을 확인하세요." })
     }
-    @PreDestroy fun close() { generation.incrementAndGet();runCatching { music?.close() };codeAgent.close();signalSubscription.close();alerts.clear();client?.shutdownNow();client=null;lifecycle.shutdownNow() }
+    @PreDestroy fun close() { generation.incrementAndGet();runCatching { music?.close() };codeAgent.close();assistantCommands?.close();signalSubscription.close();alerts.clear();client?.shutdownNow();client=null;lifecycle.shutdownNow() }
     private fun stateLabel(value:String)=mapOf("NEW" to "설치 필요","STOPPED" to "정지됨","STARTING" to "시작 중","RUNNING" to "실행 중","STOPPING" to "종료 중","FAILED" to "오류","INSTALLING" to "설치 중","IMPORTING" to "가져오는 중","IMPORT_FAILED" to "가져오기 실패","TRANSFERRING" to "파일 전송 중","SYNCING" to "파일 인계 중","SYNC_FAILED" to "인계 재시도 대기","UNKNOWN" to "연결 확인 중")[value] ?: value
 }
 
