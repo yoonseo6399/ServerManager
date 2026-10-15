@@ -71,6 +71,7 @@ class GameHostService(private val home:Path,private val version:String,private v
         @Volatile var exitCode:Int?=null;@Volatile var exitAcked=false;@Volatile var ready=false
         val seenCommands=object:LinkedHashMap<String,Boolean>(){override fun removeEldestEntry(e:MutableMap.MutableEntry<String,Boolean>)=size>1000}
         val managed get()=process!=null
+        @Volatile var stopping=false;@Volatile var port:Int?=null
         fun alive()=if(process!=null)process.isAlive else ProcessHandle.of(pid).map {it.isAlive && it.info().startInstant().map {s->s.toEpochMilli()}.orElse(-1)==startMillis}.orElse(false)
     }
     private val games=ConcurrentHashMap<String,Game>()
@@ -130,6 +131,19 @@ class GameHostService(private val home:Path,private val version:String,private v
             val socket=runCatching {server.accept()}.getOrNull() ?: break
             io.submit {serve(socket)}
         }
+    }
+    @Volatile private var relayRole:DirectRelayRunnerRole?=null
+    /**
+     * The direct relay (hub and agent tunnels) lives here so established player connections survive control-layer updates.
+     * Control messages travel through whichever controller is attached; without one, new tickets cannot be fetched
+     * but existing tunnels keep carrying traffic.
+     */
+    @Synchronized private fun relay():DirectRelayRunnerRole=relayRole ?: DirectRelayRunnerRole(home,
+        {message->controller?.send(mapOf("t" to "relay","body" to mapper.writeValueAsString(message))) ?: false},
+        {id->games[id]?.takeIf {it.alive() && it.ready && !it.stopping}?.port},
+        {id->games[id]?.let {it.alive() && it.ready && !it.stopping}==true}).also {
+        relayRole=it
+        io.submit {while(!closed){try {Thread.sleep(1000)} catch(_:InterruptedException){break};runCatching {it.tick()}}}
     }
     private fun pingLoop() {
         while(!closed) {
@@ -225,6 +239,7 @@ class GameHostService(private val home:Path,private val version:String,private v
                 if(expect<=0 || expect!=game.pid)return fail("WRONG_PROCESS")
                 val p=game.process ?: return fail("NOT_CONTROLLABLE")
                 if(!p.isAlive)return fail("NOT_RUNNING")
+                game.stopping=true
                 if(m.path("t").asText()=="stop")runCatching {synchronized(p){p.outputStream.write("stop\n".toByteArray());p.outputStream.flush()}}
                 else {p.descendants().use {s->s.forEach {runCatching {it.destroyForcibly()}}};p.destroyForcibly()}
                 ok()
@@ -234,7 +249,12 @@ class GameHostService(private val home:Path,private val version:String,private v
                 if(game.pid!=m.path("pid").asLong() || game.alive() || game.exitCode==null && game.managed)return fail("NOT_EXITED")
                 game.exitAcked=true;games.remove(game.id,game);persist();ok()
             }
-            "relay" -> {onRelayMessage?.invoke(m.path("body").asText());ok()}
+            "relay" -> {
+                val message=runCatching {mapper.readValue(m.path("body").asText(),RunnerMessage::class.java)}.getOrNull() ?: return
+                relay().onMessage(message)
+            }
+            "relay-session" -> relay().onSession()
+            "relay-busy" -> ok(mapOf("busy" to (relayRole?.busy()==true)))
             else -> fail("UNKNOWN_COMMAND")
         }
     }
@@ -255,7 +275,7 @@ class GameHostService(private val home:Path,private val version:String,private v
             val env=m.path("env");if(env.isObject)builder.environment().apply {clear();env.fields().forEach {(k,v)->put(k,v.asText())}}
             val process=try {builder.start()} catch(e:Exception){return fail("START_FAILED",mapOf("detail" to (e.message ?: e.javaClass.simpleName).take(300)))}
             val started=process.toHandle().info().startInstant().map {it.toEpochMilli()}.orElse(System.currentTimeMillis())
-            Game(id,process,process.pid(),started).also {games[id]=it}
+            Game(id,process,process.pid(),started).also {it.port=m.path("port").takeIf {p->p.isInt}?.asInt();games[id]=it}
         }
         persist()
         ok(mapOf("pid" to game.pid,"startMillis" to game.startMillis,"duplicate" to false))
@@ -276,7 +296,7 @@ class GameHostService(private val home:Path,private val version:String,private v
         controller?.send(mapOf("t" to "exit","id" to game.id,"pid" to game.pid,"code" to code))
     }
     override fun close() {
-        closed=true;runCatching {server.close()};controller?.close();io.shutdownNow()
+        closed=true;runCatching {server.close()};controller?.close();runCatching {relayRole?.close()};io.shutdownNow()
         runCatching {lock?.release()};runCatching {lockChannel.close()}
         // Games deliberately keep running: closing the host handle never kills a game.
     }
@@ -408,8 +428,8 @@ class GameHostClient private constructor(private val socket:Socket,private val r
     }
     fun status():List<HostInstanceStatus> =request(mapOf("t" to "status")).path("instances").map {mapper.treeToValue(it,HostInstanceStatus::class.java)}
     class StartResult(val process:HostedProcess,val duplicate:Boolean)
-    fun start(id:String,command:List<String>,dir:Path,env:Map<String,String>):StartResult {
-        val reply=request(mapOf("t" to "start","id" to id,"command" to command,"dir" to dir.toString(),"env" to env),30000)
+    fun start(id:String,command:List<String>,dir:Path,env:Map<String,String>,port:Int?=null):StartResult {
+        val reply=request(mapOf("t" to "start","id" to id,"command" to command,"dir" to dir.toString(),"env" to env)+(if(port!=null)mapOf("port" to port) else emptyMap()),30000)
         val process=HostedProcess(this,id,reply.path("pid").asLong(),reply.path("startMillis").asLong());processes[id]=process
         if(!reply.path("duplicate").asBoolean())attachInternal(id,0,process,adopting=false) else attachInternal(id,lastSeq[id] ?: 0,process)
         return StartResult(process,reply.path("duplicate").asBoolean())
@@ -434,7 +454,10 @@ class GameHostClient private constructor(private val socket:Socket,private val r
     fun stop(id:String,pid:Long)=runCatching {request(mapOf("t" to "stop","id" to id,"expectPid" to pid))}
     fun kill(id:String,pid:Long)=runCatching {request(mapOf("t" to "kill","id" to id,"expectPid" to pid))}
     fun ackExit(id:String,pid:Long)=request(mapOf("t" to "ack-exit","id" to id,"pid" to pid))
-    fun relay(body:String)=send(mapOf("t" to "relay","req" to "x","body" to body))
+    /** Direct-relay control traffic (manager messages for the relay role that lives in the host). */
+    fun relayForward(json:String)=send(mapOf("t" to "relay","body" to json))
+    fun relaySession()=send(mapOf("t" to "relay-session"))
+    fun relayBusy():Boolean=runCatching {request(mapOf("t" to "relay-busy")).path("busy").asBoolean()}.getOrDefault(false)
     /** Detach without touching any game. The host immediately accepts the next controller. */
     override fun close(){runCatching {socket.close()}}
 }

@@ -48,7 +48,7 @@ class HostModeStore(private val home:Path,private val env:(String)->String?={Sys
 /** What the control layer needs from the host, independent of whether it is the desktop manager or a runner. */
 interface LocalGameLauncher {
     /** A process owned by the resident host, or null when the legacy in-process launch must be used. */
-    fun launch(id:String,command:List<String>,dir:Path,env:Map<String,String>):Process?
+    fun launch(id:String,command:List<String>,dir:Path,env:Map<String,String>,port:Int?=null):Process?
     /** A still-running game owned by the host, for re-attachment after a controller update. */
     fun adopt(id:String,afterSeq:Long=0):Process?
     fun adoptable():List<String>
@@ -72,10 +72,10 @@ class HostedGames(private val home:Path,private val controllerId:String,private 
         return runCatching {java.net.Socket().use {it.connect(java.net.InetSocketAddress("127.0.0.1",endpoint.port),1000)};true}.getOrDefault(false)
     }
     var onConsole:(String,Long,String)->Unit={_,_,_->}
-    override fun launch(id:String,command:List<String>,dir:Path,env:Map<String,String>):Process? {
+    override fun launch(id:String,command:List<String>,dir:Path,env:Map<String,String>,port:Int?):Process? {
         val c=connection() ?: return null
         c.onConsole=onConsole
-        val result=c.start(id,command,dir,env)
+        val result=c.start(id,command,dir,env,port)
         check(!result.duplicate) {"이미 상주 서비스가 이 서버의 프로세스를 소유하고 있습니다 (PID ${result.process.pid()})"}
         return result.process
     }
@@ -83,6 +83,10 @@ class HostedGames(private val home:Path,private val controllerId:String,private 
     override fun adoptable():List<String> {val c=connection() ?: return emptyList();return runCatching {c.status().filter {it.managed && it.alive}.map {it.id}}.getOrDefault(emptyList())}
     override fun released(id:String,pid:Long){runCatching {client?.ackExit(id,pid)}}
     fun hostStatus():List<HostInstanceStatus> =runCatching {connection()?.status()}.getOrNull() ?: emptyList()
+    /** Relay control traffic goes to the role that lives in the host; manager-bound output comes back through [onRelay]. */
+    fun relayForward(json:String):Boolean=connection()?.relayForward(json) ?: false
+    fun relaySession():Boolean=connection()?.relaySession() ?: false
+    fun onRelay(handler:(String)->Unit){connection()?.onRelay=handler}
     fun hostProtocol():Int?=client?.takeIf {!it.disconnected}?.hostProtocol
     fun hostVersion():String?=client?.takeIf {!it.disconnected}?.hostVersion
     /** Detaches the controller. Games keep running; this is what an update or a shutdown must call. */

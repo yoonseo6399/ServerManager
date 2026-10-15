@@ -237,6 +237,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         if(hostModeState.mode!="SERVICE"){candidate.close();return}
         if(candidate.connection()==null){hostModeState=hostMode.fallback("상주 서비스를 시작하지 못해 이전 방식으로 실행합니다: ${candidate.lastError}");return}
         hosted=candidate
+        candidate.onRelay {body->runCatching {send(mapper.readValue<RunnerMessage>(body))}}
         owned.forEach {id->
             val config=configs[id] ?: runCatching {mapper.readValue<Instance>(instanceRoot(id).resolve("instance.json").readText())}.getOrNull() ?: return@forEach
             configs[id]=config
@@ -285,7 +286,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                 workers.submit { checkRunnerUpdate() }
             }
             if(restartForUpdate()) kotlin.system.exitProcess(75)
-            send(RunnerMessage("heartbeat",version=version()));sable.heartbeat();directRelay.tick()
+            send(RunnerMessage("heartbeat",version=version()));sable.heartbeat();if(hosted==null)directRelay.tick()
             reportUpdate()
             reportFolders()
             home.resolve("instances").takeIf {it.exists()}?.listDirectoryEntries()?.forEach {dir->dir.resolve("install-result.json").takeIf {it.exists()}?.let {file->runCatching {send(mapper.readValue<RunnerMessage>(file.readText()))}}}
@@ -401,7 +402,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                         "sable-registered" -> message.token?.let {sableRegistrations[it]?.complete(message.state=="OK")}
 
                         "session" -> { sessionToken=message.token;tcpRelay?.close();tcpRelay=if(tcpRelayAllowed)TcpRelayPeer(::send,::sendBinary) else null
-                            confirmActivation();directRelay.onSession();reportUpdateDetail();send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));send(RunnerMessage("llm-capability",state=if(llmAllowed)"OLLAMA_V1" else "OFF"));reportUpdate();recoverStates() }
+                            confirmActivation();if(hosted?.relaySession()!=true)directRelay.onSession();reportUpdateDetail();send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));send(RunnerMessage("llm-capability",state=if(llmAllowed)"OLLAMA_V1" else "OFF"));reportUpdate();recoverStates() }
                         "relay-config" -> {
                             val port=message.detail?.toIntOrNull()
                             val ok=tcpRelayAllowed && (message.state=="OFF" || port in 1024..65535) && runCatching {tcpRelay?.listen(if(message.state=="ON")port else null);true}.getOrDefault(false)
@@ -409,7 +410,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                         }
                         "relay-opened" -> message.streamId?.takeIf {it<0}?.let {tcpRelay?.ready(it)}
                         "relay-closed" -> message.streamId?.takeIf {it<0}?.let {tcpRelay?.end(it)}
-                        "drp-relay-config","drp-agent-config","drp-ticket" -> directRelay.onMessage(message)
+                        "drp-relay-config","drp-agent-config","drp-ticket" -> if(hosted?.relayForward(mapper.writeValueAsString(message))!=true)directRelay.onMessage(message)
                         "update-request" -> if(message.detail in setOf("WHEN_IDLE","PAUSE_TRANSFER")) {
                             requestUpdate(message.detail=="PAUSE_TRANSFER")
                         }
@@ -734,7 +735,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         val builder=ProcessBuilder(args).directory(serverDir(id).toFile()).redirectErrorStream(true)
         val udpStatus=runCatching {sable.prepare(instance,serverDir(id),builder)}.getOrElse {"UDP 초기화 실패 · TCP 대체 통신을 사용합니다"}
         send(RunnerMessage("sable-status",id,detail=udpStatus))
-        val process=hosted?.launch(id,args,serverDir(id),builder.environment().toMap()) ?: builder.start()
+        val process=hosted?.launch(id,args,serverDir(id),builder.environment().toMap(),instance.port) ?: builder.start()
         onSpawned()
         processes[id]=process
         dirty(id).writeText("${process.pid()}|${process.info().startInstant().orElse(Instant.now()).toEpochMilli()}")

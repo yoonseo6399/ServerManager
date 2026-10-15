@@ -453,7 +453,7 @@ class ServerManager {
             r.crashesBefore=CrashReports.snapshot(serverDir(id))
             // The resident host (when active) owns the process so it survives a manager restart or update.
             val builder=ProcessBuilder(args).directory(serverDir(id).toFile()).redirectErrorStream(true)
-            val p=localLauncher?.launch(id,args,serverDir(id),builder.environment().toMap()) ?: builder.start()
+            val p=localLauncher?.launch(id,args,serverDir(id),builder.environment().toMap(),i.port) ?: builder.start()
             r.process=p; r.state="STARTING"; r.players=null; r.event("system","서버 시작 · 127.0.0.1:${i.port} · PID ${p.pid()}"+if(p is HostedProcess)" · 상주 서비스가 프로세스를 소유" else "")
             watch(id,r,p)
         }
