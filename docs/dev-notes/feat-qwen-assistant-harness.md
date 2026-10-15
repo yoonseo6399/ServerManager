@@ -1,4 +1,4 @@
-상태: macOS 파일 비서·소유자 승인·Discord 연결·Google 비공개 요약 구현; 31개 범위 테스트 통과, UI 연결 검증 진행 중
+상태: 구현 완료·검토 대기; macOS 백엔드31개 및 별도 UI 통합 브라우저3개 통과, 실제 Qwen·외부 연결 미검증
 # feat/qwen-assistant-harness
 
 기준: origin/main 2bf9368 → origin/release/0.5.1 ad2bc9c fast-forward. 제공자 의존성 d8b615a를 272a93d로 cherry-pick. VERSION·릴리즈 문서는 작업 변경하지 않음.
@@ -32,3 +32,5 @@ UI 담당이 AssistantPanel을 AI 소유자 메뉴에 추가. Claude 담당 Runn
 - macOS 사본 생성 실패 시 원본 inode를 확인하고 미게시 임시 inode 정리를 시도. 외부 교체 파일은 보존.
 - UI 담당이 checkpoint82c4cef를 병합해 소유자 AI 메뉴 연결과 브라우저 검증을 수행 중. 중복 브라우저 테스트는 실행하지 않음.
 - Native API 참고: Apple xnu `bsd/sys/fcntl.h`, `bsd/sys/stat.h`, SDK `sys/stdio.h`의 Darwin64 ABI/RENAME_SWAP; JNA5.17.0 Apache2.0/LGPL2.1 이중 라이선스. 메모리 배치와 실제 파일 동작은 macOS arm64 범위 테스트로 확인.
+
+UI 담당 최종 보고: `feat/direct-relay-settings-ui` 2923d68에서 AssistantPanel 소유자 AI 메뉴 연결 완료. 브라우저3개(초안 동의→리뷰→최종 승인 및 중복 차단, 정책 SaveBar·이동 경고, 일반 사용자 제외) 통과. 스크린샷 `ServerManager-direct-relay-settings-ui/test-results/assistant-reviewed.png`를 UI 담당이 직접 확인. UI 전용 레이아웃 보완은 UI 브랜치에 있으며 이 브랜치에는 추가로 복사하지 않음.
