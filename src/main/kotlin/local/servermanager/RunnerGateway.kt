@@ -131,6 +131,18 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
                 else if(event.state=="STOPPED") manager.remoteWorkerReady(instanceId,id)
                 else event.state?.let { manager.remoteState(instanceId,id,it,event.detail) }
                 manager.remoteMetrics(instanceId,id,event.pid,event.cpuPercent,event.rssMb,event.uptimeSeconds,event.playerCount,event.players)
+                // A manager restart loses in-memory listeners while Minecraft may
+                // remain alive on its runner. Restore only from this authenticated
+                // session's current, authorized running generation; never send start.
+                if(event.state=="RUNNING" && event.pid!=null && event.pid>0 && registry.active(id)?.allowedInstanceIds?.contains(instanceId)==true) {
+                    val runtime=manager.runtime(instanceId)
+                    synchronized(runtime) {
+                        if(runtime.state=="RUNNING" && runtime.remotePid==event.pid && !runtime.recoveringFiles) {
+                            try {openRelay(manager.instance(instanceId),requireRunner(manager.instance(instanceId)))}
+                            catch(e:Exception){logger.warn("Running server relay recovery failed for {}: {}",instanceId,e.message)}
+                        }
+                    }
+                }
             }
             "log" -> event.instanceId?.let { manager.remoteLog(it,id,event.state ?: "output",event.detail ?: "") }
             "opened" -> event.streamId?.let { stream -> sockets[stream]?.takeIf { it.runnerId==id }?.opened?.countDown() }

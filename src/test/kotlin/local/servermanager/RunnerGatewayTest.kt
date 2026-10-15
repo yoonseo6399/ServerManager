@@ -16,6 +16,29 @@ import java.util.Collections
 import kotlin.test.*
 
 class RunnerGatewayTest {
+    @Test fun `authenticated running report restores relay after manager restart without starting Minecraft`() {
+        val manager=mock(ServerManager::class.java);val registry=mock(RunnerRegistry::class.java);val network=mock(GameNetwork::class.java)
+        val port=java.net.ServerSocket(0).use {it.localPort}
+        val instance=Instance("recover","test",loaderVersion="21.1.249",port=25565,memoryMb=512,javaPath="java",runnerId="runner")
+        val runtime=RuntimeState().apply {state="RUNNING";remotePid=42L}
+        val device=RunnerDevice("runner","fixture","MAC","user","key","now",version="0.4.10",allowedInstanceIds=setOf("recover"))
+        `when`(registry.active("runner")).thenReturn(device);`when`(registry.online("runner")).thenReturn(true)
+        `when`(manager.instance("recover")).thenReturn(instance);`when`(manager.runtime("recover")).thenReturn(runtime)
+        `when`(network.config()).thenReturn(GameNetworkConfig(enabled=true,port=port,baseDomain="server.example.com"))
+        val session=mock(WebSocketSession::class.java);`when`(session.attributes).thenReturn(mutableMapOf<String,Any>("runnerId" to "runner"));`when`(session.isOpen).thenReturn(true)
+        val sent=mutableListOf<WebSocketMessage<*>>();doAnswer {sent.add(it.arguments[0] as WebSocketMessage<*>);null}.`when`(session).sendMessage(any())
+        val gateway=RunnerGateway(registry,manager,network);gateway.afterConnectionEstablished(session);sent.clear()
+        val running=TextMessage(jacksonObjectMapper().writeValueAsString(RunnerMessage("state","recover","RUNNING","0.4.10",pid=42L)))
+        try {
+            `when`(registry.active("runner")).thenReturn(device.copy(allowedInstanceIds=emptySet()))
+            gateway.handleMessage(session,running)
+            java.net.ServerSocket(port).close() // No listener from an ungranted report.
+            `when`(registry.active("runner")).thenReturn(device)
+            gateway.handleMessage(session,running);gateway.handleMessage(session,running)
+            java.net.Socket("127.0.0.1",port).close()
+            assertTrue(sent.isEmpty(),"Recovery must not send a start/stop command")
+        }finally{gateway.completed(instance);gateway.closeDatagrams()}
+    }
     @Test fun `heartbeat replies keep long uploads alive and stale sessions cannot renew them`() {
         val manager=mock(ServerManager::class.java);val registry=mock(RunnerRegistry::class.java)
         `when`(registry.active("runner")).thenReturn(RunnerDevice("runner","fixture","MAC","user","key","now"))
