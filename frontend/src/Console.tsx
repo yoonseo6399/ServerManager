@@ -1,6 +1,7 @@
 import React,{memo,startTransition,useCallback,useDeferredValue,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {Terminal} from 'lucide-react';
 import {api} from './http';
+import {useBackClose} from './nav';
 import {type ParsedLog,type RawLog} from './logParser';
 import {useLogParser} from './useLogParser';
 import {useLogFilters,LogFilterEditor,hiddenByFilter,type FilterConfig} from './LogFilters';
@@ -31,6 +32,7 @@ export const ConsolePanel=memo(function ConsolePanel(props:{id:string;enabled:bo
 });
 function ConsoleView({id,enabled,hint,source,filters}:{id:string;enabled:boolean;hint:string;source:string;filters:FilterConfig}){
  const [events,setEvents]=useState<ParsedLog[]>([]),[filter,setFilter]=useState(''),[errorsOnly,setErrorsOnly]=useState(false),[follow,setFollow]=useState(!source),[hasOlder,setHasOlder]=useState(false),[loading,setLoading]=useState(false),[pending,setPending]=useState(true),[error,setError]=useState(''),[top,setTop]=useState(0),[height,setHeight]=useState(420),[detail,setDetail]=useState<ParsedLog|null>(null),[fileNav,setFileNav]=useState({previous:false,next:false,page:1});
+ useBackClose(!!detail,()=>setDetail(null),'log-detail');
  const {parse,progress}=useLogParser(),openDetail=useCallback((event:ParsedLog)=>setDetail(event),[]);
  const viewport=useRef<HTMLDivElement>(null),cursor=useRef<number|null>(null),busy=useRef(false),alive=useRef(true),anchor=useRef<number|null>(null),followRef=useRef(!source);
  const file=useRef<{offset:number;next:number|null;revision?:string;history:number[]}>({offset:0,next:null,history:[]});

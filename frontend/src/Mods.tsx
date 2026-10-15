@@ -1,3 +1,4 @@
+import {useBackClose} from './nav';
 import {useEffect,useRef,useState} from 'react';
 import {Check,ChevronLeft,ChevronRight,FlaskConical,Pause,Play,Power,PowerOff,RefreshCw,Search,ShieldCheck,Square,X} from 'lucide-react';
 import {api} from './http';
@@ -20,6 +21,7 @@ export function ModsPanel({id,loader,state,canManage,onChanged,onConsole}:{id:st
  const inventoryRevision=useRef<string|null>(null);
  const [preview,setPreview]=useState<Preview|null>(null),[note,setNote]=useState(''),[logTrial,setLogTrial]=useState<number|null>(null);
  const alive=useRef(true);const endpoint=`/instances/${id}/mods`;
+ useBackClose(!!preview,()=>setPreview(null),'mod-preview');useBackClose(logTrial!==null,()=>setLogTrial(null),'mod-trial-logs');
  const load=async()=>{let result=await api<Page>(endpoint);if(result.inventoryRevision!==inventoryRevision.current){result=await api<Page>(endpoint+'?inventory=true');inventoryRevision.current=result.inventoryRevision;}if(alive.current)setData(old=>({...result,inventory:result.inventory||old?.inventory||null}));};
  useEffect(()=>{alive.current=true;load().catch(e=>setError(e.message));let timer:ReturnType<typeof setTimeout>;let stopped=false;const poll=async()=>{try{if(!document.hidden)await load();}catch{}finally{if(!stopped)timer=setTimeout(poll,1500);}};timer=setTimeout(poll,1500);return()=>{alive.current=false;stopped=true;clearTimeout(timer);};},[id]);
  const action=async(path:string,body?:unknown)=>{if(sending)return;setSending(true);setError('');try{await api(endpoint+path,'POST',body);await load();await onChanged();}catch(e){setError((e as Error).message);}finally{if(alive.current)setSending(false);}};
