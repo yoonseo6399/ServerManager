@@ -63,6 +63,7 @@ object RunnerMain {
         System.setErr(PrintStream(System.err,true,StandardCharsets.UTF_8))
         when {
             "--runner-pair" in args -> pair(args)
+            args.any {it.startsWith("--runner-relay-consent=")} -> relayConsent(args.first {it.startsWith("--runner-relay-consent=")}.substringAfter('='))
             "--runner-status" in args -> {
                 val identity=if(identityFile.exists()) mapper.readValue<RunnerIdentity>(identityFile.readText()) else null
                 println(identity?.let { "${it.name} (${it.id}) · ${it.managerUrl}" } ?: "등록되지 않은 실행기")
@@ -84,6 +85,17 @@ object RunnerMain {
                 }
             }
         }
+    }
+    /** Local, file-free way to grant or withdraw "management web owner may use this computer as a TCP relay". A running runner applies it within ~10 seconds. */
+    private fun relayConsent(action:String) {
+        val store=RelayConsentStore(home)
+        val state=when(action) {
+            "allow" -> store.set(true,"cli")
+            "revoke" -> store.set(false,"cli-revoke")
+            "status" -> store.read()
+            else -> error("allow, revoke, status 중 하나를 지정하세요")
+        }
+        println("관리 웹 소유자의 TCP 중계 사용 허용: "+(if(state.allowed)"허용" else "허용 안 함")+" (출처: "+state.source+(state.migratedFrom?.let {", 이전된 기존 설정: $it"} ?: "")+(if(state.environmentLocked)", 환경변수로 고정" else "")+")")
     }
     private fun pair(args:Array<String>) {
         val url=args.firstOrNull { it.startsWith("--manager-url=") }?.substringAfter('=')?.trimEnd('/') ?: error("--manager-url=https://관리주소 를 지정하세요")
@@ -135,6 +147,8 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     private val llmBusy=java.util.concurrent.atomic.AtomicBoolean()
     @Volatile private var tcpRelay:TcpRelayPeer?=null
     @Volatile private var sessionToken:String?=null
+    /** Direct relay (DRP1) survives manager disconnects; only local consent withdrawal or process exit tears it down. */
+    private val directRelay=DirectRelayRunnerRole(home,::send,{id->configs[id]?.takeIf {processes[id]?.isAlive==true && id in ready && id !in stopping}?.port},{id->processes[id]?.isAlive==true && id in ready && id !in stopping})
     private val processes=ConcurrentHashMap<String,Process>()
     private val gameStreams=ConcurrentHashMap<Int,Socket>()
     private val configs=ConcurrentHashMap<String,Instance>()
@@ -208,7 +222,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                 workers.submit { checkRunnerUpdate() }
             }
             if(restartForUpdate()) kotlin.system.exitProcess(75)
-            send(RunnerMessage("heartbeat",version=version()));sable.heartbeat()
+            send(RunnerMessage("heartbeat",version=version()));sable.heartbeat();directRelay.tick()
             reportUpdate()
             reportFolders()
             home.resolve("instances").takeIf {it.exists()}?.listDirectoryEntries()?.forEach {dir->dir.resolve("install-result.json").takeIf {it.exists()}?.let {file->runCatching {send(mapper.readValue<RunnerMessage>(file.readText()))}}}
@@ -248,7 +262,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     private fun updateCheckpoint(){if(updatePauseRequested)throw RetryTransfer("서명된 실행기 업데이트를 위해 전송을 잠시 중지했습니다. 재연결 후 이어받습니다")}
     fun restartForUpdate():Boolean=synchronized(lifecycle) {
         val service=updater ?: return false
-        if(service.busy() || !service.pending() || tcpRelay?.busy()==true)return false
+        if(service.busy() || !service.pending() || tcpRelay?.busy()==true || directRelay.busy())return false
         val root=home.resolve("instances")
         val dirs=if(root.exists())root.listDirectoryEntries().filter {it.isDirectory()} else emptyList()
         if(processes.values.any {it.isAlive} || preparing.isNotEmpty() || dirs.any {orphanAlive(it.name)}){service.phase("WAITING");return false}
@@ -261,7 +275,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         processes.values.forEach { runCatching { it.waitFor() } }
         installationProcesses.values.forEach {runCatching {it.waitFor()}}
         if(!updatePauseRequested)home.resolve("instances").takeIf { it.exists() }?.let { root -> Files.list(root).use { paths -> paths.filter { it.resolve("dirty").exists() }.forEach { dir -> uploadStopped(dir.fileName.toString()) } } }
-        tcpRelay?.close();sable.close();workers.shutdown()
+        tcpRelay?.close();directRelay.close();sable.close();workers.shutdown()
     }
     override fun onOpen(webSocket:WebSocket) { connection.set(webSocket);webSocket.request(1) }
     override fun onText(webSocket:WebSocket,data:CharSequence,last:Boolean):CompletionStage<*> {
@@ -277,7 +291,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                         "sable-registered" -> message.token?.let {sableRegistrations[it]?.complete(message.state=="OK")}
 
                         "session" -> { sessionToken=message.token;tcpRelay?.close();tcpRelay=if(tcpRelayAllowed)TcpRelayPeer(::send,::sendBinary) else null
-                            send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));send(RunnerMessage("llm-capability",state=if(llmAllowed)"OLLAMA_V1" else "OFF"));reportUpdate();recoverStates() }
+                            directRelay.onSession();send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));send(RunnerMessage("llm-capability",state=if(llmAllowed)"OLLAMA_V1" else "OFF"));reportUpdate();recoverStates() }
                         "relay-config" -> {
                             val port=message.detail?.toIntOrNull()
                             val ok=tcpRelayAllowed && (message.state=="OFF" || port in 1024..65535) && runCatching {tcpRelay?.listen(if(message.state=="ON")port else null);true}.getOrDefault(false)
@@ -285,6 +299,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                         }
                         "relay-opened" -> message.streamId?.takeIf {it<0}?.let {tcpRelay?.ready(it)}
                         "relay-closed" -> message.streamId?.takeIf {it<0}?.let {tcpRelay?.end(it)}
+                        "drp-relay-config","drp-agent-config","drp-ticket" -> directRelay.onMessage(message)
                         "update-request" -> if(message.detail in setOf("WHEN_IDLE","PAUSE_TRANSFER")) {
                             requestUpdate(message.detail=="PAUSE_TRANSFER")
                         }

@@ -35,7 +35,7 @@ data class RunnerMessage(val type:String,val instanceId:String?=null,val state:S
     val uptimeSeconds:Long?=null,val playerCount:Int?=null,val players:List<String>?=null,val pid:Long?=null)
 
 @Service
-class RunnerGateway(private val registry:RunnerRegistry,private val manager:ServerManager,private val network:GameNetwork?=null):AbstractWebSocketHandler(),RemoteController {
+class RunnerGateway(private val registry:RunnerRegistry,private val manager:ServerManager,private val network:GameNetwork?=null,private val directRelay:DirectRelayService?=null):AbstractWebSocketHandler(),RemoteController {
     private val logger=org.slf4j.LoggerFactory.getLogger(RunnerGateway::class.java)
     private val mapper=jacksonObjectMapper()
     private val sessions=ConcurrentHashMap<String,WebSocketSession>()
@@ -116,7 +116,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
     private val io=Executors.newCachedThreadPool()
     private data class GameStream(val id:Int,val runnerId:String,val instanceId:String,val socket:Socket,val opened:CountDownLatch=CountDownLatch(1))
     @jakarta.annotation.PreDestroy fun closeDatagrams(){tcpRelays.values.forEach {it.close()};tcpRelays.clear();sable.close();udpOutboxes.values.forEach {it.close()};udpOutboxes.clear();udpSessions.values.forEach {runCatching {it.close()}};udpSessions.clear()}
-    @PostConstruct fun attach() { manager.attachRemoteController(this);RemoteLlm.provider=::llmChat }
+    @PostConstruct fun attach() { manager.attachRemoteController(this);RemoteLlm.provider=::llmChat;directRelay?.sender={id,message->send(id,message)};directRelay?.connectedCheck={connected(it)} }
     override fun afterConnectionEstablished(session:WebSocketSession) {
         val id=session.attributes["runnerId"] as? String ?: run { session.close(CloseStatus.POLICY_VIOLATION);return }
         if(session.attributes["sableUdp"]==true) {
@@ -148,6 +148,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
         if(sessions[id]!==session || registry.active(id)==null) { session.close(CloseStatus.POLICY_VIOLATION);return }
         if(message.payload.length>256*1024) { session.close(CloseStatus.TOO_BIG_TO_PROCESS);return }
         val event=runCatching { mapper.readValue<RunnerMessage>(message.payload) }.getOrNull() ?: return
+        if(directRelay?.core?.onRunnerMessage(id,event)==true)return
         when(event.type) {
             "relay-capability" -> {
                 registry.tcpRelayCapability(id,event.state=="TCP_V1")
@@ -250,7 +251,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
         if(sessions.remove(id,session)) {
             tcpRelays.remove(id)?.close()
             udpOutboxes.remove(id)?.close();udpSessions.remove(id)?.let {runCatching {it.close()}};sable.removeRunner(id)
-            tokens.remove(id);registry.disconnected(id);manager.remoteDisconnected(id)
+            tokens.remove(id);registry.disconnected(id);manager.remoteDisconnected(id);directRelay?.core?.onDisconnect(id)
             llmRunners.remove(id);llmAnswered.remove(id);llmRequests.values.filter {it.runner==id}.forEach {it.future.completeExceptionally(IllegalStateException("실행기가 연결 해제됐습니다"))}
             workspaceRequests.values.filter {it.runner==id}.forEach {it.future.completeExceptionally(IllegalStateException("실행기가 연결 해제됐습니다. 파일을 다시 확인하세요"))}
             sockets.values.filter { it.runnerId==id }.forEach { closeStream(it,false) }
