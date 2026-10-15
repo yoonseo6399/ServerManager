@@ -5,7 +5,7 @@ export type View={selected:string;tab:string;folder:string;editor:string|null};
 type Entry={view?:View;modal?:string;idx?:number};
 const entry=()=>(history.state as Entry|null)||{};
 const same=(a:View,b:View)=>a.selected===b.selected&&a.tab===b.tab&&a.folder===b.folder&&a.editor===b.editor;
-const urlFor=(v:View)=>['runners','network'].includes(v.tab)?'#'+v.tab:window.location.pathname+window.location.search;
+const urlFor=(v:View)=>['runners','network','account','security','users','ai','integrations','system'].includes(v.tab)?'#'+v.tab:window.location.pathname+window.location.search;
 let position=0;
 /** Mirrors `view` into history (push on change) and calls `apply` when Back/Forward moves to another view. */
 export function useViewHistory(view:View,apply:(v:View)=>void){
@@ -20,7 +20,7 @@ export function useViewHistory(view:View,apply:(v:View)=>void){
    if(!st.view){history.replaceState({view:current,idx:position},'',urlFor(current));return;}
    if(same(st.view,current))return;
    // The first automatic selection and a view change made while a modal entry is on top replace instead of stacking.
-   if(!st.view.selected||st.modal){history.replaceState({view:current,idx:st.idx??position},'',urlFor(current));return;}
+   if((!st.view.selected&&!!current.selected&&st.view.tab===current.tab)||st.modal){history.replaceState({view:current,idx:st.idx??position},'',urlFor(current));return;}
    position=(st.idx??position)+1;history.pushState({view:current,idx:position},'',urlFor(current));
   },0);
   return()=>clearTimeout(timer);

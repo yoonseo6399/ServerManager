@@ -146,6 +146,9 @@ class DiscordMusicPanel(
             if(last>0) rows+=ActionRow.of(
                 Button.secondary("music:page:${page-1}","◀ 이전 페이지").withDisabled(page==0),
                 Button.secondary("music:page:${page+1}","다음 페이지 ▶").withDisabled(page>=last))
+            rows+=ActionRow.of(
+                if(snapshot.autoplay) Button.success("music:autoplay","📻 자동재생 ON") else Button.secondary("music:autoplay","📻 자동재생 OFF"),
+                if(snapshot.repeat) Button.success("music:repeat","🔂 한 곡 반복 ON") else Button.secondary("music:repeat","🔂 한 곡 반복 OFF"))
             return rows
         }
 
@@ -156,7 +159,7 @@ class DiscordMusicPanel(
             val status=when { current==null -> "대기 중"; snapshot.paused -> "일시정지"; else -> "재생 중" }
             val embed=EmbedBuilder().setTitle("🎵 음악 플레이어").setColor(Color(0x5865F2))
                 .addField("현재 곡",title,false)
-                .addField("상태",status+(snapshot.channelId?.let { " · <#$it>" } ?: "")+(if(snapshot.autoplay) " · 자동 재생 켜짐" else " · 자동 재생 꺼짐"),false)
+                .addField("상태",status+(snapshot.channelId?.let { " · <#$it>" } ?: "")+(if(snapshot.autoplay) " · 자동 재생 켜짐" else " · 자동 재생 꺼짐")+(if(snapshot.repeat) " · 한 곡 반복 켜짐" else ""),false)
             if(safeUrl!=null) embed.addField("YouTube",safeUrl,false)
             current?.requester?.let {requester ->
                 embed.setAuthor("등록: "+requester.name.replace('\n',' ').replace('\r',' ').take(80),null,requester.avatarUrl?.let(::safeAvatarUrl))

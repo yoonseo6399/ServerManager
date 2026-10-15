@@ -1,3 +1,4 @@
+import {RunnerUpdateStatus} from './RunnerUpdateStatus';
 import {memo,useEffect,useState} from 'react';
 import {api,ApiError} from './http';
 import {useAuth} from './Auth';
@@ -29,7 +30,7 @@ export const RunnerSettings=memo(function RunnerSettings({instances}:{instances:
  <details><summary>기존 마크 서버 폴더 연결하기</summary><p>웹에서 기존 파일과 같은 종류·Minecraft·로더 버전으로 서버를 생성하세요. 런처 설치는 생략하고 아래 서버 ID를 실행기 설치 창의 ‘기존 마크 서버 폴더’에 입력한 뒤 실제 폴더를 선택하세요. 폴더는 원래 위치에서 실행됩니다. 등록 후 이 서버의 사용을 허용하고 실행 위치를 배정하면 시작할 수 있습니다.</p>{instances.map(({config:i})=><label className="security-label" key={i.id}>{i.name} · 서버 ID<input readOnly value={i.id} onFocus={e=>e.target.select()}/></label>)}<p className="muted">첫 실행은 선택한 폴더를 원본으로 사용합니다. 이후 웹 파일 관리와 실행기 간 동기화가 적용되며 외부에서 폴더를 수정하면 덮어쓰기 대신 재등록을 안내합니다. 기존 서버를 별도 프로그램으로 동시에 실행하지 마세요.</p></details>
  {!rows.length&&<p className="notice">아직 등록된 실행기가 없습니다. 위 단계로 컴퓨터를 등록하면 연결 상태가 여기에 표시됩니다.</p>}
  {rows.map(row=><div className="member" key={row.id}><strong>{row.name} · {row.platform} · {row.online?'온라인':row.enabled?'오프라인':'폐기됨'}</strong><p className="muted">버전 {row.version} · 마지막 연결 {row.lastSeen?new Date(row.lastSeen).toLocaleString():'없음'}</p>
- <div className="runner-update" aria-label={`${row.name} 업데이트`}>
+ <RunnerUpdateStatus id={row.id} online={row.online}/><div className="runner-update" aria-label={`${row.name} 업데이트`}>
  <p role="status">업데이트: {row.update?updateLabels[row.update.phase]||'상태 확인 중':supportsUpdate(row.version)?'연결 후 상태 확인':'최초 1회 실행기를 0.4.4 이상으로 업데이트하세요.'}{row.update?.latest&&` · 대상 ${row.update.latest}`}{!row.online&&' · 현재 오프라인'}</p>
  {row.update?.phase==='DOWNLOADING'&&row.update.totalBytes>0&&<><progress aria-label={`${row.name} 업데이트 다운로드`} max={row.update.totalBytes} value={row.update.downloadedBytes}/><span> {Math.floor(row.update.downloadedBytes*100/row.update.totalBytes)}%</span></>}
  {(row.registeredBy===auth.session.user?.id||auth.session.user?.owner)&&<div className="actions">
