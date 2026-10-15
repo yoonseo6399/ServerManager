@@ -6,7 +6,10 @@ plugins {
 }
 group = "local.servermanager"
 version = file("VERSION").readText().trim()
-repositories { mavenCentral() }
+repositories {
+    mavenCentral()
+    maven(url = "https://maven.lavalink.dev/releases")
+}
 kotlin { jvmToolchain(21) }
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")
@@ -17,6 +20,14 @@ dependencies {
     implementation(kotlin("reflect"))
     implementation("org.tomlj:tomlj:1.1.1")
     implementation("net.dv8tion:JDA:6.7.0") { exclude(module = "opus-java") }
+    implementation("dev.arbjerg:lavaplayer:2.2.7")
+    implementation("dev.lavalink.youtube:v2:1.18.2")
+    implementation("moe.kyokobot.libdave:adapter-jda:0.1.2")
+    implementation("moe.kyokobot.libdave:impl-jni:0.1.2")
+    runtimeOnly("moe.kyokobot.libdave:natives-linux-x86-64:0.1.2")
+    runtimeOnly("moe.kyokobot.libdave:natives-linux-aarch64:0.1.2")
+    runtimeOnly("moe.kyokobot.libdave:natives-darwin:0.1.2")
+    runtimeOnly("moe.kyokobot.libdave:natives-win-x86-64:0.1.2")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation(kotlin("test"))
     testImplementation("org.springframework.security:spring-security-test")

@@ -4,6 +4,8 @@ import jakarta.annotation.PreDestroy
 import jakarta.servlet.http.HttpServletRequest
 import net.dv8tion.jda.api.JDA
 import net.dv8tion.jda.api.JDABuilder
+import net.dv8tion.jda.api.Permission
+import net.dv8tion.jda.api.audio.AudioModuleConfig
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.events.session.ReadyEvent
 import net.dv8tion.jda.api.events.StatusChangeEvent
@@ -18,6 +20,10 @@ import net.dv8tion.jda.api.interactions.commands.OptionType
 import net.dv8tion.jda.api.interactions.commands.build.Commands
 import net.dv8tion.jda.api.interactions.commands.build.OptionData
 import net.dv8tion.jda.api.interactions.commands.build.SubcommandData
+import net.dv8tion.jda.api.requests.GatewayIntent
+import net.dv8tion.jda.api.utils.cache.CacheFlag
+import moe.kyokobot.libdave.NativeDaveFactory
+import moe.kyokobot.libdave.jda.LDJDADaveSessionFactory
 import net.dv8tion.jda.api.components.buttons.Button
 import net.dv8tion.jda.api.components.actionrow.ActionRow
 import org.springframework.boot.context.event.ApplicationReadyEvent
@@ -74,6 +80,9 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
         }
     }
     @Volatile private var client:JDA?=null
+    private val codeAgent=DiscordCodeAgent({view().config},{client},{AgentApiKeyStore(manager.root.resolve("security/agent")).read()},manager.root.resolve("security/agent"))
+    private val music by lazy { runCatching { DiscordMusic({view().config},{client},DiscordMusicPlayback(),manager.root.resolve("security/discord")) }.getOrNull() }
+    @Volatile private var musicAudioReady=false
     @Volatile private var message="봇 토큰을 입력하고 연동을 켜세요."
     @Volatile private var connecting=false
     private val requests=mutableMapOf<String,Long>()
@@ -83,7 +92,8 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
         val jda=client
         val state=when { !view().config.enabled->"OFF"; jda!=null->jda.status.name; connecting->"CONNECTING"; else->"ERROR" }
         val ready=jda?.status==JDA.Status.CONNECTED
-        val invite=if(ready) "https://discord.com/oauth2/authorize?client_id=${jda!!.selfUser.id}&scope=bot%20applications.commands&permissions=125952" else null
+        val permissions=125952L or (1L shl 35) or (1L shl 38) or Permission.VOICE_CONNECT.rawValue or Permission.VOICE_SPEAK.rawValue or Permission.MESSAGE_MANAGE.rawValue or Permission.PIN_MESSAGES.rawValue
+        val invite=if(ready) "https://discord.com/oauth2/authorize?client_id=${jda!!.selfUser.id}&scope=bot%20applications.commands&permissions=$permissions" else null
         return DiscordBotStatus(state,message,invite,if(ready) jda!!.guilds.map { mapOf("id" to it.id,"name" to it.name) } else emptyList())
     }
     @Synchronized fun save(request:DiscordSave):DiscordSettingsView {
@@ -102,11 +112,22 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
         connecting=view().config.enabled
         message=if(connecting) "Discord에 연결 중입니다." else "Discord 연동이 꺼져 있습니다."
         lifecycle.submit {
+            runCatching { music?.disconnectAll() }
             old?.shutdownNow()
             if(epoch!=generation.get() || !view().config.enabled) return@submit
             try {
                 val token=settings.token() ?: error("missing token")
-                val next=JDABuilder.createLight(token,emptyList()).setEnableShutdownHook(false).addEventListeners(this).build()
+                val intents=mutableListOf(GatewayIntent.GUILD_VOICE_STATES,GatewayIntent.GUILD_MESSAGES)
+                if(DiscordMusicGateway.messageContentAllowed(token))intents.add(GatewayIntent.MESSAGE_CONTENT)
+                val builder=JDABuilder.createLight(token,intents).enableCache(CacheFlag.VOICE_STATE)
+                    .setMemberCachePolicy(net.dv8tion.jda.api.utils.MemberCachePolicy.VOICE)
+                    .setEnableShutdownHook(false).addEventListeners(this)
+                musicAudioReady=runCatching {
+                    NativeDaveFactory.ensureAvailable()
+                    builder.setAudioModuleConfig(AudioModuleConfig().withDaveSessionFactory(LDJDADaveSessionFactory(NativeDaveFactory())))
+                    true
+                }.getOrDefault(false)
+                val next=builder.build()
                 synchronized(this) { if(epoch==generation.get()) client=next else next.shutdownNow() }
             } catch (_:Exception) {
                 if(epoch==generation.get()) { connecting=false;message="연결하지 못했습니다. 봇 토큰과 인터넷 연결을 확인한 뒤 다시 연결하세요." }
@@ -115,12 +136,12 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
     }
     override fun onReady(event:ReadyEvent) {
         if(event.jda!==client) return
-        connecting=false;message="연결되었습니다. 역할과 알림 채널을 설정하세요."
+        connecting=false;message="연결되었습니다. 역할과 알림 채널을 설정하세요. "+if(musicAudioReady)"음악 오디오 준비 완료." else "음악 오디오를 초기화하지 못했습니다."
         registerCommands(event.jda)
     }
     override fun onStatusChange(event:StatusChangeEvent) {
         if(event.jda!==client) return
-        if(event.newStatus==JDA.Status.SHUTDOWN) { connecting=false;message="Discord 연결이 종료되었습니다. 토큰과 네트워크를 확인한 뒤 다시 연결하세요." }
+        if(event.newStatus==JDA.Status.SHUTDOWN) { runCatching { music?.disconnectAll() };connecting=false;message="Discord 연결이 종료되었습니다. 토큰과 네트워크를 확인한 뒤 다시 연결하세요." }
         else if(event.newStatus==JDA.Status.CONNECTED) { connecting=false;message="Discord에 연결되었습니다." }
     }
     override fun onGuildJoin(event:GuildJoinEvent) { if(event.jda===client) registerCommands(event.jda) }
@@ -138,6 +159,8 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
                     SubcommandData("stop","내 역할에 허용된 서버 정상 종료").addOptions(OptionData(OptionType.STRING,"server","Minecraft 서버",true).setAutoComplete(true)),
                     SubcommandData("restart","내 역할에 허용된 서버 재시작").addOptions(OptionData(OptionType.STRING,"server","Minecraft 서버",true).setAutoComplete(true)))
             guild.upsertCommand(command).queue({}, { if(jda===client) message="명령 등록 실패: 봇 초대 권한과 서버 ID를 확인하세요." })
+            codeAgent.register(jda,id)
+            music?.register(jda,id)
         }
     }
     fun choices(guild:String?,roles:Set<String>,start:Boolean,query:String):List<Pair<String,String>> = choices(guild,roles,if(start) "start" else "status",query)
@@ -153,6 +176,12 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
         event.replyChoices(choices.map { Command.Choice(it.first,it.second) }).queue({}, {})
     }
     override fun onSlashCommandInteraction(event:SlashCommandInteractionEvent) {
+        if(event.name in setOf("agent","sub-agent","agent-keys")) {codeAgent.handle(event);return}
+        if(event.name=="music") {
+            if(!musicAudioReady) event.reply("음악 오디오 기능을 시작하지 못했습니다. 서버 관리자에게 오디오 설정을 확인해 달라고 요청하세요.").setEphemeral(true).queue({}, {})
+            else music?.handle(event) ?: event.reply("음악 기능을 시작하지 못했습니다. 서버 관리자에게 오디오 설정을 확인해 달라고 요청하세요.").setEphemeral(true).queue({}, {})
+            return
+        }
         if(event.jda!==client || event.name!="mc") return
         val guild=event.guild
         val id=event.getOption("server")?.asString
@@ -170,6 +199,7 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
         }, {})
     }
     override fun onButtonInteraction(event:ButtonInteractionEvent) {
+        if(event.componentId.startsWith("music:")) {music?.handleButton(event);return}
         if(event.jda!==client || !event.componentId.startsWith("sm:")) return
         val parts=event.componentId.split(':')
         val guild=event.guild
@@ -186,6 +216,9 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
                 hook.editOriginal(result).setAllowedMentions(emptyList()).queue({}, {})
             }, { hook.editOriginal("현재 서버 역할을 확인하지 못했습니다. 잠시 후 다시 시도하세요.").queue({}, {}) })
         }, {})
+    }
+    override fun onMessageReceived(event:net.dv8tion.jda.api.events.message.MessageReceivedEvent) {
+        if(event.jda===client)music?.handleMessage(event)
     }
     fun execute(guild:String,roles:Set<String>,user:String,requestId:String,id:String,action:String,actor:StartActor?=null):String = desktop.gate.read {
         if(desktop.stopping) "관리 앱 업데이트 중입니다. 잠시 후 다시 시도하세요."
@@ -365,7 +398,7 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
             rows.filter { it.id !in keep }.forEach { it.delete().queue({}, { if(client!=null) message="전용 채널 정리 실패: 메시지 관리 권한을 확인하세요." }) }
         }, { if(client!=null) message="전용 채널을 읽지 못했습니다. 메시지 기록 보기 권한을 확인하세요." })
     }
-    @PreDestroy fun close() { generation.incrementAndGet();signalSubscription.close();alerts.clear();client?.shutdownNow();client=null;lifecycle.shutdownNow() }
+    @PreDestroy fun close() { generation.incrementAndGet();runCatching { music?.close() };codeAgent.close();signalSubscription.close();alerts.clear();client?.shutdownNow();client=null;lifecycle.shutdownNow() }
     private fun stateLabel(value:String)=mapOf("NEW" to "설치 필요","STOPPED" to "정지됨","STARTING" to "시작 중","RUNNING" to "실행 중","STOPPING" to "종료 중","FAILED" to "오류","INSTALLING" to "설치 중","IMPORTING" to "가져오는 중","IMPORT_FAILED" to "가져오기 실패","TRANSFERRING" to "파일 전송 중","SYNCING" to "파일 인계 중","SYNC_FAILED" to "인계 재시도 대기","UNKNOWN" to "연결 확인 중")[value] ?: value
 }
 
