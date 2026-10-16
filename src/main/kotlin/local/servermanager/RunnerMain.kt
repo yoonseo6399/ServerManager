@@ -165,6 +165,14 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     private val tcpRelayAllowed=System.getenv("RUNNER_TCP_RELAY_ENABLED")=="true" || home.resolve("tcp-relay-enabled").let {it.isRegularFile() && it.readText().trim()=="true"}
     private val llmAllowed=System.getenv("RUNNER_LLM_ENABLED")=="true" || home.resolve("llm-enabled").let {it.isRegularFile() && it.readText().trim()=="true"}
     private val llmBusy=java.util.concurrent.atomic.AtomicBoolean()
+    private val llmTasks=ConcurrentHashMap<String,java.util.concurrent.FutureTask<Unit>>()
+    private fun cancelLlmTasks(){llmTasks.values.forEach {it.cancel(true)};llmTasks.clear()}
+    private fun submitLlm(message:RunnerMessage){
+        val key=message.token ?: return
+        val task=java.util.concurrent.FutureTask<Unit> {llmChat(key,message.state.orEmpty(),message.command.orEmpty(),message.detail=="THINK");Unit}
+        if(llmTasks.putIfAbsent(key,task)!=null)return
+        workers.submit {try{task.run()}finally{llmTasks.remove(key,task)}}
+    }
     @Volatile private var tcpRelay:TcpRelayPeer?=null
     @Volatile private var sessionToken:String?=null
     /** Direct relay (DRP1) survives manager disconnects; only local consent withdrawal or process exit tears it down. */
@@ -385,6 +393,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         reportUpdateDetail();true
     }
     fun shutdownGracefully() {
+        cancelLlmTasks()
         // Hosted games are left running: this layer may only be restarting for an update.
         detachHosted()
         processes.entries.filter {it.value !is HostedProcess}.forEach { stop(it.key) }
@@ -407,7 +416,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                         "sable-registered" -> message.token?.let {sableRegistrations[it]?.complete(message.state=="OK")}
 
                         "session" -> { sessionToken=message.token;tcpRelay?.close();tcpRelay=if(tcpRelayAllowed)TcpRelayPeer(::send,::sendBinary) else null
-                            send(RunnerMessage("update-capability",state=if(updater!=null)"RELEASE_SELECTION_V1" else "OFF",detail=if(updater?.rollbackSupported==true)"ROLLBACK_V1" else null));confirmActivation();hosted?.relaySession() ?: directRelay.onSession();reportUpdateDetail();send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));send(RunnerMessage("llm-capability",state=if(llmAllowed)"OLLAMA_AGENT_V2" else "OFF"));reportUpdate();recoverStates() }
+                            send(RunnerMessage("update-capability",state=if(updater!=null)"RELEASE_SELECTION_V1" else "OFF",detail=if(updater?.rollbackSupported==true)"ROLLBACK_V1" else null));confirmActivation();hosted?.relaySession() ?: directRelay.onSession();reportUpdateDetail();send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));send(RunnerMessage("llm-capability",state=if(llmAllowed)"OLLAMA_AGENT_V3" else "OFF"));reportUpdate();recoverStates() }
                         "relay-config" -> {
                             val port=message.detail?.toIntOrNull()
                             val ok=tcpRelayAllowed && (message.state=="OFF" || port in 1024..65535) && runCatching {tcpRelay?.listen(if(message.state=="ON")port else null);true}.getOrDefault(false)
@@ -419,7 +428,8 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                         "update-request" -> if(message.detail in setOf("WHEN_IDLE","PAUSE_TRANSFER")) {
                             requestUpdate(message.detail=="PAUSE_TRANSFER",message.command,message.state=="BETA_OK",message.state=="STABLE_ROLLBACK")
                         }
-                        "llm-request" -> if(message.token!=null)workers.submit {llmChat(message.token,message.state.orEmpty(),message.command.orEmpty(),message.detail=="THINK")}
+                        "llm-request" -> submitLlm(message)
+                        "llm-cancel" -> message.token?.let {llmTasks.remove(it)?.cancel(true)}
                         "workspace" -> if(message.instanceId!=null && message.token!=null && message.detail!=null)workers.submit {workspace(message.instanceId,message.token,message.detail)}
                         "install" -> if(message.instanceId!=null && message.token!=null && message.detail!=null)workers.submit {installServer(message.instanceId,message.token,message.detail)}
                         "start" -> if(message.instanceId!=null && message.detail!=null) workers.submit { beginStart(message.instanceId,message.detail) }
@@ -462,8 +472,8 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         }
         webSocket.request(1);return CompletableFuture.completedFuture(null)
     }
-    override fun onClose(webSocket:WebSocket,statusCode:Int,reason:String):CompletionStage<*> { if(connection.get()===webSocket)closed.countDown();return CompletableFuture.completedFuture(null) }
-    override fun onError(webSocket:WebSocket,error:Throwable) { if(connection.get()===webSocket)closed.countDown() }
+    override fun onClose(webSocket:WebSocket,statusCode:Int,reason:String):CompletionStage<*> { if(connection.get()===webSocket){cancelLlmTasks();closed.countDown()};return CompletableFuture.completedFuture(null) }
+    override fun onError(webSocket:WebSocket,error:Throwable) { if(connection.get()===webSocket){cancelLlmTasks();closed.countDown()} }
     private fun send(message:RunnerMessage):Boolean {
         val socket=connection.get() ?: return false
         return runCatching { synchronized(sendLock) { socket.sendText(mapper.writeValueAsString(message),true).join() };true }.getOrDefault(false)
@@ -539,7 +549,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                     "unload" -> {llm.unloadQwen();llm.probe()}
                     else -> if(size.startsWith("agent:")) {
                         require(prompt.length<=60000)
-                        llm.conversation(size.substringAfter(':'),mapper.readValue<List<ProjectAgentMessage>>(prompt),think) {text->send(RunnerMessage("llm-thinking",token=requestId,detail=text.take(1000)))}
+                        llm.conversation(size.substringAfter(':'),mapper.readValue<List<ProjectAgentMessage>>(prompt),think) {frame->send(RunnerMessage("llm-progress",token=requestId,detail=mapper.writeValueAsString(frame.bounded())))}
                     } else llm.chat(size,prompt,think)
                 }
                 RunnerMessage("llm-result",state="OK",token=requestId,detail=mapper.writeValueAsString(result).also {require(it.length<=200*1024)})

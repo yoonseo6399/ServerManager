@@ -21,7 +21,7 @@ class ProjectAgentConversationTest {
 {"message":{},"done":true,"done_reason":"stop","eval_count":12}
 """
         ollama(stream,{raw->val r=jacksonObjectMapper().readTree(raw);assertTrue(r.path("think").asBoolean());assertTrue(r.path("stream").asBoolean());assertEquals("json",r.path("format").asText());assertEquals(8192,r.path("options").path("num_ctx").asInt());assertEquals(3,r.path("messages").size())}) {llm->
-            val reply=llm.conversation("14b",listOf(ProjectAgentMessage("system","system"),ProjectAgentMessage("assistant","previous"),ProjectAgentMessage("user","next")),progress={progress=it})
+            val reply=llm.conversation("14b",listOf(ProjectAgentMessage("system","system"),ProjectAgentMessage("assistant","previous"),ProjectAgentMessage("user","next")),progress={progress=it.thinking})
             assertEquals("완료",jacksonObjectMapper().readTree(reply.text).path("message").asText());assertEquals("checking project",progress);assertEquals(12L,reply.tokens);assertEquals("checking project",reply.thinking)
         }
     }
