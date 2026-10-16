@@ -238,7 +238,7 @@ internal class DiscordProjectAgentDisplay(private val channel:TextChannel,privat
                     render("턴 ${event.turn} · 도구 실행")
                 }
             }
-            "tool_output"->logs[event.turn]?.let {(text,writer)->text.append(event.text);writer.offer(text.toString())}
+            "tool_output"->{if(event.text.isNotEmpty())logs[event.turn]?.let {(text,writer)->text.append(event.text);writer.offer(text.toString())};render("턴 ${event.turn} · 도구 실행 ${"%.1f".format(java.util.Locale.ROOT,event.seconds)}초")}
             "tool_end"->{
                 logs[event.turn]?.let {(text,writer)->writer.offer(text.toString().ifBlank {"출력 없음"},true)}
                 turns[event.turn]?.editMessageEmbeds(EmbedBuilder().setTitle("턴 ${event.turn} : ${event.plan!!.tool.name} · ${"%.1f".format(java.util.Locale.ROOT,event.seconds)}초").setDescription(event.text.take(3500)).setFooter(footer()).build())?.setComponents(emptyList())?.queue({}, {})
