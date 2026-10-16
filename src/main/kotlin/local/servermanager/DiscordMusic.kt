@@ -13,7 +13,7 @@ import java.util.concurrent.RejectedExecutionException
 
 /** The member is fetched through REST before this policy is evaluated; channel IDs come from voice-state events. */
 object DiscordMusicAccess {
-    private val actions=setOf("play","pause","resume","skip","stop","queue","join","leave","previous","remove","autoplay","save","load","playlists","delete","stats")
+    private val actions=setOf("play","pause","resume","skip","stop","queue","join","leave","previous","remove","autoplay","repeat","save","load","playlists","delete","stats")
     fun allowed(config:DiscordConfig,guildId:String?,clientCurrent:Boolean,action:String,userChannelId:String?,botChannelId:String?):Boolean {
         if(!clientCurrent || !config.enabled || guildId==null || action !in actions) return false
         if((config.grants.none { it.guildId==guildId }) && (config.alerts.none { it.guildId==guildId }) && (config.superAdmins.none { it.guildId==guildId })) return false
@@ -55,6 +55,7 @@ class DiscordMusic(
                     net.dv8tion.jda.api.interactions.commands.build.OptionData(OptionType.CHANNEL,"channel","생략하면 현재 채널",false)
                         .setChannelTypes(net.dv8tion.jda.api.entities.channel.ChannelType.TEXT)),
                 SubcommandData("unchannel","음악 전용 채널 등록 해제 (채널 관리자)"),
+                SubcommandData("repeat","현재 곡 한 곡 반복 켜기/끄기").addOption(OptionType.BOOLEAN,"enabled","생략하면 켜고 끄기를 전환",false),
                 SubcommandData("autoplay","완주 기록 기반 자동재생 설정").addOption(OptionType.BOOLEAN,"enabled","자동재생 켜기",true),
                 SubcommandData("stats","직접 등록한 곡의 완주 통계 보기"),
                 SubcommandData("save","현재 곡·대기열 또는 YouTube 플레이리스트를 저장")
@@ -91,6 +92,7 @@ class DiscordMusic(
             "stop" -> playback.stop(guild.id)
             "queue" -> playback.queue(guild.id)
             "leave" -> playback.leave(guild)
+            "repeat" -> playback.repeat(guild.id,when(query) {"on"->true;"off"->false;else->null})
             else -> "알 수 없는 음악 명령입니다."
         }
     }
@@ -110,7 +112,7 @@ class DiscordMusic(
         val guild=event.guild
         val jda=event.jda
         val action=event.subcommandName.orEmpty()
-        val query=event.getOption("query")?.asString.orEmpty()
+        val query=event.getOption("query")?.asString ?: event.getOption("enabled")?.asBoolean?.let { if(it) "on" else "off" }.orEmpty()
         if(guild==null || !DiscordMusicAccess.allowed(config(),guild.id,jda===currentClient(),"queue",null,null)) {
             event.reply("설정된 Discord 서버에서만 음악 명령을 사용할 수 있습니다.").setEphemeral(true).queue({}, {});return
         }
@@ -224,7 +226,7 @@ class DiscordMusic(
         val action=event.componentId.removePrefix("music:")
         if(guild==null || event.jda!==currentClient() || record==null ||
             !DiscordMusicChannelAccess.matches(record,guild.id,event.channel.id,event.messageId) ||
-            (action !in setOf("resume","pause","stop","previous","skip") && !action.startsWith("page:"))) {
+            (action !in setOf("resume","pause","stop","previous","skip","autoplay","repeat") && !action.startsWith("page:"))) {
             event.reply("현재 음악 패널에서 사용하세요.").setEphemeral(true).queue({}, {});return
         }
         event.deferReply(true).queue({hook ->
@@ -233,6 +235,8 @@ class DiscordMusic(
                     if(permitted(event.jda,guild,member,"queue")) {
                         panels.page(guild.id,action.substringAfter(":").toIntOrNull() ?: 0);"대기열 페이지를 바꿨습니다."
                     } else "현재 서버에서 사용할 수 없습니다."
+                } else if(action=="autoplay") {
+                    if(permitted(event.jda,guild,member,"autoplay")) playback.autoplay(guild.id,!playback.snapshot(guild.id).autoplay) else "같은 음성 채널에서 명령을 사용하세요."
                 } else runAction(event.jda,guild,member,action,"")
                 hook.editOriginal(result).setAllowedMentions(emptyList()).queue({hook.deleteOriginal().queueAfter(3,java.util.concurrent.TimeUnit.SECONDS,{}, {})},{})
                 panels.refresh(guild.id)

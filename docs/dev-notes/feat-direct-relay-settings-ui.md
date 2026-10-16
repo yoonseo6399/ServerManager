@@ -1,0 +1,22 @@
+상태: 직접 중계·포트포워딩·실행기 업데이트 상세 UI 완료, 통합 대기
+# feat/direct-relay-settings-ui
+- 기준 feat/settings-navigation 092bc79; 완료된 제공자/Google 브랜치 d8b615a 병합. GoogleConnectionSettings는 내 계정에 연결.
+- Claude API 계약 origin/feat/direct-tcp-relay 3e542dc docs/direct-relay-api.md 기준. 해당 backend 소스는 이 브랜치에 병합하지 않음.
+- network 첫 화면 DirectRelaySettings: 직접 경로, 동의/활성/준비 구분, 승인 없는 실행기 비활성, 준비 후 READY 전환, 취소, 연결 영향 확인 후 즉시 차단.
+- 공유기 외부 포트/내부 주소/내부 포트 그대로 표시. UNVERIFIED는 미검증, 검사는 관리 서버 위치에서의 검사라고 표시. 공유기/DNS 자동 변경 없음.
+- 기존 관리 Mac 경유 설정은 접힌 별도 legacy 영역으로 표시. 공통 게임 포트/DNS 설정은 기존 API 유지.
+- 설정 초안은 최초 조회 revision을 보존하며 충돌 시 API 오류를 표시; 초기화하면 최신 revision 사용.
+- RunnerUpdateStatus: 실제 update-status 컴포넌트/대기사유/에러/host mode/지속 로그, after cursor 재조회; 500건 제한. 오프라인/구형 available:false 구분. MANAGER_APP placeholder는 성공 상태처럼 표시하지 않음.
+- 검증: TypeScript tsc -b + Vite build 통과; Playwright settings config 6개 통과 (기존 4 + 준비/전환/차단확인/미허용/미검증/409 충돌 + 오프라인/대기사유/로그 cursor 이어읽기).
+- 실제 다중 컴퓨터 중계·공유기·Google OAuth·Windows 실행은 미검증. 운영 앱/게임 변경 없음. AssistantPanel 연결은 해당 담당자 완료 이후 통합 필요.
+
+## Review follow-up
+- Explicit dirty draft: clean polling adopts full config and revision, edits preserve original snapshot/revision, save/reset and completed mutations refresh baseline. Buttons/inputs block overlapping mutations. Added OFF→address save→prepare enabled=true clean→commit→next save correct revision regression.
+- External-check uses typed status/detail and human labels instead of raw JSON; runner ID changes clear prior status/logs.
+- Manager updates optional detail now displays actual MANAGER_APP phases/wait reason/error/log from runtime API; old responses remain supported.
+- Final scoped validation: 7 menu/direct/runner/log cases passed; added manager detail case passed separately. TypeScript/Vite passed after final component changes. No production changes.
+
+## Assistant integration
+- Merged harness checkpoint82c4cef; mounted AssistantPanel only under owner AI menu. Scoped CSS wrapper corrects inherited flex layout for task review/inputs without modifying harness source.
+- Focused Playwright assistant tests3 passed: cloud-consent/review/final-approval separate and busy disables duplicate; policy SaveBar blocks discarded navigation and existing history returns to AI after account; regular direct #ai cannot mount admin controls.
+- TypeScript and Vite build passed. Inspected full-page screenshot test-results/assistant-reviewed.png (ignored): request form, before/after and final approval now ordered vertically with no overlap. Tests use mocked backend only; actual Qwen/Google/Discord remained untouched.

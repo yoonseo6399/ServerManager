@@ -18,6 +18,7 @@ dependencies {
     implementation("com.yubico:webauthn-server-core:2.10.0")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation(kotlin("reflect"))
+    implementation("net.java.dev.jna:jna:5.17.0")
     implementation("org.tomlj:tomlj:1.1.1")
     implementation("net.dv8tion:JDA:6.7.0") { exclude(module = "opus-java") }
     implementation("dev.arbjerg:lavaplayer:2.2.7")
@@ -33,6 +34,7 @@ dependencies {
     testImplementation("org.springframework.security:spring-security-test")
 }
 tasks.test {
+    dependsOn(tasks.bootJar) // Packaged-host/runner fixtures must use this source, including on a clean CI checkout.
     useJUnitPlatform()
     // Tests must never inherit the live profile, even when launched from its working directory.
     environment("SERVER_MANAGER_DATA", layout.buildDirectory.dir("test-profile").get().asFile.absolutePath)

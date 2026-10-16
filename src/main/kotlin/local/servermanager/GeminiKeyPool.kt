@@ -141,7 +141,8 @@ class GeminiQuotaTracker(private val store:GeminiKeyPoolStore,private val model:
 
 class PooledGeminiModel(private val store:GeminiKeyPoolStore,private val model:String,private val tracker:GeminiQuotaTracker,
     private val notify:(String)->Unit={},private val factory:(String,String)->AgentModel={key,name->GeminiAgentModel(key,name)},
-    private val now:()->Long={System.currentTimeMillis()},private val sleep:(Long)->Unit={Thread.sleep(it)}):AgentModel {
+    private val now:()->Long={System.currentTimeMillis()},private val sleep:(Long)->Unit={Thread.sleep(it)},
+    private val credentialFilter:()->List<PoolCredential> = {store.credentials()}):AgentModel {
     override fun generate(request:JsonNode):JsonNode {
         // Conservative UTF-8 byte estimate, reconciled to provider promptTokenCount after completion.
         val estimate=request.toString().toByteArray(Charsets.UTF_8).size.toLong()+256
@@ -149,7 +150,7 @@ class PooledGeminiModel(private val store:GeminiKeyPoolStore,private val model:S
         var attempts=0;var reportedWait=false;var lastFailure:GeminiApiException?=null
         while(attempts<4) {
             check(!Thread.currentThread().isInterrupted) { "작업이 중지되었습니다." }
-            val credentials=store.credentials()
+            val credentials=credentialFilter()
             val decision=tracker.reserve(credentials,estimate)
             val lease=decision.lease
             if(lease==null) {

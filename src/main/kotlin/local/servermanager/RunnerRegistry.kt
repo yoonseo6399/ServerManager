@@ -42,6 +42,9 @@ class RunnerRegistry(private val manager:ServerManager,private val auth:AuthStor
     private val nonces=mutableMapOf<String,Long>()
     private val updates=mutableMapOf<String,RunnerUpdateStatus>()
     private val tcpRelays=mutableSetOf<String>()
+    private val updateDetails=mutableMapOf<String,UpdateDetail>()
+    @Synchronized fun updateDetail(id:String,detail:UpdateDetail){if(active(id)!=null)updateDetails[id]=detail}
+    @Synchronized fun updateDetailFor(id:String)=updateDetails[id]
     @Synchronized fun tcpRelayCapability(id:String,enabled:Boolean) {if(enabled && active(id)!=null)tcpRelays.add(id) else tcpRelays.remove(id)}
     @Synchronized fun tcpRelaySupported(id:String)=id in tcpRelays && online(id)
     init {
@@ -188,5 +191,22 @@ class RunnerApi(private val registry:RunnerRegistry,private val auth:AuthStore,p
     // MVC DELETE /{id} also matches GET /connect and returns 405 before upgrade.
     @DeleteMapping("/{id:[a-f0-9-]{36}}") fun revoke(@PathVariable id:String,authentication:Authentication,req:HttpServletRequest) {
         fresh(req);registry.revoke(authentication.name,id)
+    }
+}
+
+/** Read-only update progress for the management web: per component current/target, stage, wait reason, error and a durable log. */
+@RestController
+@RequestMapping("/api/runners")
+class RunnerUpdateStatusApi(private val registry:RunnerRegistry) {
+    @GetMapping("/{id:[a-f0-9-]{36}}/update-status")
+    fun status(@PathVariable id:String,@RequestParam(defaultValue="0") after:Long,authentication:Authentication):Map<String,Any?> {
+        // Same visibility rule as the runner list: only runners the caller may see.
+        if(registry.views(authentication.name).none {it.id==id})throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val detail=registry.updateDetailFor(id)
+        return mapOf("available" to (detail!=null),
+            "components" to (detail?.components ?: emptyList()),
+            "log" to (detail?.log?.filter {it.seq>after} ?: emptyList()),
+            "hostMode" to detail?.hostMode,
+            "note" to if(detail==null)"실행기가 아직 상세 업데이트 상태를 보고하지 않았습니다 (구버전이거나 오프라인)" else null)
     }
 }

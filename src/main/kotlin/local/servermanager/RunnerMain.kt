@@ -63,6 +63,7 @@ object RunnerMain {
         System.setErr(PrintStream(System.err,true,StandardCharsets.UTF_8))
         when {
             "--runner-pair" in args -> pair(args)
+            args.any {it.startsWith("--runner-relay-consent=")} -> relayConsent(args.first {it.startsWith("--runner-relay-consent=")}.substringAfter('='))
             "--runner-status" in args -> {
                 val identity=if(identityFile.exists()) mapper.readValue<RunnerIdentity>(identityFile.readText()) else null
                 println(identity?.let { "${it.name} (${it.id}) · ${it.managerUrl}" } ?: "등록되지 않은 실행기")
@@ -70,20 +71,43 @@ object RunnerMain {
             else -> {
                 println("Server Manager 실행기 대기 시작")
                 if(!identityFile.exists()) println("이 컴퓨터는 아직 등록되지 않았습니다. 관리 웹의 ‘서버 실행기’에서 패스키로 코드를 발급하고 pair.command / pair.cmd로 등록하세요.")
-                System.getenv("SERVER_MANAGER_RUNNER_READY_FILE")?.let { Path.of(it).writeText("ready") }
+                // A control layer that cannot talk to a host owning a live game must not report healthy; the supervisor
+                // then restores the previous version instead of leaving the game without a controller.
+                val preflight=HostLifecycle.preflight(home)
+                if(!preflight.ok) {
+                    UpdateCoordinator(home).update(UpdateComponents.RUNNER_CONTROL,RunnerAgent.version(),null,"FAILED",error=preflight.detail ?: preflight.reason)
+                    System.err.println("상주 게임 서비스 연결 확인 실패: ${preflight.reason}");kotlin.system.exitProcess(3)
+                }
+                if(preflight.reason=="HOST_WILL_BE_REPLACED"){val refusal=HostLifecycle.replaceIfIdle(home);if(refusal!=null){System.err.println("상주 서비스 교체 보류: $refusal");kotlin.system.exitProcess(3)}}
+                fun ready(){System.getenv("SERVER_MANAGER_RUNNER_READY_FILE")?.let { Path.of(it).writeText("ready") }}
                 var agent:RunnerAgent?=null
                 var currentId:String?=null
                 Runtime.getRuntime().addShutdownHook(Thread { agent?.shutdownGracefully() })
                 while(true) {
                     val identity=if(identityFile.exists()) runCatching { mapper.readValue<RunnerIdentity>(identityFile.readText()) }.getOrNull() else null
-                    if(identity==null) { Thread.sleep(10000);continue }
-                    if(currentId!=identity.id) { agent=RunnerAgent(home,identity);currentId=identity.id }
+                    if(identity==null) { ready();Thread.sleep(10000);continue }
+                    if(currentId!=identity.id) {
+                        val next=RunnerAgent(home,identity)
+                        try {next.initializeController(::ready)} catch(e:Exception) {System.err.println("상주 서비스 초기화 실패: ${e.javaClass.simpleName}");kotlin.system.exitProcess(3)}
+                        agent=next;currentId=identity.id
+                    }
                     try { agent!!.connectLoop() }
                     catch(e:Exception) { System.err.println("중앙 서버 연결 대기: ${e.javaClass.simpleName}");Thread.sleep(5000) }
                     if(agent!!.restartForUpdate()) kotlin.system.exitProcess(75)
                 }
             }
         }
+    }
+    /** Local, file-free way to grant or withdraw "management web owner may use this computer as a TCP relay". A running runner applies it within ~10 seconds. */
+    private fun relayConsent(action:String) {
+        val store=RelayConsentStore(home)
+        val state=when(action) {
+            "allow" -> store.set(true,"cli")
+            "revoke" -> store.set(false,"cli-revoke")
+            "status" -> store.read()
+            else -> error("allow, revoke, status 중 하나를 지정하세요")
+        }
+        println("관리 웹 소유자의 TCP 중계 사용 허용: "+(if(state.allowed)"허용" else "허용 안 함")+" (출처: "+state.source+(state.migratedFrom?.let {", 이전된 기존 설정: $it"} ?: "")+(if(state.environmentLocked)", 환경변수로 고정" else "")+")")
     }
     private fun pair(args:Array<String>) {
         val url=args.firstOrNull { it.startsWith("--manager-url=") }?.substringAfter('=')?.trimEnd('/') ?: error("--manager-url=https://관리주소 를 지정하세요")
@@ -123,6 +147,14 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     private val updater=updateService ?: if(System.getenv("RUNNER_PACKAGE_HOME")!=null) RunnerUpdater(home,version()) {state->
         if(state.phase=="READY" && pauseAfterDownload)updatePauseRequested=true
         send(RunnerMessage("update-status",detail=mapper.writeValueAsString(state)))
+        // Mirror into the component status; the current waitReason (if any) is kept by the coordinator on WAITING.
+        val stage=when(state.phase){"CHECKING"->"CHECKING";"DOWNLOADING"->"DOWNLOADING";"VERIFYING"->"VERIFYING";"READY","WAITING","PAUSING"->"WAITING";"FAILED"->"FAILED";"CURRENT","IDLE"->"IDLE";else->null}
+        if(stage!=null){
+            val previous=coordinator.current(UpdateComponents.RUNNER_CONTROL)
+            val reason=if(stage=="WAITING")(previous?.waitReason ?: if(state.phase=="READY")"APPLY_WHEN_SAFE" else "CONDITIONS")else null
+            coordinator.update(UpdateComponents.RUNNER_CONTROL,version(),state.latest,stage,waitReason=reason,error=if(stage=="FAILED")"업데이트 확인·다운로드·검증 실패 (상세는 실행기 로그)" else null)
+            reportUpdateDetail()
+        }
     } else null
     @Volatile private var lastUpdateCheck=0L
     private val connection=AtomicReference<WebSocket?>()
@@ -131,8 +163,12 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     private val binaryBuffer=ByteArrayOutputStream()
     private val sendLock=Any()
     private val tcpRelayAllowed=System.getenv("RUNNER_TCP_RELAY_ENABLED")=="true" || home.resolve("tcp-relay-enabled").let {it.isRegularFile() && it.readText().trim()=="true"}
+    private val llmAllowed=System.getenv("RUNNER_LLM_ENABLED")=="true" || home.resolve("llm-enabled").let {it.isRegularFile() && it.readText().trim()=="true"}
+    private val llmBusy=java.util.concurrent.atomic.AtomicBoolean()
     @Volatile private var tcpRelay:TcpRelayPeer?=null
     @Volatile private var sessionToken:String?=null
+    /** Direct relay (DRP1) survives manager disconnects; only local consent withdrawal or process exit tears it down. */
+    private val directRelay=DirectRelayRunnerRole(home,::send,{id->configs[id]?.takeIf {processes[id]?.isAlive==true && id in ready && id !in stopping}?.port},{id->processes[id]?.isAlive==true && id in ready && id !in stopping})
     private val processes=ConcurrentHashMap<String,Process>()
     private val gameStreams=ConcurrentHashMap<Int,Socket>()
     private val configs=ConcurrentHashMap<String,Instance>()
@@ -184,7 +220,53 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     }
     private fun javaBin()=Path.of(System.getProperty("java.home"),"bin",if(identity.platform=="WINDOWS") "java.exe" else "java").toString()
     private fun signingKey()=KeyFactory.getInstance("Ed25519").generatePrivate(PKCS8EncodedKeySpec(Base64.getUrlDecoder().decode(identity.privateKey)))
+    // ---- Resident game host -------------------------------------------------------------------------------------
+    @Volatile private var hosted:HostedGames?=null
+    private val hostMode=HostModeStore(home)
+    @Volatile var hostModeState=HostModeState()
+    private val hostInit=java.util.concurrent.atomic.AtomicBoolean()
+    private fun hostedAlive(id:String)=processes[id].let {it is HostedProcess && it.isAlive}
+    /** Decides once per control-layer start whether games run through the resident host, then re-attaches survivors. */
+    private fun initHost() {
+        if(!hostInit.compareAndSet(false,true))return
+        val jar=currentJarPath()
+        if(jar==null){hostModeState=HostModeState("LEGACY","설치된 JAR가 아닌 개발·테스트 실행");return}
+        val windows=identity.platform=="WINDOWS"
+        val candidate=HostedGames(home,"runner-${RunnerAgent.version()}",{GameHostMain.spawnDetached(home,javaBin(),jar,windows)},retryMillis=15000)
+        // A game from the previous layout that is still alive is neither adopted nor killed; the split waits for its normal stop.
+        val owned=if(GameHostClient.readEndpoint(home)!=null)candidate.adoptable().toSet() else emptySet()
+        val root=home.resolve("instances")
+        val legacy=if(root.exists())root.listDirectoryEntries().filter {it.isDirectory() && it.name !in owned && orphanAlive(it.name)}.map {it.name} else emptyList()
+        hostModeState=hostMode.evaluate(legacy)
+        if(hostModeState.mode!="SERVICE"){candidate.close();return}
+        if(candidate.connection()==null){check(GameHostClient.readEndpoint(home)?.let {ProcessHandle.of(it.pid).map {p->p.isAlive}.orElse(false)}!=true) {"기존 상주 서비스와 통신하지 못해 제어 계층 시작을 중단합니다."};hostModeState=hostMode.fallback("상주 서비스를 시작하지 못해 이전 방식으로 실행합니다: ${candidate.lastError}");return}
+        hosted=candidate
+        candidate.onRelay {body->runCatching {send(mapper.readValue<RunnerMessage>(body))}}
+        owned.forEach {id->
+            val config=configs[id] ?: runCatching {mapper.readValue<Instance>(instanceRoot(id).resolve("instance.json").readText())}.getOrNull() ?: return@forEach
+            configs[id]=config
+            val process=candidate.adopt(id,ConsolePosition.load(instanceRoot(id).resolve("console.seq"))) ?: return@forEach
+            processes[id]=process
+            // The query port was written to server.properties by the start that launched this process.
+            runCatching {Properties().also {p->serverDir(id).resolve("server.properties").inputStream().use(p::load)}.getProperty("query.port")?.toInt()}.getOrNull()?.let {queryPorts[id]=it}
+            activity[id]=AtomicLong()
+            // `ready` is restored by the replayed "Done" line in watch(); an already-running server is reported as RUNNING at once.
+            val wasReady=(process as? HostedProcess)?.readyAtAttach==true
+            if(wasReady)ready.add(id)
+            send(RunnerMessage("state",id,if(wasReady)"RUNNING" else "STARTING",version(),"제어 계층 업데이트 후 상주 서비스에서 다시 연결",pid=process.pid()))
+            watch(id,config,process,CrashReports.snapshot(serverDir(id)),fresh=false)
+        }
+    }
+    private fun currentJarPath()=GameHostMain.packagedJar(RunnerAgent::class.java)
+    /** Hosted games are not killed by a control-layer shutdown; only the console position is remembered. */
+    private fun detachHosted() {
+        processes.forEach {(id,p)->(p as? HostedProcess)?.savePosition(instanceRoot(id).resolve("console.seq"))}
+        hosted?.close()
+    }
+    fun hostStatus()=hosted?.hostStatus() ?: emptyList()
+    fun initializeController(ready:()->Unit={}) {initHost();ready()}
     fun connectLoop() {
+        initHost()
         closed=CountDownLatch(1)
         val timestamp=System.currentTimeMillis()
         val nonce=ByteArray(24).also { SecureRandom().nextBytes(it) }.let { Base64.getUrlEncoder().withoutPadding().encodeToString(it) }
@@ -206,7 +288,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                 workers.submit { checkRunnerUpdate() }
             }
             if(restartForUpdate()) kotlin.system.exitProcess(75)
-            send(RunnerMessage("heartbeat",version=version()));sable.heartbeat()
+            send(RunnerMessage("heartbeat",version=version()));sable.heartbeat();if(hosted==null)directRelay.tick()
             reportUpdate()
             reportFolders()
             home.resolve("instances").takeIf {it.exists()}?.listDirectoryEntries()?.forEach {dir->dir.resolve("install-result.json").takeIf {it.exists()}?.let {file->runCatching {send(mapper.readValue<RunnerMessage>(file.readText()))}}}
@@ -244,22 +326,69 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     }
     private fun reserveUpload(id:String)=synchronized(lifecycle){!updatePauseRequested && uploading.add(id)}
     private fun updateCheckpoint(){if(updatePauseRequested)throw RetryTransfer("서명된 실행기 업데이트를 위해 전송을 잠시 중지했습니다. 재연결 후 이어받습니다")}
+    private val activation=ActivationGuard(home)
+    /** Called once the new layer has a manager session; the host attach already happened in initHost(). */
+    private fun confirmActivation() {
+        val failed=home.resolve("failed-update-version.txt").takeIf {it.exists()}?.readText()?.trim()
+        coordinator.reconcileStart(UpdateComponents.RUNNER_CONTROL,version(),failed)
+        when(val outcome=activation.check(version())) {
+            is ActivationGuard.Outcome.Waiting -> {activation.confirm(version());coordinator.update(UpdateComponents.RUNNER_CONTROL,version(),null,"DONE",message="새 제어 계층이 관리 서버와 상주 서비스에 연결됐습니다")}
+            is ActivationGuard.Outcome.RolledBack -> coordinator.update(UpdateComponents.RUNNER_CONTROL,outcome.restored,outcome.failed,"FAILED",error=outcome.reason)
+            else -> {}
+        }
+        hosted?.let {h->
+            val host=h.hostVersion()
+            if(host!=null)coordinator.update(UpdateComponents.GAME_HOST,host,if(host!=version())version() else null,if(host!=version())"WAITING" else "DONE",waitReason=if(host!=version())"HOST_REPLACED_WHEN_IDLE" else null)
+        }
+    }
+    // ---- Update status (component, stage, wait reason, durable log) -----------------------------------------------
+    private val coordinator=UpdateCoordinator(home)
+    private fun pendingProps():java.util.Properties? {
+        val version=runCatching {home.resolve("updates/pending.txt").readText().trim()}.getOrNull() ?: return null
+        return runCatching {java.util.Properties().also {p->home.resolve("updates/$version/update.properties").inputStream().use(p::load)}}.getOrNull()
+    }
+    private fun waitingFor(service:RunnerUpdater,reason:String):Boolean {
+        service.phase("WAITING")
+        coordinator.update(UpdateComponents.RUNNER_CONTROL,version(),service.status().latest,"WAITING",waitReason=reason)
+        reportUpdateDetail();return true
+    }
+    private fun hostedGamesBlockUpdate(service:RunnerUpdater):Boolean {
+        val alive=processes.values.count {it is HostedProcess && it.isAlive}
+        if(alive==0)return false
+        val props=pendingProps()
+        val decision=UpdatePolicy.decide(UpdateComponents.RUNNER_CONTROL,UpdateFacts(hostedGamesAlive=alive,hostProtocol=hosted?.hostProtocol(),
+            targetMinHost=props?.getProperty("controller.minHost")?.toIntOrNull() ?: 1,targetMaxHost=props?.getProperty("controller.maxHost")?.toIntOrNull() ?: 1))
+        return if(decision.apply)false else waitingFor(service,decision.waitReason ?: "HOST_UNKNOWN")
+    }
+    /** Sent when the detail changes and on every new session, so a reconnecting manager can read what happened meanwhile. */
+    private fun reportUpdateDetail(){send(RunnerMessage("update-detail",detail=mapper.writeValueAsString(coordinator.snapshot(hostModeState))))}
     fun restartForUpdate():Boolean=synchronized(lifecycle) {
         val service=updater ?: return false
-        if(service.busy() || !service.pending() || tcpRelay?.busy()==true)return false
+        if(service.busy() || !service.pending())return false
+        val target=service.status().latest ?: pendingProps()?.getProperty("version")
+        if(tcpRelay?.busy()==true || directRelay.busy())return waitingFor(service,"RELAY_STREAMS_ACTIVE").let {false}
         val root=home.resolve("instances")
         val dirs=if(root.exists())root.listDirectoryEntries().filter {it.isDirectory()} else emptyList()
-        if(processes.values.any {it.isAlive} || preparing.isNotEmpty() || dirs.any {orphanAlive(it.name)}){service.phase("WAITING");return false}
-        if(uploading.isNotEmpty() || workspaces.values.any {it.busy()})return false
-        if(!updatePauseRequested && dirs.any {it.resolve("dirty").exists() || it.resolve("folder-import.pending").exists()}){service.phase("WAITING");return false}
-        updatePauseRequested=true;service.phase("RESTARTING");true
+        // Games owned by the resident host survive a control-layer restart, but only when the new layer can still talk to that host.
+        if(processes.values.any {it.isAlive && it !is HostedProcess} || dirs.any {orphanAlive(it.name)})return waitingFor(service,"LEGACY_GAME_RUNNING").let {false}
+        if(preparing.isNotEmpty())return waitingFor(service,"SERVER_PREPARING").let {false}
+        if(hostedGamesBlockUpdate(service))return false
+        if(uploading.isNotEmpty() || workspaces.values.any {it.busy()}){coordinator.update(UpdateComponents.RUNNER_CONTROL,version(),target,"WAITING",waitReason="TRANSFER_ACTIVE");return false}
+        if(!updatePauseRequested && dirs.any {(it.resolve("dirty").exists() && !hostedAlive(it.name)) || it.resolve("folder-import.pending").exists()})return waitingFor(service,"DIRTY_HANDOFF_PENDING").let {false}
+        updatePauseRequested=true;service.phase("RESTARTING")
+        activation.begin(UpdateComponents.RUNNER_CONTROL,version(),target ?: version(),10*60_000L)
+        coordinator.update(UpdateComponents.RUNNER_CONTROL,version(),target,"APPLYING",message="제어 계층을 교체합니다 · 게임 ${processes.values.count {it is HostedProcess && it.isAlive}}개는 상주 서비스가 유지")
+        coordinator.update(UpdateComponents.RUNNER_CONTROL,version(),target,"RECONNECTING")
+        reportUpdateDetail();true
     }
     fun shutdownGracefully() {
-        processes.keys.forEach { stop(it) }
-        processes.values.forEach { runCatching { it.waitFor() } }
+        // Hosted games are left running: this layer may only be restarting for an update.
+        detachHosted()
+        processes.entries.filter {it.value !is HostedProcess}.forEach { stop(it.key) }
+        processes.values.filter {it !is HostedProcess}.forEach { runCatching { it.waitFor() } }
         installationProcesses.values.forEach {runCatching {it.waitFor()}}
         if(!updatePauseRequested)home.resolve("instances").takeIf { it.exists() }?.let { root -> Files.list(root).use { paths -> paths.filter { it.resolve("dirty").exists() }.forEach { dir -> uploadStopped(dir.fileName.toString()) } } }
-        tcpRelay?.close();sable.close();workers.shutdown()
+        tcpRelay?.close();directRelay.close();sable.close();workers.shutdown()
     }
     override fun onOpen(webSocket:WebSocket) { connection.set(webSocket);webSocket.request(1) }
     override fun onText(webSocket:WebSocket,data:CharSequence,last:Boolean):CompletionStage<*> {
@@ -275,7 +404,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                         "sable-registered" -> message.token?.let {sableRegistrations[it]?.complete(message.state=="OK")}
 
                         "session" -> { sessionToken=message.token;tcpRelay?.close();tcpRelay=if(tcpRelayAllowed)TcpRelayPeer(::send,::sendBinary) else null
-                            send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));reportUpdate();recoverStates() }
+                            confirmActivation();hosted?.relaySession() ?: directRelay.onSession();reportUpdateDetail();send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));send(RunnerMessage("llm-capability",state=if(llmAllowed)"OLLAMA_V1" else "OFF"));reportUpdate();recoverStates() }
                         "relay-config" -> {
                             val port=message.detail?.toIntOrNull()
                             val ok=tcpRelayAllowed && (message.state=="OFF" || port in 1024..65535) && runCatching {tcpRelay?.listen(if(message.state=="ON")port else null);true}.getOrDefault(false)
@@ -283,9 +412,11 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                         }
                         "relay-opened" -> message.streamId?.takeIf {it<0}?.let {tcpRelay?.ready(it)}
                         "relay-closed" -> message.streamId?.takeIf {it<0}?.let {tcpRelay?.end(it)}
+                        "drp-relay-config","drp-agent-config","drp-ticket" -> hosted?.relayForward(mapper.writeValueAsString(message)) ?: directRelay.onMessage(message)
                         "update-request" -> if(message.detail in setOf("WHEN_IDLE","PAUSE_TRANSFER")) {
                             requestUpdate(message.detail=="PAUSE_TRANSFER")
                         }
+                        "llm-request" -> if(message.token!=null)workers.submit {llmChat(message.token,message.state.orEmpty(),message.command.orEmpty(),message.detail=="THINK")}
                         "workspace" -> if(message.instanceId!=null && message.token!=null && message.detail!=null)workers.submit {workspace(message.instanceId,message.token,message.detail)}
                         "install" -> if(message.instanceId!=null && message.token!=null && message.detail!=null)workers.submit {installServer(message.instanceId,message.token,message.detail)}
                         "start" -> if(message.instanceId!=null && message.detail!=null) workers.submit { beginStart(message.instanceId,message.detail) }
@@ -391,6 +522,25 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                 check(processes[id]?.isAlive!=true && !orphanAlive(id) && !dirty(id).exists()) {"서버를 정상 종료한 뒤 파일을 변경하세요"}
                 if(serverDir(id).resolve("server.properties").exists())folders.checkWorldStopped(id)
             }}}!!
+    /** Ollama runs on this computer only; the manager never gets a way to choose the endpoint or a model tag. */
+    private fun llmChat(requestId:String,size:String,prompt:String,think:Boolean) {
+        val response=try {
+            check(llmAllowed) {"이 실행기는 Qwen 실행이 허용되지 않았습니다"}
+            // Probing is read-only and stays available while a chat runs; chat and unload are serialized so only one model is ever loaded.
+            val exclusive=size!="probe"
+            check(!exclusive || llmBusy.compareAndSet(false,true)) {"이 실행기에서 다른 Qwen 요청이 진행 중입니다"}
+            try {
+                val llm=LocalLlm()
+                val result:Any=when(size) {
+                    "probe" -> llm.probe()
+                    "unload" -> {llm.unloadQwen();llm.probe()}
+                    else -> llm.chat(size,prompt,think)
+                }
+                RunnerMessage("llm-result",state="OK",token=requestId,detail=mapper.writeValueAsString(result).also {require(it.length<=200*1024)})
+            } finally {if(exclusive)llmBusy.set(false)}
+        } catch(e:Exception) {RunnerMessage("llm-result",state="ERROR",token=requestId,detail=(if(e is IllegalStateException||e is IllegalArgumentException)e.message else null)?.take(500) ?: "실행기의 Ollama 요청을 완료하지 못했습니다")}
+        send(response)
+    }
     private fun workspace(id:String,requestId:String,raw:String) {
         val response=try {synchronized(operationLocks.computeIfAbsent(id){Any()}) {
             var reserved=false
@@ -587,36 +737,44 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         val builder=ProcessBuilder(args).directory(serverDir(id).toFile()).redirectErrorStream(true)
         val udpStatus=runCatching {sable.prepare(instance,serverDir(id),builder)}.getOrElse {"UDP 초기화 실패 · TCP 대체 통신을 사용합니다"}
         send(RunnerMessage("sable-status",id,detail=udpStatus))
-        val process=builder.start()
+        val process=hosted?.launch(id,args,serverDir(id),builder.environment().toMap(),instance.port) ?: builder.start()
         onSpawned()
         processes[id]=process
         dirty(id).writeText("${process.pid()}|${process.info().startInstant().orElse(Instant.now()).toEpochMilli()}")
         send(RunnerMessage("state",id,"STARTING",version(),"원격 Minecraft 서버 시작",pid=process.pid()))
+        watch(id,instance,process,crashesBefore,fresh=true)
+    }
+    }
+    /** Reads console output, reports state and finishes the stop/handoff path. Shared by fresh starts and re-attached hosted games. */
+    private fun watch(id:String,instance:Instance,process:Process,crashesBefore:Map<String,String>,fresh:Boolean) {
         workers.submit {
             val log=diagnosticRoot(id)?.resolve("server/logs/server-manager-console.log") ?: instanceRoot(id).resolve("console.log")
             log.parent.createDirectories()
-            log.toFile().appendText("\n--- ${Instant.now()} ---\n")
+            log.toFile().appendText("\n--- ${Instant.now()}"+(if(fresh)"" else " · 상주 서비스에서 다시 연결")+" ---\n")
+            val hostedProcess=process as? HostedProcess;val position=instanceRoot(id).resolve("console.seq");var lastSaved=0L
             FileOutputStream(log.toFile(),true).bufferedWriter().use { writer ->
             process.inputStream.bufferedReader().useLines { lines -> lines.forEach { line ->
                 val kind=if(line.contains("ERROR") || line.contains("Exception")) "error" else if(line.contains("WARN")) "warn" else "output"
                 if(line.contains("logged in with entity id")||line.contains("joined the game"))activity[id]?.incrementAndGet()
                 if(processes[id]===process)stopMonitors[id]?.log(line)
                 writer.appendLine(line);writer.flush()
+                hostedProcess?.let {it.markWritten();val now=System.currentTimeMillis();if(now-lastSaved>1000){lastSaved=now;it.savePosition(position)}}
                 send(RunnerMessage("log",id,kind,version(),line.take(4096)))
                 if(line.contains("Done (") && line.contains("For help") && processes[id]===process) {
                     ready.add(id);if(id !in stopping)send(RunnerMessage("state",id,"RUNNING",version(),pid=process.pid()))
                 }
             } } }
             val code=process.waitFor();sable.stopped(id);queryPorts.remove(id)
+            // Release the host record only after the exit report is durable below; until then the host refuses a second start.
             atomicText(instanceRoot(id).resolve("exit.json"),mapper.writeValueAsString(RunnerExitReport(code,CrashReports.changed(serverDir(id),crashesBefore),if(id in stopTimeouts)"STOP_TIMEOUT" else if(id in idleStops)"IDLE" else null)))
             ready.remove(id)
             stopMonitors.remove(id)?.close();stopTimeouts.remove(id);idleStops.remove(id)
             stopping.remove(id)
             processes.remove(id,process)
+            if(process is HostedProcess)hosted?.released(id,process.pid())
             send(RunnerMessage("state",id,"SYNCING",version(),"종료 코드 $code · "+if(instance.syncEnabled())"변경 파일 인계 중" else "동기화 OFF · 실행기 파일 보존"))
             uploadStopped(id)
         }
-    }
     }
     private fun sendExitReport(id:String,raw:String):HttpResponse<ByteArray> {
         val report=mapper.readValue<RunnerExitReport>(raw)

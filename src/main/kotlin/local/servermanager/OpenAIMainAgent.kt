@@ -12,14 +12,30 @@ import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.io.path.*
 
-data class MainAgentConfig(val model:String="gpt-6.1-sol",val reasoning:String="medium",val parallelism:Int=3,val maxTurns:Int=12,val tokenBudget:Long=120000)
+data class MainAgentConfig(val model:String="gpt-6.1-sol",val reasoning:String="medium",val parallelism:Int=3,val maxTurns:Int=12,val tokenBudget:Long=120000,val provider:String="OPENAI",val credentialRef:String="pool:*")
 class MainAgentSettings(private val directory:Path) {
     private val mapper=jacksonObjectMapper()
     private val store=AgentApiKeyStore(directory.resolve("openai"),"OpenAI")
     private val file=directory.resolve("main-agent.json")
     fun key()=System.getenv("OPENAI_API_KEY")?.takeIf {it.isNotBlank()} ?: store.read()
     fun config():MainAgentConfig=(if(file.exists())mapper.readValue<MainAgentConfig>(file.readText()) else MainAgentConfig()).also {validate(it)}
+    private fun pool()=GeminiKeyPoolStore(directory,{System.getenv("GEMINI_API_KEY")?.takeIf {it.isNotBlank()} ?: AgentApiKeyStore(directory).read()})
+    fun credentials(c:MainAgentConfig)=pool().credentials().filter { when {
+        c.credentialRef=="pool:*" -> true
+        c.credentialRef.startsWith("key:") -> it.config.id==c.credentialRef.removePrefix("key:")
+        else -> it.config.project==c.credentialRef.removePrefix("project:")
+    } }
+    fun ready(c:MainAgentConfig)=if(c.provider=="OPENAI")!key().isNullOrBlank() else credentials(c).isNotEmpty()
+    fun provider(c:MainAgentConfig,notify:(String)->Unit={}):AgentModel {
+        validate(c)
+        if(c.provider=="OPENAI")return OpenAIResponsesModel(key() ?: error("OpenAI API 키가 없습니다."))
+        val store=pool()
+        return GeminiMainAdapter(PooledGeminiModel(store,c.model,GeminiQuotaTracker(store,c.model),notify,credentialFilter={credentials(c)}))
+    }
+    fun keyOptions()=pool().configs()
     fun validate(c:MainAgentConfig) {
+        require(c.provider in setOf("OPENAI","GEMINI")) { "지원하지 않는 제공자입니다." }
+        require(c.credentialRef=="pool:*" || c.credentialRef.matches(Regex("key:[A-Za-z0-9_-]{1,40}|project:[A-Za-z0-9_-]{1,80}"))) { "키 선택을 확인하세요." }
         require(c.model.matches(Regex("[A-Za-z0-9._-]{1,80}"))) { "모델 ID 형식을 확인하세요." }
         require(c.reasoning in setOf("auto","none","low","medium","high","xhigh","max")) { "추론 강도를 확인하세요." }
         require(c.parallelism in 1..3 && c.maxTurns in 1..20 && c.tokenBudget in 1000..1_000_000) { "병렬 수·호출 한도·토큰 예산을 확인하세요." }
@@ -28,7 +44,7 @@ class MainAgentSettings(private val directory:Path) {
         validate(c);if(!key.isNullOrBlank())store.save(key)
         GeminiKeyPoolStore(directory).writePrivate(file,mapper.writeValueAsString(c))
     }
-    fun redact(text:String)=key()?.let {text.replace(it,"[redacted]")} ?: text
+    fun redact(text:String)=pool().redact(key()?.let {text.replace(it,"[redacted]")} ?: text)
 }
 
 class OpenAIResponsesModel(private val key:String):AgentModel {
@@ -204,12 +220,12 @@ class MainAgentCoordinator(private val provider:AgentModel,private val workerPro
                 """.trimIndent())
                 request.set<JsonNode>("input",history);request.set<JsonNode>("tools",json(tools()))
                 if(config.reasoning!="auto")request.set<JsonNode>("reasoning",json(if(config.reasoning=="none")mapOf("effort" to "none") else mapOf("effort" to config.reasoning,"summary" to "auto")))
-                emit(AgentEvent("call_start","GPT ${config.model} · 추론 ${config.reasoning}",calls))
+                emit(AgentEvent("call_start","${config.provider} ${config.model} · 추론 ${if(config.provider=="GEMINI")"모델 기본값" else config.reasoning}",calls))
                 val started=System.nanoTime();val before=tokens
                 try {
                     val response=provider.generate(request)
                     tokens+=response.path("usage").path("total_tokens").asLong()
-                    check(response.path("status").asText()=="completed") { "OpenAI 응답이 완료되지 않았습니다." }
+                    check(response.path("status").asText()=="completed") { "메인 제공자 응답이 완료되지 않았습니다." }
                     val outputs=response.path("output").toList()
                     outputs.forEach {item ->
                         history.add(item.deepCopy<JsonNode>()) // Includes encrypted reasoning and assistant phase for replay.
@@ -238,7 +254,7 @@ class MainAgentCoordinator(private val provider:AgentModel,private val workerPro
                         history.add(json(mapOf("type" to "function_call_output","call_id" to call.path("call_id").asText(),"output" to output.take(20000))))
                     }
                     if(didPublish)return MainAgentResult(true,calls,tokens,published,project.home.toString())
-                } finally {emit(AgentEvent("call_end","GPT 호출 종료 · ${(System.nanoTime()-started)/1_000_000_000}초 · 사용 토큰 ${tokens-before}",calls))}
+                } finally {emit(AgentEvent("call_end","메인 호출 종료 · ${(System.nanoTime()-started)/1_000_000_000}초 · 사용 토큰 ${tokens-before}",calls))}
             }
             return MainAgentResult(false,calls,tokens,published,project.home.toString())
         } finally {

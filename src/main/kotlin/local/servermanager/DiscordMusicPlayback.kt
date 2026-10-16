@@ -33,7 +33,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 data class MusicRequester(val name:String,val avatarUrl:String?,val userId:String)
 data class MusicTrackView(val title:String,val url:String?,val identifier:String?,val duration:Long,val position:Long=0,val requester:MusicRequester?=null,val id:String?=null)
-data class MusicSnapshot(val current:MusicTrackView?,val queue:List<MusicTrackView>,val paused:Boolean,val channelId:String?,val error:String?,val autoplay:Boolean=true)
+data class MusicSnapshot(val current:MusicTrackView?,val queue:List<MusicTrackView>,val paused:Boolean,val channelId:String?,val error:String?,val autoplay:Boolean=true,val repeat:Boolean=false)
 
 /** At most a six percent weight bonus for popular songs; every eligible song remains possible. */
 internal fun chooseAutoplay(stats:List<MusicPlayStat>,lastUrl:String?,failed:Set<String>,random:Random=Random.Default):MusicSavedTrack? {
@@ -69,6 +69,7 @@ class DiscordMusicPlayback internal constructor(private val manager: AudioPlayer
         var lastError: String? = null
         var channelId: String? = null
         var autoplayLastUrl:String?=null
+        var repeat=false
         val failedAutoUrls=mutableSetOf<String>()
         init { player.addListener(this) }
 
@@ -88,6 +89,11 @@ class DiscordMusicPlayback internal constructor(private val manager: AudioPlayer
                     safeSaved(track)?.let { runCatching { library.recordCompletion(guild.id,it) } }
                 }
                 if(endReason.mayStartNext && transitioned.add(track) && (player.playingTrack == null || player.playingTrack === track)) {
+                    if(endReason==AudioTrackEndReason.FINISHED && repeat) {
+                        player.startTrack(cloneWithRequester(track),false)
+                        changed(guild.id)
+                        return
+                    }
                     if(endReason==AudioTrackEndReason.FINISHED) autoplayLastUrl=safeSaved(track)?.url
                     remember(track)
                     advance(false)
@@ -174,7 +180,7 @@ class DiscordMusicPlayback internal constructor(private val manager: AudioPlayer
         })
     }
     fun snapshot(guildId:String):MusicSnapshot = sessions[guildId]?.let { session -> synchronized(session) {
-        MusicSnapshot(session.player.playingTrack?.view(),session.pending.map { it.view() },session.player.isPaused,session.channelId,session.lastError,library.autoplayEnabled(guildId))
+        MusicSnapshot(session.player.playingTrack?.view(),session.pending.map { it.view() },session.player.isPaused,session.channelId,session.lastError,library.autoplayEnabled(guildId),session.repeat)
     } } ?: MusicSnapshot(null,emptyList(),false,null,null,library.autoplayEnabled(guildId))
 
     private fun session(guild: Guild): Session = sessions.computeIfAbsent(guild.id) { Session(guild) }
@@ -322,6 +328,13 @@ class DiscordMusicPlayback internal constructor(private val manager: AudioPlayer
         sessions[guildId]?.let { session -> synchronized(session) { session.autoplayRevision++;changed(guildId) } }
         return if(enabled) "자동재생을 켰습니다." else "자동재생을 껐습니다."
     }
+
+    /** [enabled] null toggles. Replays a track that finished; skipping still moves to the next track. */
+    fun repeat(guildId:String,enabled:Boolean?):String = sessions[guildId]?.let { session -> synchronized(session) {
+        session.repeat=enabled ?: !session.repeat
+        changed(guildId)
+        if(session.repeat) "한 곡 반복을 켰습니다. 끝까지 재생된 곡을 다시 재생합니다." else "한 곡 반복을 껐습니다."
+    } } ?: "먼저 음성 채널에 연결하세요."
 
     fun savedQueue(guildId:String):List<MusicSavedTrack> = sessions[guildId]?.let { session -> synchronized(session) {
         (listOfNotNull(session.player.playingTrack)+session.pending.toList()).mapNotNull(::safeSaved)

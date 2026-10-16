@@ -11,7 +11,7 @@ public class RunnerSetupUiTest {
                 UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
                 RunnerSetup.Wizard ui=new RunnerSetup.Wizard();
                 try {
-                    if(!ui.auto.isSelected() || !ui.install.isEnabled() || !ui.manager.isEnabled() || ui.code.getEchoChar()==0) throw new AssertionError("Initial wizard controls");
+                    if(ui.relay.isSelected() || !ui.relay.isEnabled() || !ui.auto.isSelected() || !ui.install.isEnabled() || !ui.manager.isEnabled() || ui.code.getEchoChar()==0) throw new AssertionError("Initial wizard controls");
                     if(ui.progress.isIndeterminate()) throw new AssertionError("Progress should be idle");
                     if(args.length>1) {ui.useFolder.doClick();ui.serverId.setText("00000000-0000-0000-0000-000000000001");ui.folder.setText("/Users/friend/Minecraft/My Server");ui.jar.setText("paper-1.21.1.jar");}
                     ui.frame.setSize(900,ui.frame.getHeight());ui.frame.validate();
@@ -19,7 +19,7 @@ public class RunnerSetupUiTest {
                     BufferedImage image=new BufferedImage(panel.getWidth(),panel.getHeight(),BufferedImage.TYPE_INT_RGB);
                     var graphics=image.createGraphics();panel.printAll(graphics);graphics.dispose();
                     ImageIO.write(image,"png",Path.of(args[0]).toFile());
-                    System.out.println("Installer UI rendered; masked code, startup choice, initial enabled state checked.");
+                    System.out.println("Installer UI rendered; masked code, startup choice, TCP relay consent default OFF, initial enabled state checked.");
                 } finally {ui.frame.dispose();}
             } catch(Exception failure) {throw new RuntimeException(failure);}
         });

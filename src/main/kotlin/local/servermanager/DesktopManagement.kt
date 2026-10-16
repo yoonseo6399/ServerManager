@@ -29,19 +29,58 @@ fun validateProfileDirectory(value:String):Path {
     Files.createTempFile(real,".write-check-",".tmp").deleteIfExists();return real
 }
 @Service
-class DesktopLifecycle(private val manager:ServerManager,private val context:ConfigurableApplicationContext) {
+class DesktopLifecycle(private val manager:ServerManager,private val context:ConfigurableApplicationContext,private val registry:RunnerRegistry?=null,private val directRelay:DirectRelayService?=null,private val gateway:RunnerGateway?=null) {
     val supervised=System.getenv("SERVER_MANAGER_SUPERVISED")=="1"
     val home:Path=Path.of(System.getenv("SERVER_MANAGER_HOME") ?: System.getProperty("user.home")+"/Library/Application Support/ServerManager")
     val gate=ReentrantReadWriteLock()
     @Volatile var stopping=false
     @Volatile private var requested=false
     fun idle()=manager.list().all { it["pid"]==null && it["diagnosticActive"]!=true && it["modBusy"]!=true && it["state"] in setOf("NEW","STOPPED","FAILED","IMPORT_FAILED") }
-    @EventListener(ApplicationReadyEvent::class) fun ready() { System.getenv("SERVER_MANAGER_EXPECTED_VERSION")?.let { expected->check(javaClass.getResourceAsStream("/app-version.txt")!!.bufferedReader().use { it.readText().trim() }==expected) { "업데이트 버전이 일치하지 않습니다" } };System.getenv("SERVER_MANAGER_READY_FILE")?.let { atomicText(Path.of(it),"ready") } }
+    val updates by lazy {UpdateCoordinator(home)}
+    val runningVersion:String by lazy {javaClass.getResourceAsStream("/app-version.txt")!!.bufferedReader().use {it.readText().trim()}}
+    fun updateDecision(targetMinHost:Int=1,targetMaxHost:Int=1):UpdateDecision {
+        // Storage relocation still uses idle(); only an app replacement may leave proven host-owned games running.
+        if(gateway?.controllerRelayStreams()==true)return UpdateDecision(false,"RELAY_STREAMS_ACTIVE")
+        for(row in manager.list()) {
+            val i=row["config"] as Instance;val r=manager.runtime(i.id)
+            if(r.diagnosticActive || r.modBusy || r.remoteFileBusy)return UpdateDecision(false,"SERVER_PREPARING")
+            if(r.recoveringFiles || r.cloudSyncActive || r.folderImport?.phase?.let {it!="COMPLETE"}==true || r.fileTransfer?.phase?.let {it!="COMPLETE"}==true || r.state=="SYNCING")return UpdateDecision(false,"TRANSFER_ACTIVE")
+            if(r.state in setOf("INSTALLING","STARTING","STOPPING","IMPORTING"))return UpdateDecision(false,"SERVER_PREPARING")
+            val local=r.process?.takeIf {it.isAlive}
+            if(local!=null) {
+                if(local !is HostedProcess)return UpdateDecision(false,"LEGACY_GAME_RUNNING")
+                val host=manager.localLauncher as? HostedGames ?: return UpdateDecision(false,"HOST_UNREACHABLE")
+                val decision=UpdatePolicy.decide(UpdateComponents.MANAGER_APP,UpdateFacts(hostedGamesAlive=1,hostProtocol=host.hostProtocol(),targetMinHost=targetMinHost,targetMaxHost=targetMaxHost))
+                if(!decision.apply)return decision
+            } else if(r.remotePid!=null || r.state=="RUNNING") {
+                val runner=i.runnerId ?: return UpdateDecision(false,"LEGACY_GAME_RUNNING")
+                if(registry?.updateDetailFor(runner)?.hostMode?.mode!="SERVICE")return UpdateDecision(false,"LEGACY_GAME_RUNNING")
+                val relay=directRelay?.core?.view() ?: return UpdateDecision(false,"RELAY_STREAMS_ACTIVE")
+                if(relay.phase!="ACTIVE" || relay.agents.none {it.runnerId==runner && it.relays.any {s->s.state=="CONNECTED"}})return UpdateDecision(false,"RELAY_STREAMS_ACTIVE")
+            } else if(r.state !in setOf("NEW","STOPPED","FAILED","IMPORT_FAILED"))return UpdateDecision(false,"SERVER_PREPARING")
+            // A stopped remote server with an outstanding handoff lease must finish recovery first.
+            if(local==null && r.remotePid==null && manager.root.resolve(i.id).resolve("remote-lease").exists())return UpdateDecision(false,"DIRTY_HANDOFF_PENDING")
+        }
+        return UpdateDecision(true)
+    }
+    @EventListener(ApplicationReadyEvent::class) fun ready() { System.getenv("SERVER_MANAGER_EXPECTED_VERSION")?.let { expected->check(javaClass.getResourceAsStream("/app-version.txt")!!.bufferedReader().use { it.readText().trim() }==expected) { "업데이트 버전이 일치하지 않습니다" } };System.getenv("SERVER_MANAGER_READY_FILE")?.let { atomicText(Path.of(it),"ready") }
+        updates.reconcileStart(UpdateComponents.MANAGER_APP,runningVersion,home.resolve("failed-update-version.txt").takeIf {it.exists()}?.readText()?.trim())
+        if(updates.current(UpdateComponents.MANAGER_APP)==null)updates.update(UpdateComponents.MANAGER_APP,runningVersion,null,"IDLE")
+    }
     fun restartWhenIdle() { check(supervised) { "자동 재시작은 설치 앱에서만 지원합니다" };requested=true }
     @Scheduled(fixedDelay=3000) fun restart() {
         if(!requested||stopping||(!home.resolve("updates/pending.txt").exists()&&!home.resolve("pending-data-location.txt").exists()))return
-        gate.write { if(!idle())return;stopping=true }
-        thread(name="desktop-restart",isDaemon=false) { Thread.sleep(700);val code=SpringApplication.exit(context,{75});kotlin.system.exitProcess(code) }
+        gate.write {
+            val relocation=home.resolve("pending-data-location.txt").exists()
+            val target=home.resolve("updates/pending.txt").takeIf {it.exists()}?.readText()?.trim()
+            val props=java.util.Properties()
+            if(target!=null)runCatching {home.resolve("updates/$target/update.properties").inputStream().use(props::load)}
+            val decision=if(relocation)UpdateDecision(idle(),if(idle())null else "SERVER_PREPARING") else updateDecision(props.getProperty("controller.minHost","1").toIntOrNull() ?: 1,props.getProperty("controller.maxHost","1").toIntOrNull() ?: 1)
+            if(!decision.apply){updates.update(UpdateComponents.MANAGER_APP,runningVersion,target,"WAITING",waitReason=decision.waitReason);return}
+            updates.update(UpdateComponents.MANAGER_APP,runningVersion,target,"APPLYING",message="게임 상주 서비스는 유지하고 관리 앱을 교체합니다")
+            stopping=true
+        }
+        thread(name="desktop-restart",isDaemon=false) { Thread.sleep(700);updates.update(UpdateComponents.MANAGER_APP,runningVersion,updates.current(UpdateComponents.MANAGER_APP)?.target,"RECONNECTING");val code=SpringApplication.exit(context,{75});kotlin.system.exitProcess(code) }
     }
 }
 @Component

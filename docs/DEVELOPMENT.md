@@ -1,5 +1,15 @@
 # Development continuation
 
+## 2026-10-16 — 0.6.0 직접 중계·상주 게임 서비스·Qwen 비서 통합
+
+0.5.1의 Qwen 일반 대화·실행기 선택을 유지하고, 설정 메뉴 분리·Gemini 메인 제공자·개인 Google 읽기 전용 연결·소유자 관리 로그·직접 TCP 중계·상주 게임 서비스·제한된 파일 비서를 통합했다. Claude 직접 중계 기반에 Mac launchd 수명, packaged JAR 탐지, 건강 신호 순서, 중계 제어 재접속 및 파일 접근 검증 보완을 포함한다. 상세 변경·검증 인계는 각 `docs/dev-notes/feat-*.md`, 최종 통합 기록은 `docs/dev-notes/release-0.6.0.md`에 있다.
+
+사용자 지시에 따라 주 에이전트가 테스트를 설계·검토하고 서브에이전트가 실행했다. 실행 검증은 Mac만 수행한다. 실제 외부 여러 컴퓨터·공유기·인터넷 플레이어 접속, 실제 Qwen 추론 품질/성능, 개인 OAuth와 Discord 상호작용은 미검증이다. 운영 앱·실행기·Minecraft·DNS·공유기 변경은 하지 않았다.
+
+파일 비서는 macOS에서만 허용되며 등록한 기존 텍스트 파일의 복사본과 승인한 변경만 다룬다. Aider는 설치·실행하지 않는다. 명령 실행은 기본 금지이며 별도 허용 시 OS 샌드박스가 아니라는 제한과 정확한 명령을 승인 화면에 표시한다. 파일마다 원자적 교체, 다중 파일은 충돌 보존을 우선한 복구 시도다. 전송 동의와 최종 반영 승인은 별개다.
+
+기존 브라우저 뒤로가기 구현은 유지한다. 기존 탐색 테스트의 파일 패널 실패는 기존 기준선에서도 확인되었고, 메뉴명 변경을 반영하지 않은 선택자 실패도 남아 있다. 새 뒤로가기 구현은 하지 않았다. 공개 릴리즈 완료는 서명 CI와 공개 파일 확인 뒤 별도로 기록한다.
+
 ## 2026-10-13 — 0.4.0-beta.1 Discord batch
 
 Implemented:
@@ -528,3 +538,16 @@ Final local candidate verification: 262 backend cases (255 pass, 7 skip), TypeSc
 
 
 0.4.14 publication COMPLETE: stable/latest release413734507, tag/source a4d64b7aaea6c4dcbbe46f56739ed729467cd91b. GitHub CLI owner login restored through the system keyring. Exact-source Mac+Windows installer CI38726999074 and signed release CI38727727053 passed; duplicate tag installer CI38727727189 cancelled after the same source passed. Downloaded all9public assets and verified names/sizes/SHA256, checksum manifest, pinned Ed25519 update signature, embedded0.4.14 version and identical JARs in all4runner ZIPs. Public JAR SHA256592b247964f518f6c61756ab825e4f99e1dd2f247d299b5b780954d534c12a9c. No published asset/tag overwritten and no production app/runner/Minecraft switch. Real Qwen/Discord/public multi-computer runtime remains unverified; existing navigation test limitation recorded above is unchanged.
+## 2026-10-15 — 0.4.12-beta.1 music library and randomized autoplay
+
+Added pending-queue selection removal by stable item IDs with 25-item panel pages; playlist URL canonicalization (including watch/short links carrying `list`); local named playlist save/load/list/delete; and guild-scoped persistent manual completion statistics. Only uninterrupted FINISHED events count, automatic plays do not feed their own statistics, and stop/leave invalidate both outstanding loads and late end events. Autoplay chooses from all completed videos with near-uniform random weights, adding at most a relative 6% logarithmic popularity bonus per the latest user instruction; the last completed song is excluded when alternatives exist. Saved lists include the current track plus pending tracks unless a YouTube playlist URL is supplied. Library limits: 50 lists/guild, 100 tracks/list, 1,000 distinct recent completed videos/guild. Existing list owners or channel managers can replace/delete a list. Storage is private, atomic `security/discord/music-library.json`; no YouTube account writes.
+
+Final `DISCORD_MUSIC_LIVE_TEST=true` Gradle test + bootJar passed (268 discovered, 263 passed, 5 skipped). Includes real public YouTube Opus-frame loading and DAVE initialization without Discord voice transmission, plus persistence, ID selection/page bounds, URL canonicalization, manual-vs-auto completion, near-uniform random weights, and stop/load/end ordering checks. Applied a locally signed 0.4.12-beta.1 JAR through the installed service after checking no local child/game/remote-lease/transfer markers; installed app HTTP session confirms 0.4.12-beta.1/setupRequired=false and existing origin. Discord token/application configuration hashes unchanged. No GitHub release published. Discord listening/button interaction still requires user validation.
+
+## 2026-10-15 — 0.5.0 integration of the 0.4.14 line and main
+
+`release/0.5.0` = v0.4.14 plus origin/main (saved playlists, completion-based autoplay, agent coordination, 0.4.12 mod warnings). Conflicts were only VERSION and this file. Added on top: Qwen chat on an opted-in runner (`llm-capability` / `llm-request` / `llm-result` runner messages, `RemoteLlm` provider, fallback to the manager's Ollama when no runner is available), `/music repeat`, and panel autoplay/repeat toggle buttons. A duplicate autoplay implementation written on the 0.4.14 line was dropped in favor of main's. The uncommitted transfer-integrity-removal experiment in the development checkout (and its stash) is intentionally NOT part of this release. Local checks: compile, music/LocalLlm/relay tests pass; the remaining failures on the Windows PC are existing POSIX/symlink/Java-path tests. Full suite runs in the tag workflow.
+
+## 2026-10-15 — 0.5.1 Qwen web settings
+
+`release/0.5.1` = v0.5.0 plus origin/main (0.4.14 merge record). Adds the web "Qwen (Ollama)" section: pin a runner, choose 14B/30B, remote Ollama check (`llm-request` states probe/unload), unload button, and a guarantee that only one Qwen model is resident (other Qwen tags are unloaded and verified gone before each request; unrelated models are untouched). `/local-llm` model option is optional and defaults to the web setting; a pinned runner never falls back to the manager computer. The uncommitted transfer-integrity experiment and transfer-progress changes in the development checkout are NOT included.

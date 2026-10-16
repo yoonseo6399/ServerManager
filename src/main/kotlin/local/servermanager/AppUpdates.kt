@@ -56,35 +56,39 @@ class AppUpdates(private val desktop:DesktopLifecycle) {
     @Volatile private var message="아직 확인하지 않았습니다"
     @Volatile private var checked:String?=null
     @Volatile private var checking=false
-    fun status()=mapOf("supported" to desktop.supervised,"enabled" to (desktop.supervised&&!disabled.exists()),"current" to current,"channel" to if(betaChannel) "BETA" else "STABLE","latest" to latest,"message" to message,"checkedAt" to checked,"checking" to checking,"repository" to "https://github.com/$repository")
-    @Synchronized fun enabled(value:Boolean){check(desktop.supervised);if(value){disabled.deleteIfExists()}else{atomicText(disabled,"disabled");desktop.home.resolve("updates/pending.txt").deleteIfExists()}}
+    fun status()=mapOf("supported" to desktop.supervised,"enabled" to (desktop.supervised&&!disabled.exists()),"current" to current,"channel" to if(betaChannel) "BETA" else "STABLE","latest" to latest,"message" to message,"checkedAt" to checked,"checking" to checking,"repository" to "https://github.com/$repository","detail" to desktop.updates.snapshot())
+    @Synchronized fun enabled(value:Boolean){check(desktop.supervised);if(value){disabled.deleteIfExists()}else{atomicText(disabled,"disabled");desktop.home.resolve("updates/pending.txt").deleteIfExists();desktop.updates.update(UpdateComponents.MANAGER_APP,current,null,"IDLE",message="자동 업데이트 적용을 해제했습니다")}}
     @Scheduled(initialDelay=60000,fixedDelay=21600000) fun periodic(){if(desktop.supervised&&!disabled.exists())checkNow()}
     @Synchronized fun checkNow():Map<String,Any?> {
         check(desktop.supervised) { "자동 업데이트는 설치 앱에서 지원합니다" }
         if(checking)return status();checking=true
+        desktop.updates.update(UpdateComponents.MANAGER_APP,current,null,"CHECKING")
         try {
             val response=mapper.readTree(get(URI("https://api.github.com/repos/$repository/releases"+(if(betaChannel) "?per_page=100" else "/latest")),4*1024*1024))
             val releases=if(betaChannel) response.toList() else listOf(response)
             val release=releases.filter { !it.path("draft").asBoolean() && SignedUpdates.eligible(it.path("tag_name").asText().removePrefix("v"),it.path("prerelease").asBoolean(),betaChannel) }
                 .maxWithOrNull { a,b->SignedUpdates.compare(a.path("tag_name").asText().removePrefix("v"),b.path("tag_name").asText().removePrefix("v")) }
-                ?: run { message="이 채널에 공개된 업데이트가 없습니다";return status() }
+                ?: run { message="이 채널에 공개된 업데이트가 없습니다";desktop.updates.update(UpdateComponents.MANAGER_APP,current,null,"DONE",message=message);return status() }
             val version=release.path("tag_name").asText().removePrefix("v");SignedUpdates.compare(version,current);latest=version;checked=Instant.now().toString()
-            if(SignedUpdates.compare(version,current)<=0){message="최신 버전입니다";return status()}
-            if(desktop.home.resolve("failed-update-version.txt").takeIf { it.exists() }?.readText()?.trim()==version){message="이 버전은 시작 검증에 실패해 자동 적용을 중지했습니다. 다음 릴리스를 기다리거나 설치 파일을 확인하세요.";return status()}
+            if(SignedUpdates.compare(version,current)<=0){message="최신 버전입니다";desktop.updates.update(UpdateComponents.MANAGER_APP,current,null,"DONE",message=message);return status()}
+            if(desktop.home.resolve("failed-update-version.txt").takeIf { it.exists() }?.readText()?.trim()==version){message="이 버전은 시작 검증에 실패해 자동 적용을 중지했습니다. 다음 릴리스를 기다리거나 설치 파일을 확인하세요.";desktop.updates.update(UpdateComponents.MANAGER_APP,current,version,"FAILED",error=message);return status()}
             val base="https://github.com/$repository/releases/download/v$version/"
+            desktop.updates.update(UpdateComponents.MANAGER_APP,current,version,"VERIFYING",message="게시자 서명을 확인합니다")
             val manifest=get(URI(base+"update.properties"),65536);val signature=get(URI(base+"update.sig"),1024);val p=SignedUpdates.manifest(manifest,signature,key)
             require(p.getProperty("version")==version)
             val dir=desktop.home.resolve("updates").resolve(version);dir.createDirectories()
             val target=dir.resolve(p.getProperty("file"))
             if(!SignedUpdates.validFile(target,p)){
                 val tmp=Files.createTempFile(dir,"download-",".part")
-                try { download(URI(base+p.getProperty("file")),tmp,p.getProperty("size").toLong());require(SignedUpdates.validFile(tmp,p)) { "업데이트 파일 무결성 검증 실패" };Files.move(tmp,target,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING) }finally{tmp.deleteIfExists()}
+                try { desktop.updates.update(UpdateComponents.MANAGER_APP,current,version,"DOWNLOADING");download(URI(base+p.getProperty("file")),tmp,p.getProperty("size").toLong());desktop.updates.update(UpdateComponents.MANAGER_APP,current,version,"VERIFYING",message="다운로드 파일 무결성을 확인합니다");require(SignedUpdates.validFile(tmp,p)) { "업데이트 파일 무결성 검증 실패" };Files.move(tmp,target,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING) }finally{tmp.deleteIfExists()}
             }
+            check(UpdatePackageVerifier.verify(manifest,signature,target,key,version,current) is UpdatePackageVerifier.Result.Ok) {"업데이트 호환성 매니페스트를 확인할 수 없습니다"}
             Files.write(dir.resolve("update.properties"),manifest);Files.write(dir.resolve("update.sig"),signature)
             atomicText(desktop.home.resolve("updates/pending.txt"),version)
-            message="업데이트를 받았습니다. 모든 게임 서버가 정지되면 자동 적용합니다."
+            message="업데이트를 받았습니다. 게임 소유 서비스와 전송 상태를 확인한 뒤 관리 앱을 교체합니다."
+            desktop.updates.update(UpdateComponents.MANAGER_APP,current,version,"WAITING",waitReason="APPLY_WHEN_SAFE",message=message)
             desktop.restartWhenIdle()
-        }catch(e:Exception){checked=Instant.now().toString();message=e.message ?: "업데이트 확인 실패"}finally{checking=false}
+        }catch(e:Exception){checked=Instant.now().toString();message=UpdateRedaction.text(e.message ?: "업데이트 확인 실패");desktop.updates.update(UpdateComponents.MANAGER_APP,current,latest,"FAILED",error=message)}finally{checking=false}
         return status()
     }
     private fun response(uri:URI):HttpResponse<java.io.InputStream> {

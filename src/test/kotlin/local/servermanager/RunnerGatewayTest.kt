@@ -230,4 +230,32 @@ class RunnerGatewayTest {
             }
         } finally { gateway.completed(instance) }
     }
+
+    @Test fun `qwen requests go only to opted-in runners and a pinned runner never falls back`() {
+        val manager=mock(ServerManager::class.java);val registry=mock(RunnerRegistry::class.java)
+        `when`(registry.active("runner")).thenReturn(RunnerDevice("runner","gpu-box","WINDOWS","user","key","now"));`when`(registry.online("runner")).thenReturn(true)
+        val mapper=jacksonObjectMapper();val sent=Collections.synchronizedList(mutableListOf<WebSocketMessage<*>>())
+        val session=mock(WebSocketSession::class.java);`when`(session.attributes).thenReturn(mutableMapOf<String,Any>("runnerId" to "runner"));`when`(session.isOpen).thenReturn(true)
+        doAnswer {sent.add(it.arguments[0] as WebSocketMessage<*>);null}.`when`(session).sendMessage(any())
+        val gateway=RunnerGateway(registry,manager);gateway.afterConnectionEstablished(session);sent.clear()
+        fun deliver(message:RunnerMessage)=gateway.handleMessage(session,TextMessage(mapper.writeValueAsString(message)))
+        try {
+            assertEquals("UNKNOWN",gateway.llmCapability("runner"))
+            deliver(RunnerMessage("llm-capability",state="OFF"))
+            assertEquals("DENIED",gateway.llmCapability("runner"))
+            assertNull(gateway.llmChat("14b","hi",false))
+            assertFailsWith<IllegalStateException> {gateway.llmChat("14b","hi",false,"runner")}
+            assertFailsWith<IllegalStateException> {gateway.llmAdmin("runner","probe")}
+            deliver(RunnerMessage("llm-capability",state="OLLAMA_V1"))
+            assertEquals("ALLOWED",gateway.llmCapability("runner"))
+            val probe=java.util.concurrent.CompletableFuture.supplyAsync {gateway.llmAdmin("runner","probe")}
+            val deadline=System.nanoTime()+2_000_000_000L
+            while(sent.isEmpty() && System.nanoTime()<deadline)Thread.sleep(2)
+            val request=mapper.readValue<RunnerMessage>((sent.single() as TextMessage).payload)
+            assertEquals("llm-request",request.type);assertEquals("probe",request.state)
+            deliver(RunnerMessage("llm-result",state="OK",token=request.token,detail="""{"reachable":true}"""))
+            assertTrue(probe.get(2,java.util.concurrent.TimeUnit.SECONDS).path("reachable").asBoolean())
+            assertFailsWith<IllegalArgumentException> {gateway.llmAdmin("runner","format")}
+        } finally {gateway.closeDatagrams()}
+    }
 }

@@ -39,6 +39,7 @@ class DiscordCodeAgent(private val config:()->DiscordConfig,private val current:
     private val key:String get()=System.getenv("GEMINI_API_KEY")?.takeIf {it.isNotBlank()} ?: storedKey().orEmpty()
     private val poolStore=settingsDirectory?.let {GeminiKeyPoolStore(it,{key.takeIf {value->value.isNotBlank()}})}
     private val mainSettings=settingsDirectory?.let {MainAgentSettings(it)}
+    private val qwen=settingsDirectory?.let {QwenSettings(it)}
     private val workspace=System.getenv("LUONNOTAR_AGENT_WORKSPACE")?.takeIf {it.isNotBlank()} ?: settingsDirectory?.resolve("workspace.txt")?.takeIf {it.isRegularFile()}?.readText()?.trim().orEmpty()
     private val testsEnabled=System.getenv("LUONNOTAR_AGENT_TESTS")=="true" || settingsDirectory?.resolve("tests-enabled")?.takeIf {it.isRegularFile()}?.readText()?.trim()=="true"
     private val model=System.getenv("LUONNOTAR_AGENT_MODEL")?.takeIf {it.isNotBlank()} ?: "gemini-3.8-flash"
@@ -46,19 +47,19 @@ class DiscordCodeAgent(private val config:()->DiscordConfig,private val current:
     fun register(jda:JDA,guildId:String) {
         val guild=jda.getGuildById(guildId) ?: return
         fun command(name:String,main:Boolean):net.dv8tion.jda.api.interactions.commands.build.SlashCommandData {
-            val command=Commands.slash(name,if(main)"GPT 메인 작업 · 서브에이전트 분배·병합" else "Gemini 서브에이전트 직접 실행")
+            val command=Commands.slash(name,if(main)"메인 에이전트 작업 · 서브에이전트 분배·병합" else "Gemini 서브에이전트 직접 실행")
                 .addOptions(OptionData(OptionType.STRING,"task","작업 목표와 완료 조건",true).setMaxLength(3000),
                     OptionData(OptionType.STRING,"files",if(main)"선택: 파일 범위 제한 (생략하면 코드 전체)" else "파일 경로, 쉼표 구분 (새 파일도 가능)",!main).setMaxLength(1500),
                     OptionData(OptionType.BOOLEAN,"edit","코드 수정 및 검증 후 원본 반영 허용",false),
                     OptionData(OptionType.BOOLEAN,"build-files","Gradle·package.json 등 빌드 설정 수정 허용",false),
                     OptionData(OptionType.STRING,"agent","스레드에 표시할 에이전트 이름",false).setMaxLength(60))
-            if(main)command.addOptions(OptionData(OptionType.STRING,"model","OpenAI 모델 ID (생략하면 웹 설정)",false).setMaxLength(80),
+            if(main)command.addOptions(OptionData(OptionType.STRING,"model","메인 제공자 모델 ID (생략하면 웹 설정)",false).setMaxLength(80),
                 OptionData(OptionType.STRING,"reasoning","추론 강도 (모델별 지원 범위가 다름)",false).apply {listOf("auto","none","low","medium","high","xhigh","max").forEach {addChoice(it,it)}},
                 OptionData(OptionType.INTEGER,"parallel","동시 서브에이전트 수 (1~3)",false).setMinValue(1).setMaxValue(3))
             return command
         }
         guild.upsertCommand(Commands.slash("local-llm","로컬 Qwen 일반 대화 (코드·도구 접근 없음)")
-            .addOptions(OptionData(OptionType.STRING,"model","Qwen 모델",true).addChoice("Qwen3 14B","14b").addChoice("Qwen3 30B","30b"),
+            .addOptions(OptionData(OptionType.STRING,"model","Qwen 모델 (생략하면 웹 설정의 모델)",false).addChoice("Qwen3 14B","14b").addChoice("Qwen3 30B","30b"),
                 OptionData(OptionType.STRING,"prompt","질문 또는 요청 (매번 독립 대화)",true).setMaxLength(6000),
                 OptionData(OptionType.BOOLEAN,"think","사고 출력 요청 (기본 꺼짐)",false))).queue({}, {})
         guild.upsertCommand(command("agent",true)).queue({}, {})
@@ -85,25 +86,29 @@ class DiscordCodeAgent(private val config:()->DiscordConfig,private val current:
                     if(!localBusy.compareAndSet(false,true)) {hook.editOriginal("다른 로컬 모델 요청이 진행 중입니다. 완료 후 요청하세요.").queue({}, {});return@queue}
                     try {worker.submit {
                         try {
-                            val size=event.getOption("model")!!.asString
-                            val answer=LocalLlm().chat(size,event.getOption("prompt")!!.asString,event.getOption("think")?.asBoolean==true)
+                            val setting=qwen?.config() ?: QwenConfig()
+                            val size=event.getOption("model")?.asString ?: setting.model
+                            val prompt=event.getOption("prompt")!!.asString;val think=event.getOption("think")?.asBoolean==true
+                            val reply=QwenRequests.chat(size,prompt,think,setting.runnerId)
+                            val answer=reply.answer
+                            val where=reply.runnerName?.let {" · 실행기 ${it.replace(Regex("[\\p{Cntrl}]")," ").take(40)}"} ?: ""
                             if(event.jda===current()) {
-                                val info="Qwen3 $size · ${"%.1f".format(java.util.Locale.ROOT,answer.seconds)}초 · 출력 ${answer.tokens}토큰"+(if(answer.limited)" · 출력 한도 도달: 답변이 미완성일 수 있습니다." else "")
+                                val info="Qwen3 $size$where · ${"%.1f".format(java.util.Locale.ROOT,answer.seconds)}초 · 출력 ${answer.tokens}토큰"+(if(answer.limited)" · 출력 한도 도달: 답변이 미완성일 수 있습니다." else "")
                                 if(answer.text.length<=1600)hook.editOriginal("$info\n\n${answer.text}").setAllowedMentions(emptyList()).complete()
                                 else hook.editOriginal(info+"\n전체 답변은 첨부 파일에 있습니다.").setAllowedMentions(emptyList())
                                     .setFiles(net.dv8tion.jda.api.utils.FileUpload.fromData(answer.text.toByteArray(Charsets.UTF_8),"qwen-answer.txt")).complete()
                             }
-                        } catch(_:Exception) {hook.editOriginal("로컬 모델 요청을 완료하지 못했습니다. Ollama 실행·모델 태그·메모리와 3분 제한을 확인하세요.").setAllowedMentions(emptyList()).queue({}, {})}
+                        } catch(e:Exception) {hook.editOriginal((if(e is IllegalStateException)"${e.message.orEmpty().take(300)}\n" else "")+"Qwen 요청을 완료하지 못했습니다. Qwen을 실행하는 컴퓨터(실행기 또는 관리 앱)의 Ollama 실행·모델 태그·메모리와 3분 제한을 확인하세요.").setAllowedMentions(emptyList()).queue({}, {})}
                         finally {localBusy.set(false)}
                     }} catch(_:Exception) {localBusy.set(false);hook.editOriginal("실행기가 종료되었습니다.").queue({}, {})}
                     return@queue
                 }
                 val main=event.name=="agent"
                 if(workspace.isBlank()) {hook.editOriginal("에이전트 작업 폴더를 먼저 설정하세요.").queue({}, {});return@queue}
-                if(main && mainSettings?.key().isNullOrBlank()) {hook.editOriginal("계정과 보안 → GPT 메인 에이전트에서 OpenAI API 키를 설정하세요. Gemini 키와 별도입니다.").queue({}, {});return@queue}
+                if(main && mainSettings?.let {it.ready(it.config())}!=true) {hook.editOriginal("AI 비서·에이전트에서 메인 제공자와 API 키를 설정하세요.").queue({}, {});return@queue}
                 if(!main && runCatching {poolStore?.credentials()?.isEmpty() ?: key.isBlank()}.getOrDefault(true)) {hook.editOriginal("Gemini API 키를 먼저 설정하세요.").queue({}, {});return@queue}
                 val accepted=if(main)mainBusy.compareAndSet(false,true) else subSlots.tryAcquire()
-                if(!accepted) {hook.editOriginal(if(main)"다른 GPT 메인 작업이 진행 중입니다." else "서브에이전트 3개가 실행 중입니다. 완료 후 요청하세요.").queue({}, {});return@queue}
+                if(!accepted) {hook.editOriginal(if(main)"다른 메인 에이전트 작업이 진행 중입니다." else "서브에이전트 3개가 실행 중입니다. 완료 후 요청하세요.").queue({}, {});return@queue}
                 try {worker.submit {
                     var starter:Message?=null;var stage="파일 검증"
                     try {
@@ -111,7 +116,7 @@ class DiscordCodeAgent(private val config:()->DiscordConfig,private val current:
                         val files=event.getOption("files")?.asString?.let {AgentPresentation.fileNames(it)} ?: emptyList()
                         val editable=event.getOption("edit")?.asBoolean==true
                         val buildFiles=event.getOption("build-files")?.asBoolean==true
-                        val agent=event.getOption("agent")?.asString?.trim()?.takeIf {it.isNotBlank()} ?: if(main)"GPT 메인" else "Gemini 서브에이전트"
+                        val agent=event.getOption("agent")?.asString?.trim()?.takeIf {it.isNotBlank()} ?: if(main)"메인 에이전트" else "Gemini 서브에이전트"
                         val selected=mainSettings?.config()?.let {it.copy(model=event.getOption("model")?.asString ?: it.model,reasoning=event.getOption("reasoning")?.asString ?: it.reasoning,parallelism=event.getOption("parallel")?.asInt ?: it.parallelism)}
                         if(main)mainSettings!!.validate(selected!!)
                         if(!main)AgentWorkspace(Path.of(workspace),files,editable,testsEnabled,editable,buildFiles)
@@ -156,7 +161,7 @@ class DiscordCodeAgent(private val config:()->DiscordConfig,private val current:
                             val runs=Path.of(workspace).resolve("build/agent-runs")
                             if(main) {
                                 val childThreads=java.util.concurrent.ConcurrentHashMap<String,DiscordAgentRun>()
-                                val result=MainAgentCoordinator(OpenAIResponsesModel(mainSettings!!.key()!!),{_,sink ->
+                                val result=MainAgentCoordinator(mainSettings!!.provider(selected!!) {send(AgentEvent("quota",it))},{_,sink ->
                                     val provider=gemini {sink(AgentEvent("quota",it))}
                                     AgentModel {req ->subSlots.acquire();try {provider.generate(req)} finally {subSlots.release()}}
                                 },selected!!,Path.of(workspace),runs,editable,testsEnabled,buildFiles,files,::send,{child,e ->
@@ -177,7 +182,7 @@ class DiscordCodeAgent(private val config:()->DiscordConfig,private val current:
                                 }).run(task)
                                 successful=result.completed
                                 integrationRun?.let {finish(it,"통합",if(successful)"완료" else "미완료",successful)}
-                                send(AgentEvent("summary","${if(successful)"완료" else "미완료"} · GPT 호출 ${result.calls} · 토큰 ${result.tokens}\n원본 반영: ${result.published.joinToString().ifBlank {"없음"}}\n작업 보관: ${result.artifact}"))
+                                send(AgentEvent("summary","${if(successful)"완료" else "미완료"} · 메인 호출 ${result.calls} · 토큰 ${result.tokens}\n원본 반영: ${result.published.joinToString().ifBlank {"없음"}}\n작업 보관: ${result.artifact}"))
                             } else {
                                 val project=IsolatedAgentProject.create(Path.of(workspace),runs)
                                 val scope=AgentWorkspace(project.integration,files,editable,testsEnabled,editable,buildFiles)
