@@ -65,6 +65,21 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
     private data class PendingLlm(val runner:String,val future:java.util.concurrent.CompletableFuture<com.fasterxml.jackson.databind.JsonNode>,val progress:(QwenProgress)->Unit={})
     private val llmRequests=ConcurrentHashMap<String,PendingLlm>()
     private val llmRunners=ConcurrentHashMap.newKeySet<String>()
+    private val restartRunners=ConcurrentHashMap.newKeySet<String>()
+    private val restartRequests=ConcurrentHashMap<String,java.util.concurrent.CompletableFuture<String?>>()
+    fun restartSupported(id:String)=id in restartRunners
+    /** Returns null when the runner accepted the restart, otherwise its refusal reason. */
+    fun requestRestart(id:String):String? {
+        check(connected(id) && registry.active(id)!=null) {"실행기를 온라인으로 연결하세요"}
+        check(restartSupported(id)) {"이 실행기는 원격 재시작을 지원하지 않습니다. 먼저 새 버전으로 업데이트하세요"}
+        val future=java.util.concurrent.CompletableFuture<String?>()
+        check(restartRequests.putIfAbsent(id,future)==null) {"이미 재시작을 요청했습니다"}
+        try {
+            check(send(id,RunnerMessage("restart-request"))) {"실행기 연결이 끊겼습니다"}
+            return future.get(10,TimeUnit.SECONDS)
+        } catch(e:java.util.concurrent.TimeoutException){throw IllegalStateException("실행기가 응답하지 않았습니다")}
+        finally {restartRequests.remove(id,future)}
+    }
     private val agentLlmRunners=ConcurrentHashMap.newKeySet<String>()
     private val streamingLlmRunners=ConcurrentHashMap.newKeySet<String>()
     private val llmAnswered=ConcurrentHashMap.newKeySet<String>()
@@ -138,7 +153,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
             return
         }
         tcpRelays.remove(id)?.close()
-        llmRunners.remove(id);agentLlmRunners.remove(id);streamingLlmRunners.remove(id);llmAnswered.remove(id)
+        restartRunners.remove(id);llmRunners.remove(id);agentLlmRunners.remove(id);streamingLlmRunners.remove(id);llmAnswered.remove(id)
         registry.tcpRelayCapability(id,false)
         registry.connected(id)
         sessions.put(id,session)?.takeIf { it!==session }?.let { previous ->
@@ -160,6 +175,8 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
         val event=runCatching { mapper.readValue<RunnerMessage>(message.payload) }.getOrNull() ?: return
         if(directRelay?.core?.onRunnerMessage(id,event)==true)return
         when(event.type) {
+            "restart-capability" -> if(event.state=="RESTART_V1" && registry.active(id)!=null)restartRunners.add(id) else restartRunners.remove(id)
+            "restart-result" -> restartRequests[id]?.complete(if(event.state=="ACCEPTED")null else (event.detail ?: "REFUSED").take(60))
             "relay-capability" -> {
                 registry.tcpRelayCapability(id,event.state=="TCP_V1")
                 if(event.state=="TCP_V1")tcpRelays.computeIfAbsent(id) {TcpRelayPeer({send(id,it)},{stream,bytes,count->sendBinary(id,stream,bytes,count)})}
@@ -266,7 +283,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
             tcpRelays.remove(id)?.close()
             udpOutboxes.remove(id)?.close();udpSessions.remove(id)?.let {runCatching {it.close()}};sable.removeRunner(id)
             tokens.remove(id);registry.disconnected(id);manager.remoteDisconnected(id);directRelay?.core?.onDisconnect(id)
-            llmRunners.remove(id);agentLlmRunners.remove(id);streamingLlmRunners.remove(id);llmAnswered.remove(id);llmRequests.values.filter {it.runner==id}.forEach {it.future.completeExceptionally(IllegalStateException("실행기가 연결 해제됐습니다"))}
+            restartRunners.remove(id);llmRunners.remove(id);agentLlmRunners.remove(id);streamingLlmRunners.remove(id);llmAnswered.remove(id);llmRequests.values.filter {it.runner==id}.forEach {it.future.completeExceptionally(IllegalStateException("실행기가 연결 해제됐습니다"))}
             workspaceRequests.values.filter {it.runner==id}.forEach {it.future.completeExceptionally(IllegalStateException("실행기가 연결 해제됐습니다. 파일을 다시 확인하세요"))}
             sockets.values.filter { it.runnerId==id }.forEach { closeStream(it,false) }
         }

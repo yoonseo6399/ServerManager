@@ -121,6 +121,7 @@ class RunnerRegistry(private val manager:ServerManager,private val auth:AuthStor
             .map { RunnerView(it.id,it.name,it.platform,it.registeredBy,it.createdAt,it.version,it.enabled,it.allowedInstanceIds,online(it.id),heartbeat[it.id]?.let { ms->Instant.ofEpochMilli(ms).toString() },updates[it.id],remoteUpdateSupported(it.id),auth.account(it.registeredBy)?.displayName ?: "삭제된 계정",(it.registeredBy==userId || user.managesAllServers()),tcpRelaySupported(it.id),releaseSelectionSupported(it.id),rollbackSupported(it.id)) }
     }
     @Synchronized fun connected(id:String){updates.remove(id);releaseSelection.remove(id);rollbacks.remove(id)}
+    @Synchronized fun registrant(id:String)=devices[id]?.registeredBy
     @Synchronized fun remoteUpdateSupported(id:String)=active(id)!=null && updates[id]?.phase?.let {it!="UNSUPPORTED"}==true
     @Synchronized fun updateStatus(id:String,status:RunnerUpdateStatus){if(active(id)!=null)updates[id]=status.validated()}
     @Synchronized fun validateUpdate(userId:String,id:String,pause:Boolean,version:String?=null):RunnerDevice {
@@ -187,6 +188,16 @@ class RunnerApi(private val registry:RunnerRegistry,private val auth:AuthStore,p
         try {check(gateway.requestUpdate(id,request.pauseTransfer,request.version,request.allowPrerelease,request.allowRollback)) {"실행기 연결이 끊겼습니다. 다시 요청하세요"}}
         catch(e:Exception){registry.updateStatus(id,RunnerUpdateStatus("FAILED"));throw e}
         audit.append(authentication.name,"runner signed update requested $id",200,"web")
+    }
+    @PostMapping("/{id}/restart") fun restart(@PathVariable id:String,authentication:Authentication,req:HttpServletRequest):Map<String,Any?> {
+        fresh(req)
+        val user=auth.account(authentication.name)
+        if(registry.views(authentication.name).none {it.id==id} || user?.enabled!=true || !(user.owner || registry.registrant(id)==authentication.name))
+            throw ResponseStatusException(HttpStatus.FORBIDDEN,"기기 등록자 또는 소유자만 실행기를 재시작할 수 있습니다")
+        val refusal=try {gateway.requestRestart(id)} catch(e:IllegalStateException){throw ResponseStatusException(HttpStatus.CONFLICT,e.message)}
+        audit.append(authentication.name,"runner restart requested $id "+(refusal ?: "accepted"),if(refusal==null)200 else 409,"web")
+        if(refusal!=null)throw ResponseStatusException(HttpStatus.CONFLICT,"지금은 재시작할 수 없습니다: $refusal")
+        return mapOf("accepted" to true)
     }
     @PostMapping("/enroll") fun enroll(@RequestBody request:RunnerEnrollmentRequest,authentication:Authentication,req:HttpServletRequest):Map<String,Any> {
         fresh(req);val code=registry.enroll(authentication.name,request.name)
