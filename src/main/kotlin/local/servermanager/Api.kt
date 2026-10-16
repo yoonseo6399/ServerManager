@@ -6,6 +6,7 @@ import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.core.io.FileSystemResource
 import org.springframework.web.multipart.MultipartFile
+import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.*
 
@@ -59,6 +60,15 @@ class Api(private val manager: ServerManager,private val accounts:AuthStore,priv
     @GetMapping("/instances/{id}/log-file-page") fun logFilePage(@PathVariable id:String,@RequestParam path:String,@RequestParam(defaultValue="0") offset:Long,@RequestParam(defaultValue="300") limit:Int,@RequestParam(required=false) revision:String?):ResponseEntity<LogFiles.Page> {
         manager.instance(id)
         return ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore()).body(if(remoteFiles.remote(id))remoteFiles.logPage(id,path,offset,revision) else LogFiles(manager.profileDir(id)).page(path,offset,limit,revision))
+    }
+    @GetMapping("/instances/{id}/log-window") fun logWindow(@PathVariable id:String,@RequestParam path:String,@RequestParam(defaultValue="1") from:Long,@RequestParam(defaultValue="300") limit:Int,@RequestParam(required=false) q:String?):ResponseEntity<LogFiles.Window> {
+        manager.instance(id)
+        val value=when {
+            remoteFiles.remote(id) -> remoteFiles.logWindow(id,path,from,limit,q)
+            path=="console.log" && !Files.isRegularFile(manager.profileDir(id).resolve(path)) -> manager.eventWindow(id,from,limit,q)
+            else -> LogFiles(manager.profileDir(id)).window(path,from,limit,q)
+        }
+        return ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore()).body(value)
     }
     @GetMapping("/instances/{id}/files") fun files(@PathVariable id: String,@RequestParam(defaultValue="") path: String)=if(remoteFiles.remote(id))remoteFiles.files(id,path) else manager.files(id,path)
     @GetMapping("/instances/{id}/text") fun text(@PathVariable id: String,@RequestParam path: String)=if(remoteFiles.remote(id))remoteFiles.text(id,path) else manager.text(id,path)

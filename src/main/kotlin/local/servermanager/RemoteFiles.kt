@@ -13,6 +13,7 @@ class RemoteFiles(private val manager:ServerManager) {
         manager.remoteWorkspace(id,WorkspaceRequest(op,manager.instance(id).copy(),path,to,offset,data,revision,uploadId))
     fun logFiles(id:String):List<LogFiles.Entry> = call(id,"LOG_LIST").map {mapper.treeToValue(it,LogFiles.Entry::class.java)}
     fun logPage(id:String,path:String,offset:Long,revision:String?):LogFiles.Page=mapper.treeToValue(call(id,"LOG_PAGE",path,offset,revision=revision),LogFiles.Page::class.java)
+    fun logWindow(id:String,path:String,from:Long,limit:Int,query:String?):LogFiles.Window=mapper.treeToValue(call(id,"LOG_WINDOW",path,from,data=limit.toString(),to=query.orEmpty()),LogFiles.Window::class.java)
     fun files(id:String,path:String):List<FileEntry> {
         val result=mutableListOf<FileEntry>();var offset=0L
         do {val page=call(id,"LIST",path,offset);result+=page.path("entries").map {mapper.treeToValue(it,FileEntry::class.java)};check(result.size<=100000);val next=page.path("next");if(next.isNull || next.isMissingNode)break;check(next.asLong()>offset);offset=next.asLong()}while(true)

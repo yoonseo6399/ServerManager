@@ -42,4 +42,23 @@ class LogFilesTest {
         log.writeText("x".repeat(1024*1024+1))
         assertFailsWith<IllegalArgumentException>{logs.page("console.log")}
     }
+    @Test fun `window numbers lines, skips noise and searches the whole file`() {
+        val noise="[00:03:30] [Server thread/INFO] [STDOUT/]: [com.defpwoq.createarms.block.MunitionRackBlockEntity:serverTick:254]: [MunitionRackDebug] No SHIP_MISSILE block found"
+        val raw=(1..2500).flatMap { listOf("줄 $it"+if(it==2222)" NEEDLE" else "",noise) }.joinToString("\r\n")
+        dir.resolve("console.log").writeText(raw)
+        val logs=LogFiles(dir);val tail=logs.window("console.log",2401,300)
+        assertEquals(2500,tail.total);assertEquals(2401,tail.first);assertEquals(2500,tail.last);assertNull(tail.next)
+        assertEquals("줄 2401",tail.lines.first().text);assertTrue(tail.lines.none { it.text.contains("MunitionRackDebug") })
+        val mid=logs.window("console.log",999,3);assertEquals(listOf("줄 999","줄 1000","줄 1001"),mid.lines.map { it.text });assertEquals(1002L,mid.next)
+        val hit=logs.window("console.log",1,300,"needle");assertEquals(listOf(2222L),hit.lines.map { it.no })
+        assertEquals(0,logs.window("console.log",1,300,"MunitionRackDebug").lines.size)
+        dir.resolve("console.log").appendText("\r\n마지막")
+        val last=logs.window("console.log",2501,10);assertEquals("마지막",last.lines.single().text);assertEquals(2501,last.total)
+    }
+    @Test fun `window works on compressed logs`() {
+        val folder=dir.resolve("server/logs").createDirectories()
+        GZIPOutputStream(folder.resolve("old.log.gz").outputStream()).use { it.write((1..1500).joinToString("\n") { "gz $it" }.toByteArray()) }
+        val w=LogFiles(dir).window("server/logs/old.log.gz",1499,10)
+        assertEquals(listOf("gz 1499","gz 1500"),w.lines.map { it.text });assertEquals(1500,w.total)
+    }
 }
