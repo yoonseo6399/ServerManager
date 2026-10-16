@@ -212,6 +212,37 @@ object HostLifecycle {
         runCatching {home.resolve("host/endpoint.json").deleteIfExists()}
         return null
     }
+    private fun hostIdentified(endpoint:HostEndpoint,handle:ProcessHandle):Boolean {
+        // Exact start time recorded by the host itself; the command line is only a fallback for endpoints written by older hosts.
+        return if(endpoint.startMillis>0)handle.info().startInstant().map {it.toEpochMilli()}.orElse(-1)==endpoint.startMillis
+            else (handle.info().commandLine().orElse("")+handle.info().arguments().map {it.joinToString(" ")}.orElse("")).contains("--game-host")
+    }
+    /** [done] means the host exited and its endpoint was cleared. Otherwise [reason] says why it was not replaced; [streams] counts relay players still draining. */
+    data class Replacement(val done:Boolean,val reason:String?=null,val streams:Int=0)
+    /**
+     * One non-blocking step of a host replacement through the controller's own connection (a second connection would be refused
+     * as CONTROLLER_ACTIVE). The host refuses while a game is alive, blocks new starts and relay players, and reports READY only
+     * after established relay streams ended on their own. The PID must match the authenticated host and its recorded start time.
+     */
+    fun replaceIdleHost(home:Path,client:GameHostClient):Replacement {
+        fun back(reason:String):Replacement {client.cancelReplacement();return Replacement(false,reason)}
+        if(liveGames(home).isNotEmpty())return back("GAME_RUNNING")
+        val endpoint=GameHostClient.readEndpoint(home) ?: return Replacement(false,"HOST_ENDPOINT_MISSING")
+        if(client.hostPid>0 && client.hostPid!=endpoint.pid)return Replacement(false,"HOST_IDENTITY_MISMATCH")
+        val handle=ProcessHandle.of(endpoint.pid).orElse(null) ?: return Replacement(false,"HOST_PROCESS_MISSING")
+        if(!hostIdentified(endpoint,handle))return Replacement(false,"NOT_A_HOST_PROCESS")
+        val state=try {client.prepareReplacementState()} catch(e:GameHostRejected){return Replacement(false,e.reason)} catch(_:Exception){return Replacement(false,"HOST_UNREACHABLE")}
+        if(!state.ready)return Replacement(false,if(state.state=="DRAINING")"RELAY_STREAMS_ACTIVE" else state.state,state.streams)
+        // The flag is up, so nothing new can start; verify once more from the outside before ending the process.
+        if(liveGames(home).isNotEmpty())return back("GAME_RUNNING")
+        if(!hostIdentified(endpoint,handle) || !handle.isAlive)return back("NOT_A_HOST_PROCESS")
+        client.close()
+        handle.destroy()
+        if(!runCatching {handle.onExit().get(10,java.util.concurrent.TimeUnit.SECONDS)}.isSuccess)return Replacement(false,"HOST_DID_NOT_EXIT")
+        // Only the endpoint that still names the process that just exited is removed.
+        if(GameHostClient.readEndpoint(home)?.pid==endpoint.pid)runCatching {home.resolve("host/endpoint.json").deleteIfExists()}
+        return Replacement(true)
+    }
     data class Preflight(val ok:Boolean,val reason:String?=null,val detail:String?=null)
     /**
      * Run before the control layer reports itself healthy. If it cannot talk to a host that owns a live game, it must not

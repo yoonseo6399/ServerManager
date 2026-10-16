@@ -19,7 +19,7 @@ object UpdateStages {
 }
 /** One row of the update status API. Never contains a token, URL with credentials, or an exception body. */
 data class ComponentUpdate(val component:String,val current:String,val target:String?,val stage:String="IDLE",val waitReason:String?=null,
-    val error:String?=null,val updatedAt:String="",val jobId:String?=null)
+    val error:String?=null,val updatedAt:String="",val jobId:String?=null,val waitDetail:String?=null)
 data class UpdateLogEntry(val seq:Long,val time:String,val jobId:String?,val component:String,val stage:String,val message:String)
 data class UpdateDetail(val components:List<ComponentUpdate>,val log:List<UpdateLogEntry>,val hostMode:HostModeState?=null,val protocol:Int=1)
 
@@ -65,16 +65,16 @@ class UpdateCoordinator(private val home:Path,private val clock:()->Instant={Ins
         return "job-${component.lowercase().replace('_','-')}-${target}-${++jobCounter}"
     }
     /** Records a transition. [current] is the running version, [target] the version being moved to. */
-    @Synchronized fun update(component:String,current:String,target:String?,stage:String,waitReason:String?=null,error:String?=null,message:String?=null) {
+    @Synchronized fun update(component:String,current:String,target:String?,stage:String,waitReason:String?=null,error:String?=null,message:String?=null,waitDetail:String?=null) {
         require(component in UpdateComponents.all && stage in UpdateStages.all)
         val previous=components[component]
         val job=jobFor(component,target)
         val now=clock().toString()
         val safeError=error?.let {UpdateRedaction.text(it)}
-        val next=ComponentUpdate(component,current,target,stage,waitReason?.take(60),safeError,now,job)
+        val next=ComponentUpdate(component,current,target,stage,waitReason?.take(60),safeError,now,job,waitDetail?.let {UpdateRedaction.text(it)}?.take(120))
         components[component]=next
         // Only changes are logged so heartbeats do not flood the history.
-        if(previous?.stage!=stage || previous.waitReason!=next.waitReason || previous.error!=next.error || previous.target!=target || previous.current!=current)
+        if(previous?.stage!=stage || previous.waitReason!=next.waitReason || previous.waitDetail!=next.waitDetail || previous.error!=next.error || previous.target!=target || previous.current!=current)
             append(UpdateLogEntry(++seq,now,job,component,stage,UpdateRedaction.text(message ?: describe(stage,waitReason,safeError,current,target))))
         persist()
         onChange(snapshot())

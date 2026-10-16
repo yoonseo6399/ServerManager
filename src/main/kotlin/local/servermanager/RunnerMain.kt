@@ -78,7 +78,6 @@ object RunnerMain {
                     UpdateCoordinator(home).update(UpdateComponents.RUNNER_CONTROL,RunnerAgent.version(),null,"FAILED",error=preflight.detail ?: preflight.reason)
                     System.err.println("상주 게임 서비스 연결 확인 실패: ${preflight.reason}");kotlin.system.exitProcess(3)
                 }
-                if(preflight.reason=="HOST_WILL_BE_REPLACED"){val refusal=HostLifecycle.replaceIfIdle(home);if(refusal!=null){System.err.println("상주 서비스 교체 보류: $refusal");kotlin.system.exitProcess(3)}}
                 fun ready(){System.getenv("SERVER_MANAGER_RUNNER_READY_FILE")?.let { Path.of(it).writeText("ready") }}
                 var agent:RunnerAgent?=null
                 var currentId:String?=null
@@ -296,6 +295,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                 workers.submit { checkRunnerUpdate() }
             }
             if(restartForUpdate()) kotlin.system.exitProcess(75)
+            tryReplaceHost()
             send(RunnerMessage("heartbeat",version=version()));sable.heartbeat();if(hosted==null)directRelay.tick()
             reportUpdate()
             reportFolders()
@@ -335,8 +335,11 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             service.phase(if(updatePauseRequested && processes.values.none {it.isAlive})"PAUSING" else "WAITING")
         } else if(service.status().phase in setOf("CURRENT","FAILED")){pauseAfterDownload=false}
     }
-    private fun reserveUpload(id:String)=synchronized(lifecycle){!updatePauseRequested && uploading.add(id)}
-    private fun updateCheckpoint(){if(updatePauseRequested)throw RetryTransfer("서명된 실행기 업데이트를 위해 전송을 잠시 중지했습니다. 재연결 후 이어받습니다")}
+    private fun reserveUpload(id:String)=synchronized(lifecycle){!updatePauseRequested && !hostReplacing && uploading.add(id)}
+    private fun updateCheckpoint(){
+        if(updatePauseRequested)throw RetryTransfer("서명된 실행기 업데이트를 위해 전송을 잠시 중지했습니다. 재연결 후 이어받습니다")
+        if(hostReplacing)throw RetryTransfer("상주 서비스를 교체하는 중입니다. 잠시 후 다시 시도하세요")
+    }
     private val activation=ActivationGuard(home)
     /** Called once the new layer has a manager session; the host attach already happened in initHost(). */
     private fun confirmActivation() {
@@ -352,15 +355,101 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             if(host!=null)coordinator.update(UpdateComponents.GAME_HOST,host,if(host!=version())version() else null,if(host!=version())"WAITING" else "DONE",waitReason=if(host!=version())"HOST_REPLACED_WHEN_IDLE" else null)
         }
     }
+    // ---- Resident host replacement (GAME_HOST) --------------------------------------------------------------------
+    // The control layer can be updated while games run, but the host itself is only swapped when it owns nothing:
+    // no game, no preparation/transfer/install, and no relay player. New work is refused while the swap is in progress.
+    @Volatile private var hostReplacing=false
+    private val hostReplaceBusy=java.util.concurrent.atomic.AtomicBoolean()
+    private var hostReplaceNotBefore=0L
+    private var hostDrainSince=0L
+    private var hostReplaceFailures=0
+    private var lastHostWait=""
+    private fun hostWait(running:String,reason:String,detail:String?) {
+        coordinator.update(UpdateComponents.GAME_HOST,running,version(),"WAITING",waitReason=reason,waitDetail=detail)
+        val signature="$reason|$detail";if(signature!=lastHostWait){lastHostWait=signature;reportUpdateDetail()}
+    }
+    /** Must run under [lifecycle]: the same lock every admission of new work takes. */
+    private fun hostReplacementBlocker():Pair<String,String>? {
+        val alive=processes.values.count {it.isAlive}
+        if(alive>0)return "GAME_RUNNING" to "서버 ${alive}개가 실행 중입니다. 모두 종료되면 자동으로 교체합니다"
+        val root=home.resolve("instances")
+        val dirs=if(root.exists())root.listDirectoryEntries().filter {it.isDirectory()} else emptyList()
+        if(dirs.any {orphanAlive(it.name)})return "LEGACY_GAME_RUNNING" to "이전 방식으로 실행 중인 서버가 있습니다. 정상 종료 후 교체합니다"
+        if(preparing.isNotEmpty())return "SERVER_PREPARING" to "서버 준비·설치 작업이 끝나면 자동으로 교체합니다"
+        if(installationProcesses.values.any {it.isAlive})return "INSTALL_ACTIVE" to "서버 설치가 끝나면 자동으로 교체합니다"
+        if(uploading.isNotEmpty() || workspaces.values.any {it.busy()})return "TRANSFER_ACTIVE" to "파일 전송이 끝나면 자동으로 교체합니다"
+        if(stopping.isNotEmpty())return "STOP_IN_PROGRESS" to "서버 종료가 끝나면 자동으로 교체합니다"
+        if(dirs.any {(it.resolve("dirty").exists() && !hostedAlive(it.name)) || it.resolve("folder-import.pending").exists()})return "DIRTY_HANDOFF_PENDING" to "파일 인계가 끝나면 자동으로 교체합니다"
+        return null
+    }
+    private fun hostRefusalDetail(reason:String,streams:Int)=when(reason) {
+        "RELAY_STREAMS_ACTIVE" -> "플레이어 연결 ${streams}개가 끝나면 자동으로 교체합니다 (신규 접속은 잠시 막힙니다)"
+        "RELAY_SERVICE_ACTIVE" -> "이 상주 서비스는 중계 배출을 지원하지 않는 이전 버전입니다. 게임·접속이 없을 때 정상 종료 후 다시 시작해야 교체됩니다"
+        "GAME_RUNNING" -> "서버가 실행 중입니다. 모두 종료되면 자동으로 교체합니다"
+        "HOST_UNREACHABLE" -> "상주 서비스와 통신하지 못했습니다. 다시 시도합니다"
+        "HOST_IDENTITY_MISMATCH","NOT_A_HOST_PROCESS","HOST_PROCESS_MISSING","HOST_ENDPOINT_MISSING" -> "상주 서비스의 PID·시작 시각을 확인하지 못해 교체하지 않았습니다"
+        else -> "상주 서비스 교체를 보류했습니다 ($reason)"
+    }
+    /** Called from the connection loop; cheap when there is nothing to do. One attempt at a time, retried every few seconds. */
+    fun tryReplaceHost() {
+        val h=hosted ?: return
+        val running=h.hostVersion() ?: return
+        if(running==version() || hostModeState.mode!="SERVICE" || updatePauseRequested || currentJarPath()==null)return
+        val now=System.currentTimeMillis()
+        if(now<hostReplaceNotBefore)return
+        if(!hostReplaceBusy.compareAndSet(false,true))return
+        hostReplaceNotBefore=now+3000
+        try {replaceHost(h,running)}
+        catch(e:Exception) {
+            hostReplacing=false;runCatching {h.connection()?.cancelReplacement()}
+            hostWait(running,"HOST_REPLACE_ERROR","상주 서비스 교체 중 오류가 발생해 다시 시도합니다 (${e.javaClass.simpleName})")
+        } finally {hostReplaceBusy.set(false)}
+    }
+    private fun replaceHost(h:HostedGames,running:String) {
+        val blocker=synchronized(lifecycle) {hostReplacementBlocker() ?: run {hostReplacing=true;null}}
+        if(blocker!=null){hostWait(running,blocker.first,blocker.second);return}
+        try {
+            val client=h.connection()
+            if(client==null){hostWait(running,"HOST_UNREACHABLE","상주 서비스에 연결하지 못했습니다. 다시 시도합니다");return}
+            val result=HostLifecycle.replaceIdleHost(home,client)
+            if(!result.done) {
+                if(result.reason=="RELAY_STREAMS_ACTIVE") {
+                    val now=System.currentTimeMillis();if(hostDrainSince==0L)hostDrainSince=now
+                    // A drain that never ends must not keep new servers out: give the players up to 90 seconds, then back off.
+                    if(now-hostDrainSince>90_000){client.cancelReplacement();hostDrainSince=0;hostReplaceNotBefore=now+60_000;hostWait(running,"RELAY_STREAMS_ACTIVE","플레이어 연결이 90초 안에 끝나지 않아 교체를 취소했습니다. 1분 뒤 다시 시도합니다");return}
+                } else hostDrainSince=0
+                val reason=result.reason ?: "HOST_NOT_READY"
+                hostWait(running,reason,hostRefusalDetail(reason,result.streams))
+                if(reason!="RELAY_STREAMS_ACTIVE")hostReplaceNotBefore=System.currentTimeMillis()+(if(reason=="RELAY_SERVICE_ACTIVE")60_000 else 5000)
+                return
+            }
+            hostDrainSince=0
+            coordinator.update(UpdateComponents.GAME_HOST,running,version(),"APPLYING",message="상주 서비스를 현재 버전으로 교체합니다")
+            val next=h.connection()
+            if(next==null || next.hostVersion!=version()) {
+                hostReplaceFailures++
+                coordinator.update(UpdateComponents.GAME_HOST,running,version(),"FAILED",error="새 상주 서비스를 시작하지 못했습니다: ${h.lastError ?: next?.hostVersion ?: "응답 없음"}")
+                reportUpdateDetail()
+                // No game can exist here, so retrying is safe. After repeated failures the supervisor restores the previous version, which starts its own host.
+                if(hostReplaceFailures>=3){System.err.println("새 상주 서비스 시작 반복 실패 · 이전 버전 복구를 요청합니다");kotlin.system.exitProcess(3)}
+                return
+            }
+            hostReplaceFailures=0
+            next.onRelay={body->runCatching {send(mapper.readValue<RunnerMessage>(body))}}
+            next.relaySession()
+            coordinator.update(UpdateComponents.GAME_HOST,next.hostVersion,null,"DONE",message="상주 서비스가 ${next.hostVersion}으로 교체됐습니다")
+            lastHostWait="";reportUpdateDetail()
+        } finally {hostReplacing=false}
+    }
     // ---- Update status (component, stage, wait reason, durable log) -----------------------------------------------
     private val coordinator=UpdateCoordinator(home)
     private fun pendingProps():java.util.Properties? {
         val version=runCatching {home.resolve("updates/pending.txt").readText().trim()}.getOrNull() ?: return null
         return runCatching {java.util.Properties().also {p->home.resolve("updates/$version/update.properties").inputStream().use(p::load)}}.getOrNull()
     }
-    private fun waitingFor(service:RunnerUpdater,reason:String):Boolean {
+    private fun waitingFor(service:RunnerUpdater,reason:String,detail:String?=null):Boolean {
         service.phase("WAITING")
-        coordinator.update(UpdateComponents.RUNNER_CONTROL,version(),service.status().latest,"WAITING",waitReason=reason)
+        coordinator.update(UpdateComponents.RUNNER_CONTROL,version(),service.status().latest,"WAITING",waitReason=reason,waitDetail=detail)
         reportUpdateDetail();return true
     }
     private fun hostedGamesBlockUpdate(service:RunnerUpdater):Boolean {
@@ -377,7 +466,10 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         val service=updater ?: return false
         if(service.busy() || !service.pending())return false
         val target=pendingProps()?.getProperty("version") ?: service.status().latest
-        if(tcpRelay?.busy()==true || directRelay.busy())return waitingFor(service,"RELAY_STREAMS_ACTIVE").let {false}
+        if(tcpRelay?.busy()==true || directRelay.busy()) {
+            val streams=(tcpRelay?.streamCount() ?: 0)+directRelay.streamTotal()
+            return waitingFor(service,"RELAY_STREAMS_ACTIVE","플레이어 연결 ${streams}개가 끝나면 자동으로 적용됩니다").let {false}
+        }
         val root=home.resolve("instances")
         val dirs=if(root.exists())root.listDirectoryEntries().filter {it.isDirectory()} else emptyList()
         // Games owned by the resident host survive a control-layer restart, but only when the new layer can still talk to that host.

@@ -47,13 +47,15 @@ object GameHostProtocol {
     fun hmac(secret:ByteArray,vararg parts:ByteArray):ByteArray=Mac.getInstance("HmacSHA256").run {init(SecretKeySpec(secret,"HmacSHA256"));parts.forEach(::update);doFinal()}
 }
 
+data class ReplacementState(val ready:Boolean,val state:String,val streams:Int)
 data class HostEndpoint(val port:Int,val secret:String,val pid:Long,val version:String,val protocol:Int,val minCompatible:Int,val startMillis:Long=0)
 data class HostInstanceStatus(val id:String,val pid:Long,val startMillis:Long,val alive:Boolean,val exitCode:Int?,val exitAcked:Boolean,val lastSeq:Long,val managed:Boolean,val reason:String?=null,val ready:Boolean=false)
 private data class PersistedInstance(val id:String,val pid:Long,val startMillis:Long,val exitCode:Int?=null,val exitAcked:Boolean=false)
 private data class PersistedHost(val instances:List<PersistedInstance> =emptyList())
 
 class GameHostService(private val home:Path,private val version:String,private val ringSize:Int=5000,private val pingMillis:Long=5000,private val leaseMillis:Long=15000,
-        private val protocol:Int=GameHostProtocol.VERSION,private val minCompatible:Int=GameHostProtocol.MIN_COMPATIBLE):AutoCloseable {
+        private val protocol:Int=GameHostProtocol.VERSION,private val minCompatible:Int=GameHostProtocol.MIN_COMPATIBLE,
+        private val replacementLeaseMillis:Long=120_000):AutoCloseable {
     private val mapper=jacksonObjectMapper()
     private val dir=home.resolve("host")
     private val endpointFile=dir.resolve("endpoint.json")
@@ -148,6 +150,7 @@ class GameHostService(private val home:Path,private val version:String,private v
     private fun pingLoop() {
         while(!closed) {
             try {Thread.sleep(pingMillis)} catch(_:InterruptedException){return}
+            runCatching {expireReplacement()}
             val c=controller ?: continue
             if(System.currentTimeMillis()-c.lastPong>leaseMillis){c.close();continue}
             c.send(mapOf("t" to "ping"))
@@ -186,7 +189,7 @@ class GameHostService(private val home:Path,private val version:String,private v
             }
             val c=me!!;socket.soTimeout=0
             // Replace the raw writer with the controller's serialized one for everything after this point.
-            c.send(mapOf("t" to "welcome","protocol" to protocol,"version" to version,"instances" to statuses()))
+            c.send(mapOf("t" to "welcome","protocol" to protocol,"version" to version,"pid" to ProcessHandle.current().pid(),"caps" to listOf("replace-drain"),"instances" to statuses()))
             while(!closed) {
                 val line=readLine(reader) ?: break
                 c.lastPong=System.currentTimeMillis()
@@ -205,6 +208,27 @@ class GameHostService(private val home:Path,private val version:String,private v
     fun controllerAttached()=controller?.socket?.isClosed==false
 
     @Volatile private var replacementPrepared=false
+    @Volatile private var replacementSince=0L
+    /**
+     * Starts blocking new work for a host replacement. Refused while any game is alive; the check and the flag are one step under
+     * the same lock a game start uses, so a start can never slip in between. New relay players are stopped, established ones drain.
+     */
+    private fun beginReplacement():Boolean {
+        synchronized(games) {
+            if(anyAlive())return false
+            if(!replacementPrepared){replacementPrepared=true;replacementSince=System.currentTimeMillis()}
+        }
+        relayRole?.pauseNewWork()
+        return true
+    }
+    private fun cancelReplacement() {
+        synchronized(games){replacementPrepared=false;replacementSince=0}
+        relayRole?.resumeNewWork()
+    }
+    /** A controller that vanished mid-replacement must not leave the relay closed and starts refused forever. */
+    private fun expireReplacement() {
+        if(replacementPrepared && System.currentTimeMillis()-replacementSince>replacementLeaseMillis)cancelReplacement()
+    }
     @Synchronized private fun handle(c:Controller,m:JsonNode) {
         val req=m.path("req").asText("")
         fun ok(extra:Map<String,Any?> =emptyMap()){c.send(mapOf("t" to "ok","req" to req)+extra)}
@@ -251,10 +275,15 @@ class GameHostService(private val home:Path,private val version:String,private v
                 game.exitAcked=true;games.remove(game.id,game);persist();ok()
             }
             "prepare-replacement" -> {
-                if(anyAlive())return fail("GAME_RUNNING")
-                if(relayRole!=null)return fail("RELAY_SERVICE_ACTIVE")
-                replacementPrepared=true;ok(mapOf("prepared" to true))
+                // Idempotent: the controller polls until established relay streams have drained. Nothing is ever cut to make progress.
+                if(!beginReplacement())return fail("GAME_RUNNING")
+                val streams=relayRole?.streamTotal() ?: 0
+                if(streams>0)return ok(mapOf("prepared" to false,"state" to "DRAINING","streams" to streams))
+                // Nothing was running when the flag went up and nothing new can start; a final look closes the remaining window.
+                if(anyAlive()){cancelReplacement();return fail("GAME_RUNNING")}
+                ok(mapOf("prepared" to true,"state" to "READY","streams" to 0))
             }
+            "cancel-replacement" -> {cancelReplacement();ok()}
             "relay" -> {
                 if(replacementPrepared)return fail("HOST_REPLACEMENT_PENDING")
                 val message=runCatching {mapper.readValue(m.path("body").asText(),RunnerMessage::class.java)}.getOrNull() ?: return
@@ -271,6 +300,7 @@ class GameHostService(private val home:Path,private val version:String,private v
         val command=m.path("command").map {it.asText()};val directory=Path.of(m.path("dir").asText())
         if(command.isEmpty() || !directory.isDirectory())return fail("BAD_REQUEST",emptyMap())
         val game=synchronized(games) {
+            if(replacementPrepared)return fail("HOST_REPLACEMENT_PENDING",emptyMap())
             val existing=games[id]
             if(existing!=null) {
                 // Never start a second process for the same server.
@@ -354,6 +384,9 @@ class GameHostClient private constructor(private val socket:Socket,private val r
     private val counter=AtomicLong()
     @Volatile var hostVersion="";private set
     @Volatile var hostProtocol=0;private set
+    @Volatile var hostPid=0L;private set
+    /** Features of the connected host. Hosts older than the drain protocol send none. */
+    @Volatile var hostCaps:Set<String> =emptySet();private set
     @Volatile var initial:List<HostInstanceStatus> =emptyList();private set
     @Volatile var disconnected=false;private set
     /** Delivers every console line exactly once in order per instance; replays are de-duplicated by sequence number. */
@@ -398,6 +431,7 @@ class GameHostClient private constructor(private val socket:Socket,private val r
     }
     private fun accept(welcome:JsonNode) {
         hostVersion=welcome.path("version").asText();hostProtocol=welcome.path("protocol").asInt()
+        hostPid=welcome.path("pid").asLong(0);hostCaps=welcome.path("caps").map {it.asText()}.toSet()
         initial=welcome.path("instances").map {mapper.treeToValue(it,HostInstanceStatus::class.java)}
         Thread({readLoop()},"game-host-client").apply {isDaemon=true;start()}
     }
@@ -465,7 +499,14 @@ class GameHostClient private constructor(private val socket:Socket,private val r
     fun relayForward(json:String)=send(mapOf("t" to "relay","body" to json))
     fun relaySession()=send(mapOf("t" to "relay-session"))
     fun relayBusy():Boolean=runCatching {request(mapOf("t" to "relay-busy")).path("busy").asBoolean(true)}.getOrDefault(true)
-    fun prepareReplacement():Boolean=request(mapOf("t" to "prepare-replacement")).path("prepared").asBoolean(false)
+    fun prepareReplacement():Boolean=prepareReplacementState().ready
+    /** One poll of the drain procedure. Hosts without the `state` field are the old all-or-nothing kind: `prepared` alone decides. */
+    fun prepareReplacementState():ReplacementState {
+        val reply=request(mapOf("t" to "prepare-replacement"))
+        val prepared=reply.path("prepared").asBoolean(false)
+        return ReplacementState(prepared,reply.path("state").asText(if(prepared)"READY" else "UNKNOWN"),reply.path("streams").asInt(0))
+    }
+    fun cancelReplacement()=runCatching {request(mapOf("t" to "cancel-replacement"))}.isSuccess
     /** Detach without touching any game. The host immediately accepts the next controller. */
     override fun close(){runCatching {socket.close()}}
 }

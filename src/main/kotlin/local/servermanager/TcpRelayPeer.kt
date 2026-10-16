@@ -17,6 +17,7 @@ class TcpRelayPeer(private val text:(RunnerMessage)->Boolean,private val binary:
     private val slots=Semaphore(32)
     private val ids=AtomicInteger(-1)
     fun busy()=streams.isNotEmpty()
+    fun streamCount()=streams.size
     private val workers=Executors.newCachedThreadPool()
     @Volatile private var listener:ServerSocket?=null
     @Volatile private var closed=false

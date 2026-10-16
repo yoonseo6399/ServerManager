@@ -214,6 +214,8 @@ class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clo
         }
         return true
     }
+    /** Closes only the player-facing listener; established players and agent tunnels are untouched. [listen] reopens it. */
+    @Synchronized fun pauseGame(){runCatching {game?.close()};game=null}
     fun streamCount()=tunnels.values.sumOf {it.players.size}
     /** Stop accepting new players now; established streams and tunnels finish naturally, then everything closes. */
     fun drainAndClose(deadlineMillis:Long) {

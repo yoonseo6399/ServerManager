@@ -583,3 +583,5 @@ Beta.4 integration: frontend production build and local bootJar passed. Addition
 ## 2026-10-17 — 0.7.0-beta.5 log window
 
 `release/0.7.0-beta.5` = published beta.4 (0558142) + `feat/log-window-on-beta4` (632edf6). Adds whole-file log window with server-side search and the `[MunitionRackDebug]` noise filter. Music, Qwen runner and transfer-progress work from the older 0.4.14-based branch was dropped because beta.4 already contains newer implementations or lacks the base commit (bbcc7f7). Backend tests: 102 failures identical to beta.4 on this Windows environment (symlink permissions); frontend build not run.
+
+Beta.5 follow-up (`feat/update-wait-notice`): GAME_HOST replacement now runs from the live controller connection with relay drain, and server pages show update-wait reasons. See `docs/dev-notes/fix-game-host-replacement.md`. Compiled only; no tests were run.
