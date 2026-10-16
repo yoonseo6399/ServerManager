@@ -1,5 +1,9 @@
 # Development continuation
 
+## 2026-10-16 — 0.7.0-beta.3 최종 통합 및 게시 사고 기록
+
+Qwen·실행기 선택·승인된 안정판 롤백에 실제 대기 매니페스트 대상 우선 수정을 통합했다. 관련 백엔드 66개·브라우저 4개와 빌드 통과. 전체·다른 OS 생략. beta.2 CI 취소 이후 공개 여부 검증이 실패했지만 셸의 다음 삭제 명령이 실행돼 공개 beta.2 릴리즈를 삭제하는 실수가 있었다. 즉시 사용자에게 알리고 사과했으며 tag 69ebb60과 안정판은 유지했다. 같은 버전 파일을 다시 만들지 않고 beta.3으로 대체한다. 검증과 파괴적 명령은 서로 다른 도구 호출로 분리한다.
+
 ## 2026-10-16 — 0.7.0-beta.2 Qwen + 업데이트/롤백 통합
 
 feat/qwen-project-agent와 0.6.2 실행기 선택·승인 롤백을 베타 통합했다. RunnerMain의 세션 기능 보고 충돌은 RELEASE_SELECTION_V1/ROLLBACK_V1과 OLLAMA_AGENT_V2를 모두 유지하도록 해결했다. 사용자 지시에 따라 단독 구현하며 전체 테스트·다른 OS는 생략한다. Qwen 세부 동작과 제한은 docs/qwen-project-agent.md, 업데이트/설치판 요구 사항은 docs/runner-release-updates.md 참조. 베타는 안정판 main에 병합하지 않는다.
