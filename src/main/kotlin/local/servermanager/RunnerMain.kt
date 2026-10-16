@@ -312,13 +312,16 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         gameStreams.values.forEach { runCatching { it.close() } };gameStreams.clear()
     }
     private fun reportUpdate(){send(RunnerMessage("update-status",detail=mapper.writeValueAsString(updater?.status() ?: RunnerUpdateStatus("UNSUPPORTED"))))}
-    fun requestUpdate(pause:Boolean) {
+    fun requestUpdate(pause:Boolean,version:String?=null,allowPrerelease:Boolean=false,allowRollback:Boolean=false) {
         if(pause)pauseAfterDownload=true
-        workers.submit {checkRunnerUpdate()}
+        workers.submit {checkRunnerUpdate(version,allowPrerelease,allowRollback)}
     }
-    private fun checkRunnerUpdate() {
+    private fun checkRunnerUpdate(targetVersion:String?=null,allowPrerelease:Boolean=false,allowRollback:Boolean=false) {
         val service=updater ?: run {reportUpdate();return}
-        runCatching {service.check()}.onFailure {System.err.println("실행기 업데이트 확인 실패: ${it.javaClass.simpleName}")}
+        runCatching {if(targetVersion==null)service.check() else service.install(targetVersion,allowPrerelease,allowRollback)}.onFailure {
+            System.err.println("실행기 업데이트 확인 실패: ${it.javaClass.simpleName}")
+            coordinator.update(UpdateComponents.RUNNER_CONTROL,version(),service.status().latest,"FAILED",error=UpdateRedaction.text(it.message ?: "업데이트 검증 실패"));reportUpdateDetail()
+        }
         if(service.pending()) {
             if(pauseAfterDownload)updatePauseRequested=true
             service.phase(if(updatePauseRequested && processes.values.none {it.isAlive})"PAUSING" else "WAITING")
@@ -365,7 +368,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     fun restartForUpdate():Boolean=synchronized(lifecycle) {
         val service=updater ?: return false
         if(service.busy() || !service.pending())return false
-        val target=service.status().latest ?: pendingProps()?.getProperty("version")
+        val target=pendingProps()?.getProperty("version") ?: service.status().latest
         if(tcpRelay?.busy()==true || directRelay.busy())return waitingFor(service,"RELAY_STREAMS_ACTIVE").let {false}
         val root=home.resolve("instances")
         val dirs=if(root.exists())root.listDirectoryEntries().filter {it.isDirectory()} else emptyList()
@@ -404,7 +407,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                         "sable-registered" -> message.token?.let {sableRegistrations[it]?.complete(message.state=="OK")}
 
                         "session" -> { sessionToken=message.token;tcpRelay?.close();tcpRelay=if(tcpRelayAllowed)TcpRelayPeer(::send,::sendBinary) else null
-                            confirmActivation();hosted?.relaySession() ?: directRelay.onSession();reportUpdateDetail();send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));send(RunnerMessage("llm-capability",state=if(llmAllowed)"OLLAMA_V1" else "OFF"));reportUpdate();recoverStates() }
+                            send(RunnerMessage("update-capability",state=if(updater!=null)"RELEASE_SELECTION_V1" else "OFF",detail=if(updater?.rollbackSupported==true)"ROLLBACK_V1" else null));confirmActivation();hosted?.relaySession() ?: directRelay.onSession();reportUpdateDetail();send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));send(RunnerMessage("llm-capability",state=if(llmAllowed)"OLLAMA_V1" else "OFF"));reportUpdate();recoverStates() }
                         "relay-config" -> {
                             val port=message.detail?.toIntOrNull()
                             val ok=tcpRelayAllowed && (message.state=="OFF" || port in 1024..65535) && runCatching {tcpRelay?.listen(if(message.state=="ON")port else null);true}.getOrDefault(false)
@@ -414,7 +417,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                         "relay-closed" -> message.streamId?.takeIf {it<0}?.let {tcpRelay?.end(it)}
                         "drp-relay-config","drp-agent-config","drp-ticket" -> hosted?.relayForward(mapper.writeValueAsString(message)) ?: directRelay.onMessage(message)
                         "update-request" -> if(message.detail in setOf("WHEN_IDLE","PAUSE_TRANSFER")) {
-                            requestUpdate(message.detail=="PAUSE_TRANSFER")
+                            requestUpdate(message.detail=="PAUSE_TRANSFER",message.command,message.state=="BETA_OK",message.state=="STABLE_ROLLBACK")
                         }
                         "llm-request" -> if(message.token!=null)workers.submit {llmChat(message.token,message.state.orEmpty(),message.command.orEmpty(),message.detail=="THINK")}
                         "workspace" -> if(message.instanceId!=null && message.token!=null && message.detail!=null)workers.submit {workspace(message.instanceId,message.token,message.detail)}

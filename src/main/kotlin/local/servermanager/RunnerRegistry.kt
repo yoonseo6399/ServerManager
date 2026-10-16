@@ -25,7 +25,7 @@ import kotlin.io.path.*
 data class RunnerDevice(val id:String,val name:String,val platform:String,val registeredBy:String,val publicKey:String,
     val createdAt:String,var version:String="unknown",var enabled:Boolean=true,var allowedInstanceIds:Set<String> = emptySet())
 data class RunnerView(val id:String,val name:String,val platform:String,val registeredBy:String,val createdAt:String,
-    val version:String,val enabled:Boolean,val allowedInstanceIds:Set<String>,val online:Boolean,val lastSeen:String?,val update:RunnerUpdateStatus?=null,val remoteUpdateSupported:Boolean=false,val registeredByName:String="",val canGrant:Boolean=false,val tcpRelaySupported:Boolean=false)
+    val version:String,val enabled:Boolean,val allowedInstanceIds:Set<String>,val online:Boolean,val lastSeen:String?,val update:RunnerUpdateStatus?=null,val remoteUpdateSupported:Boolean=false,val registeredByName:String="",val canGrant:Boolean=false,val tcpRelaySupported:Boolean=false,val releaseSelectionSupported:Boolean=false,val rollbackSupported:Boolean=false)
 data class RunnerPairRequest(val code:String,val publicKey:String,val platform:String,val version:String)
 data class RunnerEnrollmentRequest(val name:String)
 private data class PendingRunner(val codeHash:String,val userId:String,val name:String,val expiresAt:Long)
@@ -42,6 +42,11 @@ class RunnerRegistry(private val manager:ServerManager,private val auth:AuthStor
     private val nonces=mutableMapOf<String,Long>()
     private val updates=mutableMapOf<String,RunnerUpdateStatus>()
     private val tcpRelays=mutableSetOf<String>()
+    private val releaseSelection=mutableSetOf<String>()
+    private val rollbacks=mutableSetOf<String>()
+    @Synchronized fun updateCapability(id:String,selection:Boolean,rollback:Boolean){if(selection && active(id)!=null)releaseSelection.add(id) else releaseSelection.remove(id);if(selection && rollback && active(id)!=null)rollbacks.add(id) else rollbacks.remove(id)}
+    @Synchronized fun releaseSelectionSupported(id:String)=id in releaseSelection && online(id)
+    @Synchronized fun rollbackSupported(id:String)=id in rollbacks && releaseSelectionSupported(id)
     private val updateDetails=mutableMapOf<String,UpdateDetail>()
     @Synchronized fun updateDetail(id:String,detail:UpdateDetail){if(active(id)!=null)updateDetails[id]=detail}
     @Synchronized fun updateDetailFor(id:String)=updateDetails[id]
@@ -108,24 +113,29 @@ class RunnerRegistry(private val manager:ServerManager,private val auth:AuthStor
         heartbeat[id]=System.currentTimeMillis()
         devices[id]?.let { if(it.version!=version && version.length in 1..80) { it.version=version;updates.remove(id);persist() } }
     }
-    @Synchronized fun disconnected(id:String) { heartbeat.remove(id);tcpRelays.remove(id) }
+    @Synchronized fun disconnected(id:String) { heartbeat.remove(id);tcpRelays.remove(id);releaseSelection.remove(id);rollbacks.remove(id) }
     @Synchronized fun online(id:String)=active(id)!=null && (heartbeat[id]?.let { System.currentTimeMillis()-it<45_000 } ?: false)
     @Synchronized fun views(userId:String):List<RunnerView> {
         val user=auth.account(userId) ?: return emptyList()
         return devices.values.filter { user.managesAllServers() || it.registeredBy==userId || it.allowedInstanceIds.any { id -> user.permissions[id]=="ADMIN" } }
-            .map { RunnerView(it.id,it.name,it.platform,it.registeredBy,it.createdAt,it.version,it.enabled,it.allowedInstanceIds,online(it.id),heartbeat[it.id]?.let { ms->Instant.ofEpochMilli(ms).toString() },updates[it.id],remoteUpdateSupported(it.id),auth.account(it.registeredBy)?.displayName ?: "삭제된 계정",(it.registeredBy==userId || user.managesAllServers()),tcpRelaySupported(it.id)) }
+            .map { RunnerView(it.id,it.name,it.platform,it.registeredBy,it.createdAt,it.version,it.enabled,it.allowedInstanceIds,online(it.id),heartbeat[it.id]?.let { ms->Instant.ofEpochMilli(ms).toString() },updates[it.id],remoteUpdateSupported(it.id),auth.account(it.registeredBy)?.displayName ?: "삭제된 계정",(it.registeredBy==userId || user.managesAllServers()),tcpRelaySupported(it.id),releaseSelectionSupported(it.id),rollbackSupported(it.id)) }
     }
-    @Synchronized fun connected(id:String){updates.remove(id)}
+    @Synchronized fun connected(id:String){updates.remove(id);releaseSelection.remove(id);rollbacks.remove(id)}
     @Synchronized fun remoteUpdateSupported(id:String)=active(id)!=null && updates[id]?.phase?.let {it!="UNSUPPORTED"}==true
     @Synchronized fun updateStatus(id:String,status:RunnerUpdateStatus){if(active(id)!=null)updates[id]=status.validated()}
-    @Synchronized fun requestUpdate(userId:String,id:String,pause:Boolean) {
+    @Synchronized fun validateUpdate(userId:String,id:String,pause:Boolean,version:String?=null):RunnerDevice {
         val user=auth.account(userId);require(user?.enabled==true && (user.owner || devices[id]?.registeredBy==userId)) {"기기 등록자 또는 소유자만 실행기를 업데이트할 수 있습니다"}
         check(active(id)!=null) {"폐기된 실행기입니다"}
         check(online(id)) {"실행기를 온라인으로 연결하세요"}
         check(updates[id]?.phase!="UNSUPPORTED") {"서명 업데이트를 지원하는 설치판으로 실행하세요"}
         check(remoteUpdateSupported(id)) {"이 실행기는 최초 한 번 자동 업데이트 또는 새 설치판 적용이 필요합니다 (0.4.4 이상)"}
         if(pause)check(manager.list().none {(it["config"] as Instance).runnerId==id && it["diagnosticActive"]==true}) {"모드 검사를 마친 뒤 전송 중지 업데이트를 요청하세요"}
-        updates[id]=RunnerUpdateStatus("REQUESTED")
+        if(version!=null){SignedUpdates.compare(version,"0.0.0");check(releaseSelectionSupported(id)) {"먼저 실행기를 최신 안정판으로 업데이트한 뒤 다시 선택하세요"}}
+        return devices.getValue(id)
+    }
+    @Synchronized fun requestUpdate(userId:String,id:String,pause:Boolean,version:String?=null) {
+        validateUpdate(userId,id,pause,version)
+        updates[id]=RunnerUpdateStatus("REQUESTED",version)
     }
     @Synchronized fun allow(userId:String,id:String,instanceId:String,allowed:Boolean) {
         val device=devices[id] ?: error("실행기를 찾을 수 없습니다")
@@ -159,15 +169,22 @@ class RunnerRegistry(private val manager:ServerManager,private val auth:AuthStor
 
 @RestController
 @RequestMapping("/api/runners")
-class RunnerApi(private val registry:RunnerRegistry,private val auth:AuthStore,private val audit:AuditLog,private val gateway:RunnerGateway) {
+class RunnerApi(private val registry:RunnerRegistry,private val auth:AuthStore,private val audit:AuditLog,private val gateway:RunnerGateway,private val updates:AppUpdates) {
     private fun fresh(req:HttpServletRequest) {
         val verified=req.getSession(false)?.getAttribute("sm.verified") as? Long ?: 0
         if(System.currentTimeMillis()-verified>300000) throw ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED,"패스키로 다시 인증한 뒤 진행하세요")
     }
     @GetMapping fun list(authentication:Authentication)=registry.views(authentication.name)
+    @GetMapping("/{id}/releases") fun releases(@PathVariable id:String,authentication:Authentication):List<PublishedUpdate> {
+        val runner=registry.views(authentication.name).firstOrNull {it.id==id} ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        return updates.releasesFor(runner.version,runner.rollbackSupported)
+    }
     @PostMapping("/{id}/update") fun update(@PathVariable id:String,@RequestBody request:RunnerUpdateRequest,authentication:Authentication,req:HttpServletRequest) {
-        fresh(req);registry.requestUpdate(authentication.name,id,request.pauseTransfer)
-        try {check(gateway.requestUpdate(id,request.pauseTransfer)) {"실행기 연결이 끊겼습니다. 다시 요청하세요"}}
+        fresh(req)
+        val device=registry.validateUpdate(authentication.name,id,request.pauseTransfer,request.version)
+        if(request.version!=null)UpdateReleases.select(updates.releasesFor(device.version,registry.rollbackSupported(id)),request.version,request.allowPrerelease,request.allowRollback)
+        registry.requestUpdate(authentication.name,id,request.pauseTransfer,request.version)
+        try {check(gateway.requestUpdate(id,request.pauseTransfer,request.version,request.allowPrerelease,request.allowRollback)) {"실행기 연결이 끊겼습니다. 다시 요청하세요"}}
         catch(e:Exception){registry.updateStatus(id,RunnerUpdateStatus("FAILED"));throw e}
         audit.append(authentication.name,"runner signed update requested $id",200,"web")
     }

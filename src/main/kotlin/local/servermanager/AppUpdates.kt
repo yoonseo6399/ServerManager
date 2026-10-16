@@ -15,27 +15,30 @@ import java.time.Instant
 import java.util.Properties
 import kotlin.io.path.*
 
-data class PublishedUpdate(val version:String,val name:String,val prerelease:Boolean,val publishedAt:String,val url:String,val installable:Boolean,val reason:String?)
+data class PublishedUpdate(val version:String,val name:String,val prerelease:Boolean,val publishedAt:String,val url:String,val installable:Boolean,val reason:String?,val rollback:Boolean=false)
 object UpdateReleases {
-    fun catalog(bytes:ByteArray,current:String,failed:String?):List<PublishedUpdate> = jacksonObjectMapper().readTree(bytes).let {root->
+    fun catalog(bytes:ByteArray,current:String,failed:String?,rollbackSupported:Boolean=false):List<PublishedUpdate> = jacksonObjectMapper().readTree(bytes).let {root->
         require(root.isArray) {"잘못된 릴리즈 목록"}
         root.filter { !it.path("draft").asBoolean() && it.path("tag_name").asText().startsWith("v") && SignedUpdates.eligible(it.path("tag_name").asText().removePrefix("v"),it.path("prerelease").asBoolean(),true) }.map {release->
             val version=release.path("tag_name").asText().removePrefix("v")
             val assets=release.path("assets").map {it.path("name").asText()}.toSet()
             val reason=when {
-                SignedUpdates.compare(version,current)<=0->"현재 버전 이하이므로 설치할 수 없습니다"
+                SignedUpdates.compare(version,current)==0->"현재 버전입니다"
+                SignedUpdates.compare(version,current)<0 && !UpdateRollback.stableTarget(version)->"0.6.0 이상 안정판으로만 롤백할 수 있습니다"
+                SignedUpdates.compare(version,current)<0 && !rollbackSupported->"낮은 안정판 롤백에는 새 설치판이 필요합니다"
                 version==failed->"시작 검증에 실패한 버전입니다"
                 !assets.containsAll(setOf("update.properties","update.sig","server-manager-$version.jar"))->"서명된 업데이트 파일이 없습니다"
                 else->null
             }
-            PublishedUpdate(version,release.path("name").asText(version).take(200),release.path("prerelease").asBoolean(),release.path("published_at").asText(),"https://github.com/yoonseo6399/ServerManager/releases/tag/v$version",reason==null,reason)
+            PublishedUpdate(version,release.path("name").asText(version).take(200),release.path("prerelease").asBoolean(),release.path("published_at").asText(),"https://github.com/yoonseo6399/ServerManager/releases/tag/v$version",reason==null,reason,SignedUpdates.compare(version,current)<0 && !release.path("prerelease").asBoolean())
         }.distinctBy {it.version}.sortedWith {a,b->SignedUpdates.compare(b.version,a.version)}
     }
-    fun select(releases:List<PublishedUpdate>,version:String,allowPrerelease:Boolean):PublishedUpdate {
+    fun select(releases:List<PublishedUpdate>,version:String,allowPrerelease:Boolean,allowRollback:Boolean=false):PublishedUpdate {
         SignedUpdates.compare(version,"0.0.0")
         val release=releases.singleOrNull {it.version==version} ?: error("공개된 릴리즈를 선택하세요")
         require(release.installable) {release.reason ?: "설치할 수 없는 버전입니다"}
         require(!release.prerelease || allowPrerelease) {"베타 설치 동의가 필요합니다"}
+        require(!release.rollback || allowRollback) {"안정판 롤백 동의가 필요합니다"}
         return release
     }
 }
@@ -74,6 +77,7 @@ class AppUpdates(private val desktop:DesktopLifecycle) {
     private val client=HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).connectTimeout(Duration.ofSeconds(15)).build()
     val current=javaClass.getResourceAsStream("/app-version.txt")!!.bufferedReader().use { it.readText().trim() }
     val betaChannel="-beta." in current
+    val rollbackSupported=System.getenv("SERVER_MANAGER_BOOTSTRAP_PROTOCOL")=="2"
     val repository=javaClass.getResourceAsStream("/update-repository.txt")!!.bufferedReader().use { it.readText().trim() }
     private val key=javaClass.getResourceAsStream("/update-public-key.der")!!.use { it.readAllBytes() }
     private val disabled=desktop.home.resolve("updates-disabled")
@@ -81,21 +85,22 @@ class AppUpdates(private val desktop:DesktopLifecycle) {
     @Volatile private var message="아직 확인하지 않았습니다"
     @Volatile private var checked:String?=null
     @Volatile private var checking=false
-    fun status()=mapOf("supported" to desktop.supervised,"enabled" to (desktop.supervised&&!disabled.exists()),"current" to current,"channel" to if(betaChannel) "BETA" else "STABLE","latest" to latest,"message" to message,"checkedAt" to checked,"checking" to checking,"repository" to "https://github.com/$repository","detail" to desktop.updates.snapshot())
+    fun status()=mapOf("supported" to desktop.supervised,"rollbackSupported" to rollbackSupported,"enabled" to (desktop.supervised&&!disabled.exists()),"current" to current,"channel" to if(betaChannel) "BETA" else "STABLE","latest" to latest,"message" to message,"checkedAt" to checked,"checking" to checking,"repository" to "https://github.com/$repository","detail" to desktop.updates.snapshot())
     @Synchronized fun enabled(value:Boolean){check(desktop.supervised);if(value){disabled.deleteIfExists()}else{atomicText(disabled,"disabled");desktop.home.resolve("updates/pending.txt").deleteIfExists();desktop.updates.update(UpdateComponents.MANAGER_APP,current,null,"IDLE",message="자동 업데이트 적용을 해제했습니다")}}
     @Scheduled(initialDelay=60000,fixedDelay=21600000) fun periodic(){if(desktop.supervised&&!disabled.exists())checkNow()}
-    fun releases():List<PublishedUpdate> = UpdateReleases.catalog(get(URI("https://api.github.com/repos/$repository/releases?per_page=100"),4*1024*1024),current,desktop.home.resolve("failed-update-version.txt").takeIf {it.exists()}?.readText()?.trim())
-    @Synchronized fun install(version:String,allowPrerelease:Boolean):Map<String,Any?> {
+    fun releases():List<PublishedUpdate> = UpdateReleases.catalog(get(URI("https://api.github.com/repos/$repository/releases?per_page=100"),4*1024*1024),current,desktop.home.resolve("failed-update-version.txt").takeIf {it.exists()}?.readText()?.trim(),rollbackSupported)
+    fun releasesFor(version:String,rollback:Boolean=false):List<PublishedUpdate> = UpdateReleases.catalog(get(URI("https://api.github.com/repos/$repository/releases?per_page=100"),4*1024*1024),version,null,rollback)
+    @Synchronized fun install(version:String,allowPrerelease:Boolean,allowRollback:Boolean=false):Map<String,Any?> {
         check(desktop.supervised) {"수동 업데이트는 설치 앱에서 지원합니다"}
-        val release=UpdateReleases.select(releases(),version,allowPrerelease)
-        return prepare(release.version)
+        val release=UpdateReleases.select(releases(),version,allowPrerelease,allowRollback)
+        return prepare(release.version,allowRollback)
     }
     @Synchronized fun checkNow():Map<String,Any?> = prepare(null)
-    private fun prepare(selectedVersion:String?):Map<String,Any?> {
+    private fun prepare(selectedVersion:String?,allowRollback:Boolean=false):Map<String,Any?> {
         check(desktop.supervised) { "자동 업데이트는 설치 앱에서 지원합니다" }
         if(selectedVersion==null){
-            val pending=desktop.home.resolve("updates/pending.txt").takeIf {it.exists()}?.readText()?.trim()
-            if(pending!=null && runCatching {SignedUpdates.compare(pending,current)>0}.getOrDefault(false)){
+            val pending=UpdateRollback.pending(desktop.home,current,rollbackSupported)
+            if(pending!=null){
                 latest=pending;message="$pending 업데이트 적용을 기다리고 있습니다. 대기 중인 버전을 유지합니다. 다른 버전은 릴리즈 목록에서 직접 선택하세요."
                 return status()
             }
@@ -109,7 +114,7 @@ class AppUpdates(private val desktop:DesktopLifecycle) {
                 .maxWithOrNull { a,b->SignedUpdates.compare(a.path("tag_name").asText().removePrefix("v"),b.path("tag_name").asText().removePrefix("v")) }
                 ?: run { message="이 채널에 공개된 업데이트가 없습니다";desktop.updates.update(UpdateComponents.MANAGER_APP,current,null,"DONE",message=message);return status() }
             val version=release.path("tag_name").asText().removePrefix("v");SignedUpdates.compare(version,current);latest=version;checked=Instant.now().toString()
-            if(SignedUpdates.compare(version,current)<=0){message="최신 버전입니다";desktop.updates.update(UpdateComponents.MANAGER_APP,current,null,"DONE",message=message);return status()}
+            if(SignedUpdates.compare(version,current)<=0 && !(allowRollback && rollbackSupported && selectedVersion==version && "-beta." !in version && SignedUpdates.compare(version,current)<0)){message="최신 버전입니다";desktop.updates.update(UpdateComponents.MANAGER_APP,current,null,"DONE",message=message);return status()}
             if(desktop.home.resolve("failed-update-version.txt").takeIf { it.exists() }?.readText()?.trim()==version){message="이 버전은 시작 검증에 실패해 자동 적용을 중지했습니다. 다음 릴리스를 기다리거나 설치 파일을 확인하세요.";desktop.updates.update(UpdateComponents.MANAGER_APP,current,version,"FAILED",error=message);return status()}
             val base="https://github.com/$repository/releases/download/v$version/"
             desktop.updates.update(UpdateComponents.MANAGER_APP,current,version,"VERIFYING",message="게시자 서명을 확인합니다")
@@ -121,8 +126,9 @@ class AppUpdates(private val desktop:DesktopLifecycle) {
                 val tmp=Files.createTempFile(dir,"download-",".part")
                 try { desktop.updates.update(UpdateComponents.MANAGER_APP,current,version,"DOWNLOADING");download(URI(base+p.getProperty("file")),tmp,p.getProperty("size").toLong());desktop.updates.update(UpdateComponents.MANAGER_APP,current,version,"VERIFYING",message="다운로드 파일 무결성을 확인합니다");require(SignedUpdates.validFile(tmp,p)) { "업데이트 파일 무결성 검증 실패" };Files.move(tmp,target,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING) }finally{tmp.deleteIfExists()}
             }
-            check(UpdatePackageVerifier.verify(manifest,signature,target,key,version,current) is UpdatePackageVerifier.Result.Ok) {"업데이트 호환성 매니페스트를 확인할 수 없습니다"}
+            check(UpdatePackageVerifier.verify(manifest,signature,target,key,version,current,allowRollback && rollbackSupported) is UpdatePackageVerifier.Result.Ok) {"업데이트 호환성 매니페스트를 확인할 수 없습니다"}
             Files.write(dir.resolve("update.properties"),manifest);Files.write(dir.resolve("update.sig"),signature)
+            UpdateRollback.stageConsent(desktop.home,version,current,allowRollback,rollbackSupported)
             atomicText(desktop.home.resolve("updates/pending.txt"),version)
             message="업데이트를 받았습니다. 게임 소유 서비스와 전송 상태를 확인한 뒤 관리 앱을 교체합니다."
             desktop.updates.update(UpdateComponents.MANAGER_APP,current,version,"WAITING",waitReason="APPLY_WHEN_SAFE",message=message)
@@ -143,13 +149,13 @@ class AppUpdates(private val desktop:DesktopLifecycle) {
     private fun download(uri:URI,target:Path,limit:Long) { response(uri).body().use { input->target.outputStream().use { out->val buffer=ByteArray(65536);var total=0L;while(true){val n=input.read(buffer);if(n<0)break;total+=n;require(total<=limit) { "업데이트 파일 크기 초과" };out.write(buffer,0,n)};require(total==limit) } } }
 }
 data class UpdatePreference(val enabled:Boolean)
-data class UpdateSelection(val version:String,val allowPrerelease:Boolean=false)
+data class UpdateSelection(val version:String,val allowPrerelease:Boolean=false,val allowRollback:Boolean=false)
 @RestController
 @RequestMapping("/api/admin/updates")
 class UpdateApi(private val updates:AppUpdates) {
     @GetMapping fun status()=updates.status()
     @GetMapping("/releases") fun releases()=updates.releases()
-    @PostMapping("/install") fun install(@RequestBody body:UpdateSelection,req:HttpServletRequest):Map<String,Any?> {freshDesktop(req);return updates.install(body.version,body.allowPrerelease)}
+    @PostMapping("/install") fun install(@RequestBody body:UpdateSelection,req:HttpServletRequest):Map<String,Any?> {freshDesktop(req);return updates.install(body.version,body.allowPrerelease,body.allowRollback)}
     @PutMapping fun enabled(@RequestBody body:UpdatePreference,req:HttpServletRequest):Map<String,Any?> { freshDesktop(req);updates.enabled(body.enabled);return updates.status() }
     @PostMapping("/check") fun check(req:HttpServletRequest):Map<String,Any?> { freshDesktop(req);return updates.checkNow() }
 }

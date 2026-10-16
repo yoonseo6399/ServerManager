@@ -197,6 +197,7 @@ class ActivationGuard(private val home:Path) {
     private fun rollback(p:Pending,reason:String):Outcome {
         atomic(home.resolve("failed-update-version.txt"),p.to)
         atomic(updates.resolve("active.txt"),p.from)
+        if(updates.resolve("rollback-active.txt").exists())atomic(updates.resolve("rollback-active.txt"),p.from)
         updates.resolve("pending.txt").deleteIfExists();pending.deleteIfExists()
         return Outcome.RolledBack(p.to,p.from,reason)
     }
@@ -208,11 +209,12 @@ object UpdatePackageVerifier {
         data class Ok(val version:String,val minHost:Int,val maxHost:Int,val hostProtocol:Int):Result
         data class Rejected(val reason:String):Result
     }
-    fun verify(manifest:ByteArray,signature:ByteArray,jar:Path,key:ByteArray,expectedVersion:String,currentVersion:String):Result {
+    fun verify(manifest:ByteArray,signature:ByteArray,jar:Path,key:ByteArray,expectedVersion:String,currentVersion:String,allowRollback:Boolean=false):Result {
         val props=try {SignedUpdates.manifest(manifest,signature,key)} catch(e:Exception){return Result.Rejected("SIGNATURE_INVALID")}
         val version=props.getProperty("version")
         if(version!=expectedVersion)return Result.Rejected("VERSION_MISMATCH")
-        if(runCatching {SignedUpdates.compare(version,currentVersion)}.getOrDefault(0)<=0)return Result.Rejected("NOT_NEWER")
+        val comparison=runCatching {SignedUpdates.compare(version,currentVersion)}.getOrDefault(0)
+        if(comparison<=0 && !(comparison<0 && allowRollback && UpdateRollback.stableTarget(version)))return Result.Rejected("NOT_NEWER")
         if(!SignedUpdates.validFile(jar,props))return Result.Rejected("PACKAGE_HASH_MISMATCH")
         val minHost=props.getProperty("controller.minHost","1").toIntOrNull() ?: return Result.Rejected("MANIFEST_INVALID")
         val maxHost=props.getProperty("controller.maxHost",minHost.toString()).toIntOrNull() ?: return Result.Rejected("MANIFEST_INVALID")

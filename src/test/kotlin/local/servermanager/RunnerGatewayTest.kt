@@ -79,6 +79,16 @@ class RunnerGatewayTest {
         assertTrue(gateway.requestUpdate("runner",true))
         val command=jacksonObjectMapper().readValue<RunnerMessage>((sent.single() as TextMessage).payload)
         assertEquals("update-request",command.type);assertEquals("PAUSE_TRANSFER",command.detail)
+        assertFails {gateway.requestUpdate("runner",false,"0.7.0-beta.2",true)}
+        `when`(registry.releaseSelectionSupported("runner")).thenReturn(true);`when`(registry.rollbackSupported("runner")).thenReturn(true)
+        sent.clear();assertTrue(gateway.requestUpdate("runner",false,"0.7.0-beta.2",true))
+        val beta=jacksonObjectMapper().readValue<RunnerMessage>((sent.single() as TextMessage).payload)
+        assertEquals("0.7.0-beta.2",beta.command);assertEquals("BETA_OK",beta.state)
+        sent.clear();assertTrue(gateway.requestUpdate("runner",false,"0.6.2",false,true))
+        val rollback=jacksonObjectMapper().readValue<RunnerMessage>((sent.single() as TextMessage).payload)
+        assertEquals("0.6.2",rollback.command);assertEquals("STABLE_ROLLBACK",rollback.state)
+        gateway.handleMessage(session,TextMessage(jacksonObjectMapper().writeValueAsString(RunnerMessage("update-capability",state="RELEASE_SELECTION_V1",detail="ROLLBACK_V1"))))
+        verify(registry).updateCapability("runner",true,true)
         gateway.handleMessage(session,TextMessage(jacksonObjectMapper().writeValueAsString(RunnerMessage("update-status",detail=jacksonObjectMapper().writeValueAsString(RunnerUpdateStatus("DOWNLOADING","0.4.5",5,10))))))
         verify(registry).updateStatus("runner",RunnerUpdateStatus("DOWNLOADING","0.4.5",5,10))
         `when`(registry.active("runner")).thenReturn(device.copy(version="0.4.3"));`when`(registry.remoteUpdateSupported("runner")).thenReturn(false);assertFails {gateway.requestUpdate("runner",false)}

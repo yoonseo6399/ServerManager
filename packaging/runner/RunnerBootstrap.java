@@ -21,8 +21,11 @@ public final class RunnerBootstrap {
   int[] x=parts(a),y=parts(b);for(int i=0;i<4;i++){int c=Integer.compare(x[i],y[i]);if(c!=0)return c;}return 0;
  }
  static int[] parts(String v){String[] s=v.split("-beta\\.");String[] c=s[0].split("\\.");return new int[]{Integer.parseInt(c[0]),Integer.parseInt(c[1]),Integer.parseInt(c[2]),s.length==2?Integer.parseInt(s[1]):Integer.MAX_VALUE};}
+ static boolean approvedRollback(String target,String current)throws Exception{return compare(target,current)<0 && compare(target,"0.6.0")>=0 && !target.contains("-beta.") && target.equals(text(updates.resolve("rollback-approved.txt"),""));}
+ static void activate(String version)throws Exception{atomic(updates.resolve("active.txt"),version);if(compare(version,bundled)<0)atomic(updates.resolve("rollback-active.txt"),version);else Files.deleteIfExists(updates.resolve("rollback-active.txt"));}
  static Path verified(String version)throws Exception{
-  if(compare(version,bundled)<=0)return packageHome.resolve("server-manager.jar");
+  if(version.equals(bundled))return packageHome.resolve("server-manager.jar");
+  if(compare(version,bundled)<0 && !version.equals(text(updates.resolve("rollback-active.txt"),"")) && !version.equals(text(updates.resolve("rollback-approved.txt"),"")))throw new SecurityException("Unapproved downgrade");
   Path dir=updates.resolve(version);byte[] manifest=Files.readAllBytes(dir.resolve("update.properties"));
   Signature verifier=Signature.getInstance("Ed25519");verifier.initVerify(KeyFactory.getInstance("Ed25519").generatePublic(new X509EncodedKeySpec(Files.readAllBytes(packageHome.resolve("update-public-key.der")))));verifier.update(manifest);
   if(!verifier.verify(Files.readAllBytes(dir.resolve("update.sig"))))throw new SecurityException("Runner update signature mismatch");
@@ -41,25 +44,26 @@ public final class RunnerBootstrap {
   try(FileChannel channel=FileChannel.open(home.resolve("runner.lock"),StandardOpenOption.CREATE,StandardOpenOption.WRITE);FileLock lock=channel.tryLock()){
    if(lock==null)throw new IllegalStateException("Runner is already active");
    Runtime.getRuntime().addShutdownHook(new Thread(()->{Process active=child;if(active!=null&&active.isAlive()){active.destroy();try{active.waitFor();}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}}}));
-   String active=text(updates.resolve("active.txt"),bundled);if(compare(active,bundled)<0)active=bundled;
+   String active=text(updates.resolve("active.txt"),bundled);if(compare(active,bundled)<0 && !active.equals(text(updates.resolve("rollback-active.txt"),"")))active=bundled;
+   boolean rolledBack=false;
    for(;;){
-    Path jar;try{jar=verified(active);}catch(Exception failure){atomic(home.resolve("update-error.txt"),failure.getMessage());active=bundled;jar=verified(active);atomic(updates.resolve("active.txt"),active);}
+    Path jar;try{jar=verified(active);}catch(Exception failure){atomic(home.resolve("update-error.txt"),failure.getMessage());active=bundled;jar=verified(active);activate(active);}
     Path ready=home.resolve("ready-"+UUID.randomUUID());
     ProcessBuilder builder=new ProcessBuilder(System.getProperty("java.home")+"/bin/java","-jar",jar.toString(),"--runner").redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.appendTo(home.resolve("logs/runner.log").toFile()));
-    builder.environment().put("RUNNER_PACKAGE_HOME",packageHome.toString());builder.environment().put("SERVER_MANAGER_RUNNER_HOME",home.toString());builder.environment().put("SERVER_MANAGER_RUNNER_READY_FILE",ready.toString());
+    builder.environment().put("RUNNER_BOOTSTRAP_PROTOCOL","2");builder.environment().put("RUNNER_PACKAGE_HOME",packageHome.toString());builder.environment().put("SERVER_MANAGER_RUNNER_HOME",home.toString());builder.environment().put("SERVER_MANAGER_RUNNER_READY_FILE",ready.toString());
     child=builder.start();boolean healthy=false;
     for(int i=0;i<120&&child.isAlive()&&!Files.exists(ready);i++)Thread.sleep(500);
     healthy=Files.exists(ready);Files.deleteIfExists(ready);
     if(healthy){Thread.sleep(3000);healthy=child.isAlive();}
     if(!healthy){
      if(child.isAlive()){child.destroy();if(!child.waitFor(30,TimeUnit.SECONDS))throw new IllegalStateException("Runner did not stop; refusing to replace it");}
-     if(compare(active,bundled)>0){atomic(home.resolve("failed-update-version.txt"),active);active=text(updates.resolve("previous.txt"),bundled);atomic(updates.resolve("active.txt"),active);continue;}
+     if(!active.equals(bundled)&&!rolledBack){atomic(home.resolve("failed-update-version.txt"),active);active=text(updates.resolve("previous.txt"),bundled);activate(active);rolledBack=true;continue;}
      throw new IllegalStateException("Bundled runner did not start");
     }
     int exit=child.waitFor();child=null;
     if(exit==75){
      String pending=text(updates.resolve("pending.txt"),active);
-     if(compare(pending,active)>0){verified(pending);atomic(updates.resolve("previous.txt"),active);active=pending;atomic(updates.resolve("active.txt"),active);Files.deleteIfExists(updates.resolve("pending.txt"));}
+     if(compare(pending,active)>0 || approvedRollback(pending,active)){verified(pending);atomic(updates.resolve("previous.txt"),active);active=pending;activate(active);Files.deleteIfExists(updates.resolve("pending.txt"));Files.deleteIfExists(updates.resolve("rollback-approved.txt"));rolledBack=false;}
     }else Thread.sleep(10000);
    }
   }
