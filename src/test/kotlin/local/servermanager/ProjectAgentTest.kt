@@ -135,7 +135,7 @@ class ProjectAgentTest {
         assertNull(loaded.preferences("guild","other").model)
         val command=DiscordProjectAgent.command();assertEquals("agent",command.name)
         val run=command.subcommands.single {it.name=="run"};assertFalse(run.options.single {it.name=="model"}.isRequired)
-        assertEquals(setOf("setting","channel","project","run","link","stop"),command.subcommands.map {it.name}.toSet());command.toData()
+        assertEquals(setOf("setting","channel","project","run","link","stop","context"),command.subcommands.map {it.name}.toSet());command.toData()
     }
     @Test fun `routing model receives only message and no past actor context`() {
         val (store,_,_)=setup();engine(store).use {e->assertTrue(e.route("프로젝트 만들어줘",ProjectAgentInference {m,think,_->assertEquals(2,m.size);assertFalse(think);"""{"addressed":true}"""}));assertFalse(e.route("친구야 안녕",ProjectAgentInference {_,_,_->"invalid"}))}

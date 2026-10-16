@@ -15,7 +15,7 @@ class ProjectAgentLiveTest {
     @Test fun `real Qwen streams Thinking separately from final answer`() {
         val llm=LocalLlm();val model=System.getenv("PROJECT_AGENT_LIVE_MODEL") ?: "14b";var thinking=""
         try {
-            val answer=llm.conversation(model,listOf(ProjectAgentMessage("system","Return ONLY JSON {\"message\":\"안녕하세요\",\"tool\":null}. No tools."),ProjectAgentMessage("user","Say hello.")),true){thinking=it}
+            val answer=llm.conversation(model,listOf(ProjectAgentMessage("system","Return ONLY JSON {\"message\":\"안녕하세요\",\"tool\":null}. No tools."),ProjectAgentMessage("user","Say hello.")),true){thinking=it.thinking}
             assertFalse(answer.limited);assertTrue(thinking.isNotBlank());assertTrue(answer.thinking.isNotBlank());assertTrue(answer.text.contains("안녕하세요"))
             println("LIVE-THINKING-PROOF model=$model seconds=${answer.seconds} thinkingStreamed=true finalAnswerSeparate=true")
         }finally {llm.unload(LocalLlm.tag(model))}

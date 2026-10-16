@@ -268,15 +268,36 @@ class RunnerGatewayTest {
             assertFailsWith<IllegalArgumentException> {gateway.llmAdmin("runner","format")}
             val messages=listOf(ProjectAgentMessage("system","actor"),ProjectAgentMessage("user","hello"))
             assertFailsWith<IllegalStateException> {gateway.llmConversation("14b",messages,true,"runner") {}}
-            deliver(RunnerMessage("llm-capability",state="OLLAMA_AGENT_V2"));sent.clear();var thinking=""
-            val conversation=java.util.concurrent.CompletableFuture.supplyAsync {gateway.llmConversation("14b",messages,true,"runner") {thinking=it}}
+            deliver(RunnerMessage("llm-capability",state="OLLAMA_AGENT_V2"))
+            assertFailsWith<IllegalStateException> {gateway.llmConversation("14b",messages,true,"runner") {}}
+            deliver(RunnerMessage("llm-capability",state="OLLAMA_AGENT_V3"));sent.clear();var thinking=""
+            val conversation=java.util.concurrent.CompletableFuture.supplyAsync {gateway.llmConversation("14b",messages,true,"runner") {thinking=it.thinking}}
             val until=System.nanoTime()+2_000_000_000L;while(sent.isEmpty() && System.nanoTime()<until)Thread.sleep(2)
             val agentRequest=mapper.readValue<RunnerMessage>((sent.single() as TextMessage).payload)
             assertEquals("agent:14b",agentRequest.state);assertEquals("THINK",agentRequest.detail);assertEquals(2,mapper.readTree(agentRequest.command).size())
             deliver(RunnerMessage("llm-thinking",token="wrong",detail="not accepted"));assertEquals("",thinking)
             deliver(RunnerMessage("llm-thinking",token=agentRequest.token,detail="checking"));assertEquals("checking",thinking)
+            deliver(RunnerMessage("llm-progress",token=agentRequest.token,detail=mapper.writeValueAsString(QwenProgress("streamed thought","partial answer"))));assertEquals("streamed thought",thinking)
             deliver(RunnerMessage("llm-result",state="OK",token=agentRequest.token,detail="""{"text":"done","limited":false,"seconds":1.0,"tokens":5,"thinking":"checking"}"""))
             assertEquals("done",conversation.get(2,java.util.concurrent.TimeUnit.SECONDS)!!.answer.text)
         } finally {gateway.closeDatagrams()}
+    }
+    @Test fun `qwen interruption sends cancellation for the exact remote request and ignores late tokens`() {
+        val manager=mock(ServerManager::class.java);val registry=mock(RunnerRegistry::class.java)
+        `when`(registry.active("runner")).thenReturn(RunnerDevice("runner","fixture","MAC","owner","key","now"));`when`(registry.online("runner")).thenReturn(true)
+        val session=mock(WebSocketSession::class.java);`when`(session.attributes).thenReturn(mutableMapOf<String,Any>("runnerId" to "runner"));`when`(session.isOpen).thenReturn(true)
+        val mapper=jacksonObjectMapper();val sent=java.util.concurrent.CopyOnWriteArrayList<RunnerMessage>()
+        doAnswer {sent.add(mapper.readValue((it.arguments[0] as TextMessage).payload));null}.`when`(session).sendMessage(any())
+        val gateway=RunnerGateway(registry,manager);gateway.afterConnectionEstablished(session)
+        gateway.handleMessage(session,TextMessage(mapper.writeValueAsString(RunnerMessage("llm-capability",state="OLLAMA_AGENT_V3"))))
+        val frames=java.util.concurrent.CopyOnWriteArrayList<QwenProgress>();val stopped=java.util.concurrent.CountDownLatch(1)
+        val thread=Thread {try{gateway.llmConversation("14b",listOf(ProjectAgentMessage("user","hello")),true,"runner",frames::add)}catch(_:Exception){stopped.countDown()}}
+        try {
+            thread.start();val deadline=System.nanoTime()+2_000_000_000;while(sent.none {it.type=="llm-request"} && System.nanoTime()<deadline)Thread.sleep(2)
+            val request=sent.single {it.type=="llm-request"};thread.interrupt();assertTrue(stopped.await(2,java.util.concurrent.TimeUnit.SECONDS));thread.join(2000)
+            assertEquals(request.token,sent.single {it.type=="llm-cancel"}.token)
+            gateway.handleMessage(session,TextMessage(mapper.writeValueAsString(RunnerMessage("llm-progress",token=request.token,detail=mapper.writeValueAsString(QwenProgress("late","late"))))))
+            assertTrue(frames.isEmpty())
+        }finally{thread.interrupt();thread.join(1000);gateway.closeDatagrams()}
     }
 }
