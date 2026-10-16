@@ -206,7 +206,10 @@ object HostLifecycle {
             else (handle.info().commandLine().orElse("")+handle.info().arguments().map {it.joinToString(" ")}.orElse("")).contains("--game-host")
         if(!identified)return "NOT_A_HOST_PROCESS"
         val client=try {GameHostClient.connect(home,"host-replacement",retryMillis=1000)} catch(e:GameHostRejected){return e.reason} catch(_:Exception){return "HOST_UNREACHABLE"}
-        try {if(!client.prepareReplacement())return "HOST_NOT_PREPARED"} catch(e:GameHostRejected){return e.reason} catch(_:Exception){return "HOST_UNREACHABLE"} finally {client.close()}
+        try {
+            val state=client.prepareReplacementState()
+            if(!state.ready){client.cancelReplacement();return if(state.state=="DRAINING")"RELAY_STREAMS_ACTIVE" else "HOST_NOT_PREPARED"}
+        } catch(e:GameHostRejected){return e.reason} catch(_:Exception){return "HOST_UNREACHABLE"} finally {client.close()}
         handle.destroy()
         if(!runCatching {handle.onExit().get(10,java.util.concurrent.TimeUnit.SECONDS)}.isSuccess){handle.destroyForcibly()}
         runCatching {home.resolve("host/endpoint.json").deleteIfExists()}
