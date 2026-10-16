@@ -1,5 +1,9 @@
 # Development continuation
 
+## 2026-10-16 — 0.7.0-beta.2 Qwen + 업데이트/롤백 통합
+
+feat/qwen-project-agent와 0.6.2 실행기 선택·승인 롤백을 베타 통합했다. RunnerMain의 세션 기능 보고 충돌은 RELEASE_SELECTION_V1/ROLLBACK_V1과 OLLAMA_AGENT_V2를 모두 유지하도록 해결했다. 사용자 지시에 따라 단독 구현하며 전체 테스트·다른 OS는 생략한다. Qwen 세부 동작과 제한은 docs/qwen-project-agent.md, 업데이트/설치판 요구 사항은 docs/runner-release-updates.md 참조. 베타는 안정판 main에 병합하지 않는다.
+
 ## 2026-10-16 — 0.6.2 실행기 선택 업데이트·명시적 안정판 롤백
 
 feat/runner-release-picker를 단독 통합했다. 실행기별 릴리즈 목록은 실행기 현재 버전을 기준으로 계산하고 명시적 베타 요청은 자동 채널 필터와 구분한다. 연결별 기능 협상, 소유자/등록자·최근 패스키 확인, 정확한 대상 재검증과 상태·로그를 제공한다. 구형 실행기에는 최초 안정판 원격 업데이트를 안내한다.

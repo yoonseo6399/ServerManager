@@ -1,5 +1,7 @@
 # 루오노타르 메인·서브에이전트 (실험용)
 
+> 0.7.0 베타에서 `/agent`는 [Qwen 프로젝트 에이전트](qwen-project-agent.md)입니다. 아래 클라우드 예시의 `/agent`는 `/cloud-agent`로 사용하세요. 아래의 `/local-llm`은 `/agent run`과 프로젝트 채널로 대체되었으며, 단발 대화·도구 없음·Thinking 기본 false 설명은 새 모드에 적용되지 않습니다.
+
 `/agent`는 OpenAI Responses API를 사용하는 GPT 메인 작업이다. 메인은 파일을 조사하고 직접 수정하거나 Gemini 서브 작업을 분배한다. `/sub-agent`는 기존 Gemini 작업을 직접 실행하는 명령이다. 기존 Discord 토큰과 최고 관리자 역할 설정을 사용한다.
 
 ## 설정과 사용
