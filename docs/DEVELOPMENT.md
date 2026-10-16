@@ -1,5 +1,11 @@
 # Development continuation
 
+## 2026-10-16 — 0.7.0-beta.1 Qwen 프로젝트 에이전트
+
+feat/qwen-project-agent를 단독 구현·통합했다. `/agent`는 Qwen, 기존 클라우드는 `/cloud-agent`로 구분한다. 개인 모델·Thinking·명시적/자동 승인, 비공개 프로젝트 채널과 제한된 대화 문맥, 파일·검색·명령·빌드·테스트·Git·프로젝트 생성, 별도 감시 Qwen, Discord 요청자 이름·ID 전달을 추가했다. 도구는 관리 앱 OS 사용자로 실행하며 추론 실행기와 구분한다. 프로젝트 외부·범위 불명 작업은 자동 모드에서도 사람 승인이 필요하다. OS 샌드박스는 아니다.
+
+관련 자동 테스트 32개, 실제 14B 임시 파일 수정/독립 검토/승인 및 Thinking 스트림, 프런트엔드·bootJar 빌드 통과. 사용자 지시로 전체 테스트·다른 OS 검증은 생략했다. 실제 Discord 상호작용과 30B 성능은 미검증이다. 상세 사용법·제한은 docs/qwen-project-agent.md. 운영 앱 자동 교체는 하지 않는다.
+
 ## 2026-10-16 — 0.6.0 직접 중계·상주 게임 서비스·Qwen 비서 통합
 
 0.5.1의 Qwen 일반 대화·실행기 선택을 유지하고, 설정 메뉴 분리·Gemini 메인 제공자·개인 Google 읽기 전용 연결·소유자 관리 로그·직접 TCP 중계·상주 게임 서비스·제한된 파일 비서를 통합했다. Claude 직접 중계 기반에 Mac launchd 수명, packaged JAR 탐지, 건강 신호 순서, 중계 제어 재접속 및 파일 접근 검증 보완을 포함한다. 상세 변경·검증 인계는 각 `docs/dev-notes/feat-*.md`, 최종 통합 기록은 `docs/dev-notes/release-0.6.0.md`에 있다.
