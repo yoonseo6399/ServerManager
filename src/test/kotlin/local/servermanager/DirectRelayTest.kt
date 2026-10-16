@@ -168,9 +168,15 @@ class DirectRelayTest {
         sent.get(3,java.util.concurrent.TimeUnit.SECONDS)
     }
     @Test fun `idle read exception closes handed off player and releases stream`() {
-        val game=EchoGame().track();val hub=DirectRelayHub(relayId,secret,playerReadTimeoutMillis=100).track().also {it.listen(0,0,"127.0.0.1");it.applyPolicy(policy())}
+        val game=EchoGame().track();val hub=DirectRelayHub(relayId,secret,playerReadTimeoutMillis=500).track().also {it.listen(0,0,"127.0.0.1");it.applyPolicy(policy())}
         val agent=agentFor(hub,game);connectedAgent(hub,agent)
-        player(hub).use {p->assertTrue(readAll(p,6).startsWith("echo:"));await("timeout cleans stream"){hub.streamCount()==0};assertEquals(-1,p.getInputStream().read())}
+        player(hub).use {p->
+            // TCP can split handshake and payload into separate echo responses. Drain all pending bytes
+            // until the remote EOF; a leaked handed-off socket fails with the bounded socket timeout.
+            val received=p.getInputStream().readBytes().toString(Charsets.UTF_8)
+            assertTrue(received.startsWith("echo:"));assertTrue(received.contains("hello"))
+            await("timeout cleans stream"){hub.streamCount()==0 && agent.streamCount()==0}
+        }
     }
     @Test fun `tampered ciphertext frames are rejected by the secure channel`() {
         val server=ServerSocket(0).track();val a=Socket("127.0.0.1",server.localPort).track();val b=server.accept().track()

@@ -30,3 +30,6 @@
 - 기존 제품 제약: shared/direct 게임 네트워크는 등록 실행기를 필요로 한다. runnerId 없는 관리 Mac 로컬 게임을 직접 중계 대상으로 광고하지 않는다. 같은 Mac에서도 실행기를 등록하면 해당 경로를 사용한다. 독립 로컬 게임의 관리 앱 업데이트 보호는 별도로 검증했다.
 - 실제 외부 컴퓨터·공유기·DNS·인터넷 플레이어 연결은 미검증이다. 실제 Minecraft나 운영 앱/계정/데이터를 조작하지 않았다. 영구 launchd 항목 설치와 릴리즈 게시 없음.
 - 통합 담당은 본 브랜치를 release에 merge. MANAGER_APP UI 계약은 settings_ui 담당에게 전달했다. build.gradle.kts의 test dependsOn bootJar 한 줄은 Qwen JNA 의존성 추가와 함께 보존한다.
+
+## 최종 통합 회귀 후 보정
+- 통합0.6.0 실행에서 idle-cleanup 테스트만 expected -1 / actual101('e')로 실패했다. 소켓 누수 결함이 아니라 handshake echo 뒤 별도 payload echo가 남을 수 있는 정상 TCP 분할을 테스트가 무시했다. EOF까지 남은 응답을 bounded timeout 안에서 모두 읽고 내용과 양쪽 stream 해제를 확인하도록 수정했다. 시간 제한을500ms로 두어 loaded CI의100ms 의존성도 줄였다. 제품 런타임 변경 없음.
