@@ -46,7 +46,7 @@ class RunnerFolders(private val home:Path) {
         checkWorldStopped(id)
         recover(id)
         require(base.resolve("server.properties").isRegularFile()) { "server.properties가 있는 실제 마크 서버 폴더를 선택하세요" }
-        val (files,dirs)=FileInventory.collect(base,onProgress) // Reject links/special files before any pull, replacement or start.
+        val (files,dirs)=FileInventory.collectCached(base,onProgress=onProgress) // Reject links/special files before any pull, replacement or start.
         if(!initial(id)) check(config(id)!!.getProperty("fingerprint")==fingerprint(RunnerFileManifest(files,dirs))) { "원래 폴더에 외부 변경이 있습니다. 자동 덮어쓰기를 중단했습니다. 실행기 설치 창에서 폴더를 다시 등록하면 로컬 파일을 원본으로 사용합니다" }
     }
     fun checkWorldStopped(id:String) {

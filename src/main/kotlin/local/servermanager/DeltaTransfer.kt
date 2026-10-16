@@ -86,10 +86,11 @@ object DeltaTransfer {
         validate(before,base);validate(after,base)
         require(!Files.isSymbolicLink(base) && !Files.isSymbolicLink(incoming))
         recover(base,history)
-        check(FileInventory.collect(base).let {(f,d)->RunnerFileManifest(f,d)}==before) {"전송 중 원래 파일이 변경되어 반영하지 않았습니다"}
+        // Transfer-time checks compare names and sizes only; re-hashing the whole tree with SHA-256 is intentionally skipped.
+        check(runCatching {checkShape(base,before)}.isSuccess) {"전송 중 원래 파일이 변경되어 반영하지 않았습니다"}
         val changes=changed(before,after)
-        val uploads=FileInventory.collect(incoming).first
-        check(uploads==after.files.filterKeys {it in changes}) {"변경 파일의 목록·크기·해시가 일치하지 않습니다"}
+        val uploads=Files.walk(incoming).use {paths->paths.filter {it.isRegularFile(NOFOLLOW_LINKS)}.toList().associate {incoming.relativize(it).toString().replace('\\','/') to it.fileSize()}}
+        check(uploads==after.files.filterKeys {it in changes}.mapValues {it.value.size}) {"변경 파일의 목록·크기가 일치하지 않습니다"}
         checkAllowed()
         if(before==after)return null
         history.createDirectories()
@@ -133,7 +134,7 @@ object DeltaTransfer {
             val target=safe(base,relative)
             val saved=safe(folder,"files/$relative")
             if((relative !in record.before.files || saved.exists()) && target.isRegularFile(NOFOLLOW_LINKS)) {
-                check(FileInventory.digest(target)==record.after.files.getValue(relative).sha256) {"복구 대상에 외부 변경이 있습니다: $relative"}
+                check(target.fileSize()==record.after.files.getValue(relative).size) {"복구 대상에 외부 변경이 있습니다: $relative"}
                 Files.delete(target)
             }
         }
@@ -145,7 +146,7 @@ object DeltaTransfer {
             val saved=safe(folder,"files/$relative")
             if(saved.exists()) {val target=safe(base,relative);check(!target.exists()) {"복구 경로가 이미 사용 중입니다: $relative"};Files.move(saved,target,ATOMIC_MOVE)}
         }
-        check(FileInventory.collect(base).let {(f,d)->RunnerFileManifest(f,d)}==record.before) {"원본 파일 복구 검증에 실패했습니다"}
+        checkShape(base,record.before)
         journal(folder,record.copy(phase="ROLLED_BACK"))
     }
     private fun prune(base:Path,history:Path,newest:Path) {

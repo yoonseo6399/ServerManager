@@ -3,12 +3,12 @@ import {CheckCircle2,AlertTriangle,Loader2,FolderCheck} from 'lucide-react';
 import {api,ApiError} from './http';
 import {useAuth} from './Auth';
 
-export type FolderProgress={phase:string;files:number;bytes:number;totalFiles:number;totalBytes:number;message:string;direction?:string;bytesPerSecond?:number|null;remainingSeconds?:number|null;elapsedSeconds?:number|null};
+export type FolderProgress={phase:string;files:number;bytes:number;totalFiles:number;totalBytes:number;message:string;direction?:string;bytesPerSecond?:number|null;remainingSeconds?:number|null;elapsedSeconds?:number|null;step?:string;stepNo?:number;stepTotal?:number;reused?:number;hashed?:number};
 export type FolderSource={state:string;path:string};
 const size=(bytes:number)=>bytes>=1024**3?(bytes/1024**3).toFixed(2)+' GiB':(bytes/1024**2).toFixed(1)+' MiB';
 const rate=(bytes:number)=>bytes<1024**2?(bytes/1024).toFixed(1)+' KiB/s':size(bytes)+'/s';
 const stages=['SCANNING','UPLOADING','VERIFYING'];
-const labels:Record<string,string>={SCANNING:'파일·해시 검사 중',UPLOADING:'변경 파일 전송 중',VERIFYING:'검증·반영 중',COMPLETE:'전송 완료',FAILED:'전송 실패',RETRYING:'연결 복구 후 이어받기 대기'};
+const labels:Record<string,string>={SCANNING:'전송 준비 중',UPLOADING:'변경 파일 전송 중',VERIFYING:'검증·반영 중',COMPLETE:'전송 완료',FAILED:'전송 실패',RETRYING:'연결 복구 후 이어받기 대기'};
 export const TransferStatus=memo(function TransferStatus({value}:{value:FolderProgress}){
  const [dismissed,setDismissed]=useState(false);
  // Polling returns a new object every two seconds. Only phase changes may reset this timer.
@@ -19,11 +19,12 @@ export const TransferStatus=memo(function TransferStatus({value}:{value:FolderPr
  return <div className={'transfer-card '+(complete?'is-complete':failed?'is-failed':'is-working')} role="status" aria-live="polite" aria-label="서버 파일 전송 상태" aria-busy={working}>
   <div className="transfer-heading"><span className="transfer-icon"><Icon size={20} className={working?'transfer-spinner':''}/></span><div><strong>{labels[value.phase]||'전송 상태 확인 중'}</strong><div className="transfer-direction">{value.direction==='TO_RUNNER'?'관리 서버':'실행기'} <span aria-hidden="true">→</span> {value.direction==='TO_RUNNER'?'실행기':'관리 서버'}</div></div>{value.phase==='UPLOADING'&&value.totalBytes>0&&<span className="transfer-percent">{Math.min(100,value.bytes/value.totalBytes*100).toFixed(1)}%</span>}</div>
   {working&&<>
-   <p className="transfer-counts">{value.phase==='SCANNING'?`${value.files.toLocaleString()}개 검사 · ${size(value.bytes)} 확인`:`${value.files.toLocaleString()} / ${value.totalFiles.toLocaleString()}개 · ${size(value.bytes)} / ${size(value.totalBytes)}`}</p>
+   {value.phase==='SCANNING'&&!!value.stepTotal&&<p className="transfer-prep" aria-label="전송 준비 단계"><strong>준비 {value.stepNo}/{value.stepTotal}단계</strong> · {value.step}</p>}
+   <p className="transfer-counts">{value.phase==='SCANNING'?`${value.files.toLocaleString()}개 확인 · ${size(value.bytes)}`+((value.reused||value.hashed)?` · 이전 결과 재사용 ${(value.reused||0).toLocaleString()}개 · 새로 읽음 ${(value.hashed||0).toLocaleString()}개`:''):`${value.files.toLocaleString()} / ${value.totalFiles.toLocaleString()}개 · ${size(value.bytes)} / ${size(value.totalBytes)}`}</p>
    {value.totalBytes>0&&value.phase==='UPLOADING'&&<progress aria-label="서버 파일 전송 진행률" max={value.totalBytes} value={value.bytes}/>}
-   <ol className="transfer-stages" aria-label="파일 전송 단계">{['파일 검사','변경 파일 전송','검증·반영'].map((label,index)=><li key={label} className={index<=stages.indexOf(value.phase)?'reached':''} aria-current={index===stages.indexOf(value.phase)?'step':undefined}><span/>{label}</li>)}</ol>
+   <ol className="transfer-stages" aria-label="파일 전송 단계">{['파일 목록 준비','변경 파일 전송','검증·반영'].map((label,index)=><li key={label} className={index<=stages.indexOf(value.phase)?'reached':''} aria-current={index===stages.indexOf(value.phase)?'step':undefined}><span/>{label}</li>)}</ol>
   </>}
-  {working&&<div className="transfer-estimates" aria-label="전송 속도와 예상 시간"><span>전송 속도 <strong>{value.phase==='RETRYING'?'연결 대기':value.phase==='VERIFYING'?'전송 완료':value.phase==='SCANNING'?'전송 준비 중':value.bytesPerSecond==null?'계산 중':rate(value.bytesPerSecond)}</strong></span><span>예상 남은 시간 <strong>{value.phase==='RETRYING'?'연결 대기':value.phase==='VERIFYING'?'검증·반영 중':value.phase==='SCANNING'?'파일 검사 중':value.remainingSeconds==null?'계산 중':value.remainingSeconds>=3600?`${Math.floor(value.remainingSeconds/3600)}시간 ${Math.floor(value.remainingSeconds%3600/60)}분`:value.remainingSeconds>=60?`${Math.floor(value.remainingSeconds/60)}분 ${value.remainingSeconds%60}초`:`${value.remainingSeconds}초`}</strong></span><small>전송 기준 · 검증·반영 시간은 별도입니다.</small></div>}
+  {working&&<div className="transfer-estimates" aria-label="전송 속도와 예상 시간"><span>전송 속도 <strong>{value.phase==='RETRYING'?'연결 대기':value.phase==='VERIFYING'?'전송 완료':value.phase==='SCANNING'?(value.step||'전송 준비 중'):value.bytesPerSecond==null?'계산 중':rate(value.bytesPerSecond)}</strong></span><span>예상 남은 시간 <strong>{value.phase==='RETRYING'?'연결 대기':value.phase==='VERIFYING'?'검증·반영 중':value.phase==='SCANNING'?'파일 검사 중':value.remainingSeconds==null?'계산 중':value.remainingSeconds>=3600?`${Math.floor(value.remainingSeconds/3600)}시간 ${Math.floor(value.remainingSeconds%3600/60)}분`:value.remainingSeconds>=60?`${Math.floor(value.remainingSeconds/60)}분 ${value.remainingSeconds%60}초`:`${value.remainingSeconds}초`}</strong></span><small>전송 기준 · 검증·반영 시간은 별도입니다.</small></div>}
   {value.message&&<p className="transfer-message">{value.message}</p>}
  </div>;
 });

@@ -111,14 +111,14 @@ class RunnerTransferTest {
         assertEquals(listOf("first","second"),downloaded.map {it.bytes.toString(Charsets.UTF_8)})
         assertFails {restarted.batchFiles("instance",listOf("../escape"))}
     }
-    @Test fun `bad hash cannot replace central server data`() {
+    @Test fun `bad size cannot replace central server data`() {
         val (transfer,base,manager)=fixture()
         base.resolve("world.dat").writeText("original")
         val worker=temp.resolve("worker").also { it.createDirectories() }
         worker.resolve("world.dat").writeText("changed")
         val (files,dirs)=FileInventory.collect(worker)
         val plan=transfer.begin("runner","instance",RunnerFileManifest(files,dirs))
-        transfer.upload("runner","instance",plan.transferId,"world.dat",0,"corrupt".toByteArray())
+        transfer.upload("runner","instance",plan.transferId,"world.dat",0,"bad".toByteArray())
         assertFailsWith<IllegalStateException> { transfer.commit("runner","instance",plan.transferId) }
         assertEquals("original",base.resolve("world.dat").readText())
         verify(manager,never()).remoteCommitted("instance","runner")
@@ -192,7 +192,7 @@ class RunnerTransferTest {
         transfer.upload("runner","instance",first.transferId,"good",0,"good".toByteArray())
         transfer.upload("runner","instance",first.transferId,"bad",0,"original".toByteArray())
         transfer.upload("runner","instance",first.transferId,"part",0,"12".toByteArray())
-        val cache=temp.resolve("instance/runner-transfer/${first.transferId}");cache.resolve("bad").writeText("tampered")
+        val cache=temp.resolve("instance/runner-transfer/${first.transferId}");cache.resolve("bad").writeText("tampered!")
         val resumed=RunnerTransfer(manager,registry).begin("runner","instance",manifest)
         assertEquals(setOf("bad","part"),resumed.changedFiles);assertTrue(resumed.offsets.isEmpty())
         assertEquals(4L,resumed.completedBytes);assertEquals(1,resumed.completedFiles)

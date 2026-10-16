@@ -28,3 +28,4 @@ aside{background:#172026;border-right-color:#2b373d}.workspace{border-radius:10p
 @media(max-width:640px){.log-filter-settings .filter-fields{grid-template-columns:1fr}.log-filter-settings{padding:14px}.log-filter-settings input,.log-filter-settings select{max-width:100%}}
 
 .transfer-estimates{display:flex;flex-wrap:wrap;gap:14px 28px;margin:16px 0;line-height:1.7;color:#9eb4a6}.transfer-estimates strong{display:inline-block;margin-left:9px;color:#d4e6db;font-variant-numeric:tabular-nums}
+.transfer-card .transfer-prep{margin:14px 0 0;color:#b7dfc7;font-size:12.5px}.transfer-card .transfer-prep strong{color:#e3f3e9}

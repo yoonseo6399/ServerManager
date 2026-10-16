@@ -20,7 +20,37 @@ object FileInventory {
         }
         return hash.digest().joinToString("") { "%02x".format(it) }
     }
-    fun collect(base:Path,onProgress:(Int,Long)->Unit={_,_->}):Pair<Map<String,CloudFile>,Set<String>> {
+    private data class Stamp(val size:Long,val modified:java.nio.file.attribute.FileTime,val key:String,val changed:String)
+    private val hashCache=java.util.concurrent.ConcurrentHashMap<String,Pair<Stamp,String>>()
+    private const val CACHE_LIMIT=500_000
+    /** A file counts as unchanged only when size, nanosecond mtime, inode and (where available) ctime all match the stamp taken before hashing. */
+    private fun stamp(path:Path):Stamp {
+        val a=Files.readAttributes(path,java.nio.file.attribute.BasicFileAttributes::class.java,java.nio.file.LinkOption.NOFOLLOW_LINKS)
+        val changed=if(path.fileSystem.supportedFileAttributeViews().contains("unix"))Files.getAttribute(path,"unix:ctime",java.nio.file.LinkOption.NOFOLLOW_LINKS).toString() else a.creationTime().toString()
+        return Stamp(a.size(),a.lastModifiedTime(),a.fileKey()?.toString() ?: "",changed)
+    }
+    /**
+     * Digest for scans only. Reuses the previous hash of an untouched file so a restart/mod toggle does not re-read the whole world.
+     * Files modified within the last two seconds are never cached (racy-mtime guard); integrity checks keep using [digest].
+     */
+    /** How many files of one scan reused an earlier hash and how many had to be read. */
+    class ScanStats {val reused=java.util.concurrent.atomic.AtomicInteger();val hashed=java.util.concurrent.atomic.AtomicInteger()}
+    fun cachedDigest(path:Path,stats:ScanStats?=null):String {
+        val before=stamp(path);val key=path.toAbsolutePath().normalize().toString()
+        hashCache[key]?.let {(old,sha)->if(old==before){stats?.reused?.incrementAndGet();return sha}}
+        stats?.hashed?.incrementAndGet()
+        val sha=digest(path)
+        val after=stamp(path)
+        if(before==after && System.currentTimeMillis()-after.modified.toMillis()>2000) {
+            if(hashCache.size>=CACHE_LIMIT)hashCache.clear()
+            hashCache[key]=after to sha
+        } else hashCache.remove(key)
+        return sha
+    }
+    /** Same walk and safety checks as [collect], but untouched files are not hashed again. Use only for scans, never for post-transfer verification. */
+    fun collectCached(base:Path,stats:ScanStats?=null,onProgress:(Int,Long)->Unit={_,_->}):Pair<Map<String,CloudFile>,Set<String>> = walk(base,onProgress) {cachedDigest(it,stats)}
+    fun collect(base:Path,onProgress:(Int,Long)->Unit={_,_->}):Pair<Map<String,CloudFile>,Set<String>> = walk(base,onProgress,::digest)
+    private fun walk(base:Path,onProgress:(Int,Long)->Unit,hash:(Path)->String):Pair<Map<String,CloudFile>,Set<String>> {
         val files=linkedMapOf<String,CloudFile>()
         val dirs=linkedSetOf<String>()
         var bytes=0L
@@ -30,7 +60,7 @@ object FileInventory {
             val relative=base.relativize(path).toString().replace('\\','/')
             safePath(base,relative)
             if(path.isDirectory()) dirs.add(relative)
-            else if(path.isRegularFile()) {val size=path.fileSize();files[relative]=CloudFile(digest(path),size);bytes+=size;onProgress(files.size,bytes)}
+            else if(path.isRegularFile()) {val size=path.fileSize();files[relative]=CloudFile(hash(path),size);bytes+=size;onProgress(files.size,bytes)}
             else error("일반 파일이 아닌 항목이 있어 동기화를 중단했습니다")
         } }
         return files to dirs

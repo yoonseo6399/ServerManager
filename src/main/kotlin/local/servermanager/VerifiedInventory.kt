@@ -5,7 +5,7 @@ import java.util.concurrent.*
 
 /** Hashing never runs on an HTTP thread. Results are memory-only and revalidated before use. */
 class VerifiedInventory(
-    private val collect:(Path)->RunnerFileManifest={path->FileInventory.collect(path).let {(f,d)->RunnerFileManifest(f,d)}},
+    private val collect:(Path)->RunnerFileManifest={path->FileInventory.collectCached(path).let {(f,d)->RunnerFileManifest(f,d)}},
     private val maxEntries:Int=4,
     private val maxPaths:Int=200_000
 ):AutoCloseable {

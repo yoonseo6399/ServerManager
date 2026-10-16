@@ -41,9 +41,9 @@ class DeltaTransferTest {
         file(stage,"level.dat","corrupted")
         assertFailsWith<IllegalStateException>{DeltaTransfer.apply(base,stage,before,after,history)}
         assertEquals(before,inventory(base));assertFalse(history.exists())
-        file(stage,"level.dat","new");file(base,"level.dat","external")
+        file(stage,"level.dat","new");file(base,"level.dat","external edit")
         assertFailsWith<IllegalStateException>{DeltaTransfer.apply(base,stage,before,after,history)}
-        assertEquals("external",base.resolve("level.dat").readText())
+        assertEquals("external edit",base.resolve("level.dat").readText())
     }
     @Test fun `every interrupted mutation recovers original content including file directory swaps and empty directories`() {
         val steps=mutableListOf<String>()

@@ -87,7 +87,9 @@ class RunnerTransfer(private val manager:ServerManager,private val registry:Runn
     private fun <T> locked(id:String,action:()->T):T=synchronized(locks.computeIfAbsent(id){Any()}) {action()}
     private fun history(id:String)=manager.profileDir(id).resolve("runner-backups")
     private fun report(transfer:PendingTransfer,phase:String,message:String="") {
-        val value=FolderImportProgress(phase,transfer.files,transfer.bytes,transfer.changed.size,transfer.totalBytes,message)
+        val preparing=phase=="SCANNING"
+        val value=FolderImportProgress(phase,transfer.files,transfer.bytes,transfer.changed.size,transfer.totalBytes,message,
+            step=if(preparing)"관리 서버 비교·전송 계획" else "",stepNo=if(preparing)3 else 0,stepTotal=if(preparing)3 else 0)
         if(transfer.importRequest!=null)manager.folderImportProgress(transfer.instanceId,transfer.runnerId,transfer.importRequest,value)
         else manager.fileTransferProgress(transfer.instanceId,transfer.runnerId,value)
     }
@@ -108,7 +110,7 @@ class RunnerTransfer(private val manager:ServerManager,private val registry:Runn
     }
     fun inventory(id:String):RunnerFileManifest=locked(id) {
         manager.checkTransferReady(id)
-        val (files,dirs)=FileInventory.collect(manager.serverDir(id))
+        val (files,dirs)=FileInventory.collectCached(manager.serverDir(id))
         RunnerFileManifest(files,dirs)
     }
     fun begin(runnerId:String,instanceId:String,manifest:RunnerFileManifest,importRequest:String?=null,resumeProtocol:Int=0,prepared:RunnerFileManifest?=null):RunnerTransferPlan=locked(instanceId) {
@@ -118,8 +120,8 @@ class RunnerTransfer(private val manager:ServerManager,private val registry:Runn
         manager.checkTransferReady(instanceId)
         DeltaTransfer.validate(manifest,manager.serverDir(instanceId))
         DeltaTransfer.recover(manager.serverDir(instanceId),history(instanceId))
-        if(importRequest!=null)manager.folderImportProgress(instanceId,runnerId,importRequest,FolderImportProgress("SCANNING",message="관리 서버의 기존 파일과 비교하고 있습니다"))
-        else manager.fileTransferProgress(instanceId,runnerId,FolderImportProgress("SCANNING",message="관리 서버의 기존 파일과 비교하고 있습니다"))
+        if(importRequest!=null)manager.folderImportProgress(instanceId,runnerId,importRequest,FolderImportProgress("SCANNING",message="관리 서버의 기존 파일과 비교하고 있습니다",step="관리 서버 비교·전송 계획",stepNo=3,stepTotal=3))
+        else manager.fileTransferProgress(instanceId,runnerId,FolderImportProgress("SCANNING",message="관리 서버의 기존 파일과 비교하고 있습니다",step="관리 서버 비교·전송 계획",stepNo=3,stepTotal=3))
         val old=prepared ?: inventory(instanceId)
         val changed=manifest.files.filter { (path,file)->old.files[path]!=file }.keys
         val cacheRoot=manager.root.resolve(instanceId).resolve("runner-transfer")
@@ -144,7 +146,7 @@ class RunnerTransfer(private val manager:ServerManager,private val registry:Runn
             val folder=manager.root.resolve(instanceId).resolve("runner-transfer").resolve(id).also {it.createDirectories()}
             PendingTransfer(id,runnerId,instanceId,manifest,changed,folder,old,importRequest).also {store(it);pending[id]=it}
         }
-        report(transfer,"SCANNING",if(previous!=null)"이미 받은 파일을 검증하고 중단된 위치를 확인하고 있습니다" else "전송할 파일을 준비하고 있습니다")
+        report(transfer,"SCANNING",if(previous!=null)"이미 받은 파일의 크기를 확인하고 중단된 위치부터 이어받을 준비를 하고 있습니다" else "전송할 파일과 임시 저장 위치를 준비하고 있습니다")
         transfer.progress.clear();transfer.bytes=0;transfer.files=0
         Files.walk(transfer.folder).use {paths->paths.filter {it!=transfer.folder}.forEach {p->
             require(!Files.isSymbolicLink(p)) {"전송 캐시에 심볼릭 링크가 있습니다"}
@@ -156,7 +158,7 @@ class RunnerTransfer(private val manager:ServerManager,private val registry:Runn
             target.parent.createDirectories()
             if(!target.exists() && expected.size==0L)target.writeBytes(byteArrayOf())
             var offset=if(target.exists())target.fileSize() else 0L
-            if(offset>expected.size || offset==expected.size && FileInventory.digest(target)!=expected.sha256 || resumeProtocol==0 && offset<expected.size && offset>0) {
+            if(offset>expected.size || resumeProtocol==0 && offset<expected.size && offset>0) {
                 target.deleteIfExists();offset=0
             }
             transfer.progress[path]=offset;transfer.bytes+=offset
