@@ -3,6 +3,12 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      skip_full_tests:
+        description: 'Skip the full backend suite only when explicitly requested by the release owner'
+        type: boolean
+        required: false
+        default: false
 permissions:
   contents: write
 concurrency:
@@ -26,7 +32,11 @@ jobs:
         run: |
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then test "$GITHUB_REF_NAME" = "v$(cat VERSION)"; fi
       - run: npm ci --prefix frontend && npm run build --prefix frontend
-      - run: ./gradlew test bootJar --no-daemon
+      - name: Full backend suite
+        if: ${{ !inputs.skip_full_tests }}
+        run: ./gradlew test --no-daemon
+      - name: Build release JAR
+        run: ./gradlew bootJar --no-daemon
       - run: python3 scripts/test-runner-setup.py
       - run: python3 scripts/package-macos.py
       - run: python3 scripts/package-runner.py
