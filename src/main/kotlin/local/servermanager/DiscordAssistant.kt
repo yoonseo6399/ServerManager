@@ -26,8 +26,6 @@ class DiscordAssistant(private val harness:AssistantHarness,private val identity
         guild.upsertCommand(Commands.slash("assistant-google","내 Google 조회 결과 일부를 Qwen으로 비공개 요약")
             .addOption(OptionType.STRING,"source","gmail 또는 calendar",true).addOption(OptionType.BOOLEAN,"consent","조회 일부를 Qwen 컴퓨터로 보내는 데 동의",true)
             .addOption(OptionType.STRING,"query","Gmail 검색 조건",false).addOption(OptionType.STRING,"from","일정 시작 RFC3339",false).addOption(OptionType.STRING,"until","일정 종료 RFC3339",false)).queue({}, {})
-        guild.upsertCommand(Commands.slash("assistant","Qwen 파일 수정 제안과 비공개 승인").addOption(OptionType.STRING,"task","간단한 작업 목표",true)
-            .addOption(OptionType.STRING,"workspace","관리 웹에 등록된 폴더 ID",true).addOption(OptionType.STRING,"files","기존 파일 경로 1~5개, 쉼표 구분",true)).queue({}, {})
     }
     private fun authorized(jda:JDA,guild:String,roles:Set<String>):Boolean {
         val c=config();return jda===current() && c.enabled && c.superAdmins.any {it.guildId==guild && it.roleId in roles}

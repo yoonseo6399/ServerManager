@@ -16,11 +16,11 @@ export function QwenSettings(){
  const runner=view?.runners.find(r=>r.id===runnerId);const ready=!!runner&&runner.online&&runner.capability==='ALLOWED';
  // Saving and unloading change what runs on someone's computer, so they need a fresh passkey check like other admin settings.
  async function run<T>(fn:()=>Promise<T>):Promise<T|undefined>{setBusy(true);setError('');setNotice('');try{try{return await fn();}catch(e){if(!(e instanceof ApiError)||e.status!==428)throw e;await auth.login(true);return await fn();}}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
- async function save(){const result=await run(()=>api<{unloaded:boolean|null}>('/admin/qwen','PUT',{runnerId:runnerId||null,model}));if(!result)return;await load();setNotice(result.unloaded===true?'저장했습니다. 이전 설정의 Qwen 모델은 메모리에서 내렸습니다.':'저장했습니다. 다음 /local-llm 요청부터 적용됩니다.');}
+ async function save(){const result=await run(()=>api<{unloaded:boolean|null}>('/admin/qwen','PUT',{runnerId:runnerId||null,model}));if(!result)return;await load();setNotice(result.unloaded===true?'저장했습니다. 이전 설정의 Qwen 모델은 메모리에서 내렸습니다.':'저장했습니다. 다음 /agent 요청부터 적용됩니다. 개인 기본 모델은 /agent setting에서 선택할 수 있습니다.');}
  async function check(){const result=await run(()=>api<Probe>('/admin/qwen/probe','POST',{runnerId}));if(result)setProbe(result);}
  async function unload(){const result=await run(()=>api<Probe>('/admin/qwen/unload','POST',{runnerId}));if(result){setProbe(result);setNotice('Qwen 모델을 메모리에서 내렸습니다.');}}
  return <section className="discord-settings" aria-labelledby="qwen-heading"><h2 id="qwen-heading">Qwen (Ollama)</h2>
- <p><code>/local-llm</code>을 처리할 컴퓨터와 기본 모델을 고릅니다. 같은 시간에 Qwen 모델은 하나만 메모리에 올라가며, 모델을 바꾸면 이전 모델을 먼저 내립니다.</p>
+ <p><code>/agent</code>의 추론 컴퓨터와 공통 기본 모델을 고릅니다. 프로젝트 도구·명령은 관리 앱 컴퓨터에서 실행합니다. Thinking은 기본 켜짐이며 Discord 옵션으로 끌 수 있습니다. 같은 시간에 Qwen 모델은 하나만 메모리에 올라가며, 모델을 바꾸면 이전 모델을 먼저 내립니다.</p>
  {error&&<p role="alert" className="alert error-banner">{error}</p>}{notice&&<p role="status" className="notice alert">{notice}</p>}
  <form onSubmit={e=>{e.preventDefault();save();}}><fieldset className="discord-fieldset" disabled={busy||!view}>
  <div className="discord-rule"><label>실행 컴퓨터<select value={runnerId} onChange={e=>{setRunnerId(e.target.value);setProbe(null);}}>
