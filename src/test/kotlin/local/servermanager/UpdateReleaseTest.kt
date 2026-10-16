@@ -2,11 +2,15 @@ package local.servermanager
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 import org.mockito.Mockito.*
 import org.springframework.mock.web.MockHttpServletRequest
 import kotlin.test.*
+import java.nio.file.Path
+import kotlin.io.path.*
 
 class UpdateReleaseTest {
+    @TempDir lateinit var temp:Path
     private val mapper=jacksonObjectMapper()
     private fun release(v:String,beta:Boolean=false,draft:Boolean=false,assets:Boolean=true)=mapOf("tag_name" to "v$v","prerelease" to beta,"draft" to draft,"name" to "Release $v","published_at" to "2026-10-16T00:00:00Z","assets" to if(assets)listOf("update.properties","update.sig","server-manager-$v.jar").map {mapOf("name" to it)} else emptyList())
     private fun catalog(vararg rows:Map<String,Any>)=UpdateReleases.catalog(mapper.writeValueAsBytes(rows),"0.6.1","0.6.3")
@@ -32,5 +36,14 @@ class UpdateReleaseTest {
         `when`(updates.install("0.7.0-beta.1",true)).thenReturn(mapOf("message" to "WAITING"))
         assertEquals("WAITING",api.install(UpdateSelection("0.7.0-beta.1",true),request)["message"])
         verify(updates).install("0.7.0-beta.1",true)
+    }
+    @Test fun `automatic check preserves a staged manual release without network or restart`() {
+        val desktop=mock(DesktopLifecycle::class.java)
+        `when`(desktop.home).thenReturn(temp);`when`(desktop.supervised).thenReturn(true)
+        `when`(desktop.updates).thenReturn(UpdateCoordinator(temp))
+        val pending=temp.resolve("updates/pending.txt");pending.parent.createDirectories();pending.writeText("99.0.0-beta.1")
+        val result=AppUpdates(desktop).checkNow()
+        assertEquals("99.0.0-beta.1",result["latest"]);assertContains(result["message"].toString(),"유지")
+        assertEquals("99.0.0-beta.1",pending.readText());verify(desktop,never()).restartWhenIdle()
     }
 }

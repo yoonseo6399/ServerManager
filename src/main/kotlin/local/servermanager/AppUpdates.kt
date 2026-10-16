@@ -93,6 +93,13 @@ class AppUpdates(private val desktop:DesktopLifecycle) {
     @Synchronized fun checkNow():Map<String,Any?> = prepare(null)
     private fun prepare(selectedVersion:String?):Map<String,Any?> {
         check(desktop.supervised) { "자동 업데이트는 설치 앱에서 지원합니다" }
+        if(selectedVersion==null){
+            val pending=desktop.home.resolve("updates/pending.txt").takeIf {it.exists()}?.readText()?.trim()
+            if(pending!=null && runCatching {SignedUpdates.compare(pending,current)>0}.getOrDefault(false)){
+                latest=pending;message="$pending 업데이트 적용을 기다리고 있습니다. 대기 중인 버전을 유지합니다. 다른 버전은 릴리즈 목록에서 직접 선택하세요."
+                return status()
+            }
+        }
         if(checking)return status();checking=true
         desktop.updates.update(UpdateComponents.MANAGER_APP,current,null,"CHECKING")
         try {
