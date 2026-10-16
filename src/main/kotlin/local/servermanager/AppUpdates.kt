@@ -15,6 +15,31 @@ import java.time.Instant
 import java.util.Properties
 import kotlin.io.path.*
 
+data class PublishedUpdate(val version:String,val name:String,val prerelease:Boolean,val publishedAt:String,val url:String,val installable:Boolean,val reason:String?)
+object UpdateReleases {
+    fun catalog(bytes:ByteArray,current:String,failed:String?):List<PublishedUpdate> = jacksonObjectMapper().readTree(bytes).let {root->
+        require(root.isArray) {"잘못된 릴리즈 목록"}
+        root.filter { !it.path("draft").asBoolean() && it.path("tag_name").asText().startsWith("v") && SignedUpdates.eligible(it.path("tag_name").asText().removePrefix("v"),it.path("prerelease").asBoolean(),true) }.map {release->
+            val version=release.path("tag_name").asText().removePrefix("v")
+            val assets=release.path("assets").map {it.path("name").asText()}.toSet()
+            val reason=when {
+                SignedUpdates.compare(version,current)<=0->"현재 버전 이하이므로 설치할 수 없습니다"
+                version==failed->"시작 검증에 실패한 버전입니다"
+                !assets.containsAll(setOf("update.properties","update.sig","server-manager-$version.jar"))->"서명된 업데이트 파일이 없습니다"
+                else->null
+            }
+            PublishedUpdate(version,release.path("name").asText(version).take(200),release.path("prerelease").asBoolean(),release.path("published_at").asText(),"https://github.com/yoonseo6399/ServerManager/releases/tag/v$version",reason==null,reason)
+        }.distinctBy {it.version}.sortedWith {a,b->SignedUpdates.compare(b.version,a.version)}
+    }
+    fun select(releases:List<PublishedUpdate>,version:String,allowPrerelease:Boolean):PublishedUpdate {
+        SignedUpdates.compare(version,"0.0.0")
+        val release=releases.singleOrNull {it.version==version} ?: error("공개된 릴리즈를 선택하세요")
+        require(release.installable) {release.reason ?: "설치할 수 없는 버전입니다"}
+        require(!release.prerelease || allowPrerelease) {"베타 설치 동의가 필요합니다"}
+        return release
+    }
+}
+
 object SignedUpdates {
     fun compare(a:String,b:String):Int {
         fun parts(value:String):List<Int> {
@@ -59,14 +84,21 @@ class AppUpdates(private val desktop:DesktopLifecycle) {
     fun status()=mapOf("supported" to desktop.supervised,"enabled" to (desktop.supervised&&!disabled.exists()),"current" to current,"channel" to if(betaChannel) "BETA" else "STABLE","latest" to latest,"message" to message,"checkedAt" to checked,"checking" to checking,"repository" to "https://github.com/$repository","detail" to desktop.updates.snapshot())
     @Synchronized fun enabled(value:Boolean){check(desktop.supervised);if(value){disabled.deleteIfExists()}else{atomicText(disabled,"disabled");desktop.home.resolve("updates/pending.txt").deleteIfExists();desktop.updates.update(UpdateComponents.MANAGER_APP,current,null,"IDLE",message="자동 업데이트 적용을 해제했습니다")}}
     @Scheduled(initialDelay=60000,fixedDelay=21600000) fun periodic(){if(desktop.supervised&&!disabled.exists())checkNow()}
-    @Synchronized fun checkNow():Map<String,Any?> {
+    fun releases():List<PublishedUpdate> = UpdateReleases.catalog(get(URI("https://api.github.com/repos/$repository/releases?per_page=100"),4*1024*1024),current,desktop.home.resolve("failed-update-version.txt").takeIf {it.exists()}?.readText()?.trim())
+    @Synchronized fun install(version:String,allowPrerelease:Boolean):Map<String,Any?> {
+        check(desktop.supervised) {"수동 업데이트는 설치 앱에서 지원합니다"}
+        val release=UpdateReleases.select(releases(),version,allowPrerelease)
+        return prepare(release.version)
+    }
+    @Synchronized fun checkNow():Map<String,Any?> = prepare(null)
+    private fun prepare(selectedVersion:String?):Map<String,Any?> {
         check(desktop.supervised) { "자동 업데이트는 설치 앱에서 지원합니다" }
         if(checking)return status();checking=true
         desktop.updates.update(UpdateComponents.MANAGER_APP,current,null,"CHECKING")
         try {
-            val response=mapper.readTree(get(URI("https://api.github.com/repos/$repository/releases"+(if(betaChannel) "?per_page=100" else "/latest")),4*1024*1024))
-            val releases=if(betaChannel) response.toList() else listOf(response)
-            val release=releases.filter { !it.path("draft").asBoolean() && SignedUpdates.eligible(it.path("tag_name").asText().removePrefix("v"),it.path("prerelease").asBoolean(),betaChannel) }
+            val response=mapper.readTree(get(URI("https://api.github.com/repos/$repository/releases"+(if(selectedVersion!=null) "/tags/v$selectedVersion" else if(betaChannel) "?per_page=100" else "/latest")),4*1024*1024))
+            val releases=if(betaChannel && selectedVersion==null) response.toList() else listOf(response)
+            val release=releases.filter { !it.path("draft").asBoolean() && SignedUpdates.eligible(it.path("tag_name").asText().removePrefix("v"),it.path("prerelease").asBoolean(),betaChannel || selectedVersion!=null) && (selectedVersion==null || it.path("tag_name").asText()=="v$selectedVersion") }
                 .maxWithOrNull { a,b->SignedUpdates.compare(a.path("tag_name").asText().removePrefix("v"),b.path("tag_name").asText().removePrefix("v")) }
                 ?: run { message="이 채널에 공개된 업데이트가 없습니다";desktop.updates.update(UpdateComponents.MANAGER_APP,current,null,"DONE",message=message);return status() }
             val version=release.path("tag_name").asText().removePrefix("v");SignedUpdates.compare(version,current);latest=version;checked=Instant.now().toString()
@@ -104,10 +136,13 @@ class AppUpdates(private val desktop:DesktopLifecycle) {
     private fun download(uri:URI,target:Path,limit:Long) { response(uri).body().use { input->target.outputStream().use { out->val buffer=ByteArray(65536);var total=0L;while(true){val n=input.read(buffer);if(n<0)break;total+=n;require(total<=limit) { "업데이트 파일 크기 초과" };out.write(buffer,0,n)};require(total==limit) } } }
 }
 data class UpdatePreference(val enabled:Boolean)
+data class UpdateSelection(val version:String,val allowPrerelease:Boolean=false)
 @RestController
 @RequestMapping("/api/admin/updates")
 class UpdateApi(private val updates:AppUpdates) {
     @GetMapping fun status()=updates.status()
+    @GetMapping("/releases") fun releases()=updates.releases()
+    @PostMapping("/install") fun install(@RequestBody body:UpdateSelection,req:HttpServletRequest):Map<String,Any?> {freshDesktop(req);return updates.install(body.version,body.allowPrerelease)}
     @PutMapping fun enabled(@RequestBody body:UpdatePreference,req:HttpServletRequest):Map<String,Any?> { freshDesktop(req);updates.enabled(body.enabled);return updates.status() }
     @PostMapping("/check") fun check(req:HttpServletRequest):Map<String,Any?> { freshDesktop(req);return updates.checkNow() }
 }
