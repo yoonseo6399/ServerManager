@@ -266,6 +266,17 @@ class RunnerGatewayTest {
             deliver(RunnerMessage("llm-result",state="OK",token=request.token,detail="""{"reachable":true}"""))
             assertTrue(probe.get(2,java.util.concurrent.TimeUnit.SECONDS).path("reachable").asBoolean())
             assertFailsWith<IllegalArgumentException> {gateway.llmAdmin("runner","format")}
+            val messages=listOf(ProjectAgentMessage("system","actor"),ProjectAgentMessage("user","hello"))
+            assertFailsWith<IllegalStateException> {gateway.llmConversation("14b",messages,true,"runner") {}}
+            deliver(RunnerMessage("llm-capability",state="OLLAMA_AGENT_V2"));sent.clear();var thinking=""
+            val conversation=java.util.concurrent.CompletableFuture.supplyAsync {gateway.llmConversation("14b",messages,true,"runner") {thinking=it}}
+            val until=System.nanoTime()+2_000_000_000L;while(sent.isEmpty() && System.nanoTime()<until)Thread.sleep(2)
+            val agentRequest=mapper.readValue<RunnerMessage>((sent.single() as TextMessage).payload)
+            assertEquals("agent:14b",agentRequest.state);assertEquals("THINK",agentRequest.detail);assertEquals(2,mapper.readTree(agentRequest.command).size())
+            deliver(RunnerMessage("llm-thinking",token="wrong",detail="not accepted"));assertEquals("",thinking)
+            deliver(RunnerMessage("llm-thinking",token=agentRequest.token,detail="checking"));assertEquals("checking",thinking)
+            deliver(RunnerMessage("llm-result",state="OK",token=agentRequest.token,detail="""{"text":"done","limited":false,"seconds":1.0,"tokens":5,"thinking":"checking"}"""))
+            assertEquals("done",conversation.get(2,java.util.concurrent.TimeUnit.SECONDS)!!.answer.text)
         } finally {gateway.closeDatagrams()}
     }
 }

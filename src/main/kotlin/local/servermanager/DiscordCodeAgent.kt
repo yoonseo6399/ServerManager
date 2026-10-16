@@ -58,18 +58,14 @@ class DiscordCodeAgent(private val config:()->DiscordConfig,private val current:
                 OptionData(OptionType.INTEGER,"parallel","동시 서브에이전트 수 (1~3)",false).setMinValue(1).setMaxValue(3))
             return command
         }
-        guild.upsertCommand(Commands.slash("local-llm","로컬 Qwen 일반 대화 (코드·도구 접근 없음)")
-            .addOptions(OptionData(OptionType.STRING,"model","Qwen 모델 (생략하면 웹 설정의 모델)",false).addChoice("Qwen3 14B","14b").addChoice("Qwen3 30B","30b"),
-                OptionData(OptionType.STRING,"prompt","질문 또는 요청 (매번 독립 대화)",true).setMaxLength(6000),
-                OptionData(OptionType.BOOLEAN,"think","사고 출력 요청 (기본 꺼짐)",false))).queue({}, {})
-        guild.upsertCommand(command("agent",true)).queue({}, {})
+        guild.upsertCommand(command("cloud-agent",true)).queue({}, {})
         guild.upsertCommand(command("sub-agent",false)).queue({}, {})
         guild.upsertCommand(Commands.slash("agent-keys","프로젝트별 Gemini API 사용량 확인 (최고 관리자)")).queue({}, {})
     }
     private fun redact(text:String):String=mainSettings?.redact(poolStore?.redact(text) ?: text) ?: (poolStore?.redact(text) ?: text)
     private fun gemini(notify:(String)->Unit):AgentModel=if(poolStore!=null && quota!=null)PooledGeminiModel(poolStore,model,quota,notify) else GeminiAgentModel(key,model)
     fun handle(event:SlashCommandInteractionEvent) {
-        if(event.jda!==current() || event.name !in setOf("agent","sub-agent","agent-keys","local-llm"))return
+        if(event.jda!==current() || event.name !in setOf("cloud-agent","sub-agent","agent-keys","local-llm"))return
         val guild=event.guild;val channel=event.channel as? TextChannel
         if(guild==null || channel==null) {event.reply("일반 텍스트 채널에서 실행하세요.").setEphemeral(true).queue({}, {});return}
         event.deferReply(true).queue({hook ->
@@ -103,7 +99,7 @@ class DiscordCodeAgent(private val config:()->DiscordConfig,private val current:
                     }} catch(_:Exception) {localBusy.set(false);hook.editOriginal("실행기가 종료되었습니다.").queue({}, {})}
                     return@queue
                 }
-                val main=event.name=="agent"
+                val main=event.name=="cloud-agent"
                 if(workspace.isBlank()) {hook.editOriginal("에이전트 작업 폴더를 먼저 설정하세요.").queue({}, {});return@queue}
                 if(main && mainSettings?.let {it.ready(it.config())}!=true) {hook.editOriginal("AI 비서·에이전트에서 메인 제공자와 API 키를 설정하세요.").queue({}, {});return@queue}
                 if(!main && runCatching {poolStore?.credentials()?.isEmpty() ?: key.isBlank()}.getOrDefault(true)) {hook.editOriginal("Gemini API 키를 먼저 설정하세요.").queue({}, {});return@queue}
