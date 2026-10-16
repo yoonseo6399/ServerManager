@@ -190,6 +190,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
                 registry.seen(id,event.version?.take(80) ?: "unknown")
                 manager.pendingFolderImports(id).forEach { (instance,request)->runCatching {importFolder(instance,request)} }
             }
+            "update-capability" -> registry.updateCapability(id,event.state=="RELEASE_SELECTION_V1",event.detail=="ROLLBACK_V1")
             "update-status" -> event.detail?.let {runCatching {registry.updateStatus(id,mapper.readValue<RunnerUpdateStatus>(it))}}
             "update-detail" -> event.detail?.takeIf {it.length<=200_000}?.let {runCatching {registry.updateDetail(id,mapper.readValue<UpdateDetail>(it))}}
             "folder-source" -> event.instanceId?.let { instance ->
@@ -259,9 +260,10 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
             sockets.values.filter { it.runnerId==id }.forEach { closeStream(it,false) }
         }
     }
-    fun requestUpdate(id:String,pause:Boolean):Boolean {
+    fun requestUpdate(id:String,pause:Boolean,version:String?=null,allowPrerelease:Boolean=false,allowRollback:Boolean=false):Boolean {
         check(registry.remoteUpdateSupported(id))
-        return connected(id) && send(id,RunnerMessage("update-request",detail=if(pause) "PAUSE_TRANSFER" else "WHEN_IDLE"))
+        if(version!=null){SignedUpdates.compare(version,"0.0.0");check(registry.releaseSelectionSupported(id));if(allowRollback)check(registry.rollbackSupported(id))}
+        return connected(id) && send(id,RunnerMessage("update-request",detail=if(pause) "PAUSE_TRANSFER" else "WHEN_IDLE",command=version,state=if(allowRollback)"STABLE_ROLLBACK" else if(allowPrerelease)"BETA_OK" else null))
     }
     fun connected(id:String)=sessions[id]?.isOpen==true && registry.online(id)
     fun authorized(id:String,token:String?):Boolean = token!=null && registry.active(id)!=null && connected(id) &&

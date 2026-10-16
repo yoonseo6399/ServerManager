@@ -17,6 +17,7 @@ import kotlin.io.path.*
 class RunnerUpdater(private val home:Path,private val current:String,
     private val client:HttpClient=HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).connectTimeout(Duration.ofSeconds(15)).build(),
     private val key:ByteArray=RunnerUpdater::class.java.getResourceAsStream("/update-public-key.der")!!.use {it.readAllBytes()},
+    val rollbackSupported:Boolean=System.getenv("RUNNER_BOOTSTRAP_PROTOCOL")=="2",
     private val changed:(RunnerUpdateStatus)->Unit={}) {
     private val mapper=jacksonObjectMapper()
     private val repository=RunnerUpdater::class.java.getResourceAsStream("/update-repository.txt")!!.bufferedReader().use { it.readText().trim() }
@@ -28,19 +29,25 @@ class RunnerUpdater(private val home:Path,private val current:String,
     fun busy()=checking.get()
     fun phase(value:String){publish(state.copy(phase=value,latest=pendingVersion() ?: state.latest))}
     private fun publish(next:RunnerUpdateStatus){state=next.validated();changed(state)}
-    private fun pendingVersion():String?=runCatching {updates.resolve("pending.txt").takeIf {it.exists()}?.readText()?.trim()?.takeIf {SignedUpdates.compare(it,current)>0}}.getOrNull()
+    private fun pendingVersion():String?=UpdateRollback.pending(home,current,rollbackSupported)
     fun pending()=pendingVersion()!=null
-    fun check() {
+    fun check() = prepare(null,false)
+    fun install(version:String,allowPrerelease:Boolean,allowRollback:Boolean=false) = prepare(version,allowPrerelease,allowRollback)
+    private fun prepare(selected:String?,allowPrerelease:Boolean,allowRollback:Boolean=false) {
         if(!checking.compareAndSet(false,true))return
         try {
-            publish(RunnerUpdateStatus("CHECKING"))
+            if(selected==null && pendingVersion()!=null){publish(RunnerUpdateStatus("READY",pendingVersion()));return}
+            selected?.let {SignedUpdates.compare(it,"0.0.0")}
+            publish(RunnerUpdateStatus("CHECKING",selected))
             updates.createDirectories()
             val bytes=get(URI("https://api.github.com/repos/$repository/releases?per_page=100"),4*1024*1024)
             val releases=mapper.readTree(bytes).toList()
-            val release=releases.filter { !it.path("draft").asBoolean() && SignedUpdates.eligible(it.path("tag_name").asText().removePrefix("v"),it.path("prerelease").asBoolean(),beta) }
-                .maxWithOrNull { a,b->SignedUpdates.compare(a.path("tag_name").asText().removePrefix("v"),b.path("tag_name").asText().removePrefix("v")) } ?: run {publish(RunnerUpdateStatus("CURRENT",current));return}
-            val version=release.path("tag_name").asText().removePrefix("v")
-            if(SignedUpdates.compare(version,current)<=0){publish(RunnerUpdateStatus("CURRENT",current));return}
+            val version=if(selected!=null)UpdateReleases.select(UpdateReleases.catalog(bytes,current,home.resolve("failed-update-version.txt").takeIf {it.exists()}?.readText()?.trim(),rollbackSupported),selected,allowPrerelease,allowRollback).version else {
+                val release=releases.filter { !it.path("draft").asBoolean() && SignedUpdates.eligible(it.path("tag_name").asText().removePrefix("v"),it.path("prerelease").asBoolean(),beta) }
+                    .maxWithOrNull { a,b->SignedUpdates.compare(a.path("tag_name").asText().removePrefix("v"),b.path("tag_name").asText().removePrefix("v")) } ?: run {publish(RunnerUpdateStatus("CURRENT",current));return}
+                release.path("tag_name").asText().removePrefix("v")
+            }
+            if(SignedUpdates.compare(version,current)<=0 && !(allowRollback && rollbackSupported && selected==version && "-beta." !in version && SignedUpdates.compare(version,current)<0)){publish(RunnerUpdateStatus("CURRENT",current));return}
             if(home.resolve("failed-update-version.txt").takeIf {it.exists()}?.readText()?.trim()==version){publish(RunnerUpdateStatus("FAILED",version));return}
             val base="https://github.com/$repository/releases/download/v$version/"
             val manifest=get(URI(base+"update.properties"),65536)
@@ -64,8 +71,10 @@ class RunnerUpdater(private val home:Path,private val current:String,
                     Files.move(temp,jar,ATOMIC_MOVE,REPLACE_EXISTING)
                 } finally { temp.deleteIfExists() }
             }
+            check(UpdatePackageVerifier.verify(manifest,signature,jar,key,version,current,allowRollback && rollbackSupported) is UpdatePackageVerifier.Result.Ok) {"실행기 업데이트 호환성 검증 실패"}
             atomicBytes(folder.resolve("update.properties"),manifest)
             atomicBytes(folder.resolve("update.sig"),signature)
+            UpdateRollback.stageConsent(home,version,current,allowRollback,rollbackSupported)
             atomicText(updates.resolve("pending.txt"),version)
             publish(RunnerUpdateStatus("READY",version))
         } catch(e:Exception){publish(state.copy(phase="FAILED"));throw e} finally { checking.set(false) }

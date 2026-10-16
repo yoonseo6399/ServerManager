@@ -92,6 +92,15 @@ class UpdateCoordinatorTest {
         val ok=assertIs<UpdatePackageVerifier.Result.Ok>(UpdatePackageVerifier.verify(p.manifest,p.signature,p.jar,p.key,"0.5.2","0.5.1"))
         assertEquals(Triple(1,2,2),Triple(ok.minHost,ok.maxHost,ok.hostProtocol))
     }
+    @Test fun `only explicit stable rollback relaxes version ordering and never signature validation`() {
+        val p=pkg("0.6.1")
+        assertIs<UpdatePackageVerifier.Result.Rejected>(UpdatePackageVerifier.verify(p.manifest,p.signature,p.jar,p.key,"0.6.1","0.7.0-beta.2"))
+        assertIs<UpdatePackageVerifier.Result.Ok>(UpdatePackageVerifier.verify(p.manifest,p.signature,p.jar,p.key,"0.6.1","0.7.0-beta.2",true))
+        val bad=pkg("0.6.1",tamperJar=true)
+        assertIs<UpdatePackageVerifier.Result.Rejected>(UpdatePackageVerifier.verify(bad.manifest,bad.signature,bad.jar,bad.key,"0.6.1","0.7.0-beta.2",true))
+        val beta=pkg("0.7.0-beta.1")
+        assertIs<UpdatePackageVerifier.Result.Rejected>(UpdatePackageVerifier.verify(beta.manifest,beta.signature,beta.jar,beta.key,"0.7.0-beta.1","0.7.0-beta.2",true))
+    }
     @Test fun `tampered manifest tampered package wrong key version mismatch and downgrade are rejected`() {
         fun r(p:Pkg,expected:String="0.5.2",current:String="0.5.1")=assertIs<UpdatePackageVerifier.Result.Rejected>(UpdatePackageVerifier.verify(p.manifest,p.signature,p.jar,p.key,expected,current)).reason
         assertEquals("SIGNATURE_INVALID",r(pkg("0.5.2",tamperManifest=true)))

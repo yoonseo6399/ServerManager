@@ -21,7 +21,7 @@ test('owner selects a beta explicitly and installs the exact version without cha
  await page.getByLabel('베타 설치 동의').check();await expect(install).toBeEnabled();
  page.once('dialog',d=>d.dismiss());await install.click();expect(installed).toEqual([]);
  page.once('dialog',d=>d.accept());await install.click();
- await expect.poll(()=>installed.length).toBe(1);expect(installed[0]).toEqual({version:'0.7.0-beta.1',allowPrerelease:true});
+ await expect.poll(()=>installed.length).toBe(1);expect(installed[0]).toEqual({version:'0.7.0-beta.1',allowPrerelease:true,allowRollback:false});
  await expect(page.getByLabel('자동 업데이트',{exact:true})).not.toBeChecked();
  await expect(page.getByRole('status').filter({hasText:'안전 재시작 대기'})).toBeVisible();
 });

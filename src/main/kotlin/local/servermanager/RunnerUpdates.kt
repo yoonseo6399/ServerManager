@@ -9,7 +9,7 @@ data class RunnerUpdateStatus(val phase:String="IDLE",val latest:String?=null,va
         return this
     }
 }
-data class RunnerUpdateRequest(val pauseTransfer:Boolean=false)
+data class RunnerUpdateRequest(val pauseTransfer:Boolean=false,val version:String?=null,val allowPrerelease:Boolean=false,val allowRollback:Boolean=false)
 object RunnerUpdateSupport {
     fun supported(version:String)=runCatching {SignedUpdates.compare(version,"0.4.4")>=0}.getOrDefault(false)
 }

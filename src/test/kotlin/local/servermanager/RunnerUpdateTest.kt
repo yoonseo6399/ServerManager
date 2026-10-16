@@ -67,4 +67,16 @@ class RunnerUpdateTest {
         assertFails {RunnerUpdateStatus("DOWNLOADING",downloadedBytes=2,totalBytes=1).validated()}
         assertFalse(RunnerUpdateSupport.supported("0.4.3"));assertTrue(RunnerUpdateSupport.supported("0.4.4"))
     }
+    @Test fun `incoming selected update command dispatches exact model independent version and consent`() {
+        val service=mock(RunnerUpdater::class.java);`when`(service.status()).thenReturn(RunnerUpdateStatus("CURRENT"))
+        val agent=RunnerAgent(temp,RunnerIdentity("https://localhost","fixture","fixture","unused","MAC"),service)
+        val socket=mock(java.net.http.WebSocket::class.java);agent.onOpen(socket)
+        try {
+            val mapper=com.fasterxml.jackson.module.kotlin.jacksonObjectMapper()
+            agent.onText(socket,mapper.writeValueAsString(RunnerMessage("update-request",detail="WHEN_IDLE",command="0.7.0-beta.2",state="BETA_OK")),true)
+            verify(service,timeout(3000)).install("0.7.0-beta.2",true,false)
+            agent.onText(socket,mapper.writeValueAsString(RunnerMessage("update-request",detail="WHEN_IDLE",command="0.6.2",state="STABLE_ROLLBACK")),true)
+            verify(service,timeout(3000)).install("0.6.2",false,true)
+        }finally{agent.shutdownGracefully()}
+    }
 }
