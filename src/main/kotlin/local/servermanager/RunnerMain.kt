@@ -368,7 +368,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     fun restartForUpdate():Boolean=synchronized(lifecycle) {
         val service=updater ?: return false
         if(service.busy() || !service.pending())return false
-        val target=service.status().latest ?: pendingProps()?.getProperty("version")
+        val target=pendingProps()?.getProperty("version") ?: service.status().latest
         if(tcpRelay?.busy()==true || directRelay.busy())return waitingFor(service,"RELAY_STREAMS_ACTIVE").let {false}
         val root=home.resolve("instances")
         val dirs=if(root.exists())root.listDirectoryEntries().filter {it.isDirectory()} else emptyList()
