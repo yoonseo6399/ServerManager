@@ -126,7 +126,7 @@ Tool output is bounded and may be shortened; use focused reads/searches instead 
                 if(gradle!=null && needsHuman){active();tools.verify(Path.of(session.home),plan);store.trustGradle(session.guild,user,gradle)}
                 active();emit(ProjectAgentEvent("tool_start",turn,"executing tool ${call.name}",plan,assessment))
                 val toolStart=System.nanoTime()
-                val result=try {tools.execute(Path.of(session.home),plan,progress={chunk->active();emit(ProjectAgentEvent("tool_output",turn,chunk,plan))},active=::active)}catch(e:Exception){active();ProjectAgentToolResult("도구 실패: ${e.message.orEmpty().take(600)}","도구 실패: ${e.message.orEmpty().take(600)}",-1)}
+                val result=try {tools.execute(Path.of(session.home),plan,progress={chunk->active();emit(ProjectAgentEvent("tool_output",turn,chunk,plan,seconds=(System.nanoTime()-toolStart)/1e9))},active=::active)}catch(e:Exception){active();ProjectAgentToolResult("도구 실패: ${e.message.orEmpty().take(600)}","도구 실패: ${e.message.orEmpty().take(600)}",-1)}
                 active();emit(ProjectAgentEvent("status",turn,"도구 결과 요약 중"))
                 val summary=ProjectAgentMemory.summarize(result,model);active();emit(ProjectAgentEvent("usage",turn,usage=model.usage()))
                 emit(ProjectAgentEvent("tool_end",turn,summary,plan,assessment,seconds=(System.nanoTime()-toolStart)/1e9))
