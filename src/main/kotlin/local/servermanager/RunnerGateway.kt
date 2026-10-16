@@ -126,7 +126,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
     private val io=Executors.newCachedThreadPool()
     private data class GameStream(val id:Int,val runnerId:String,val instanceId:String,val socket:Socket,val opened:CountDownLatch=CountDownLatch(1))
     @jakarta.annotation.PreDestroy fun closeDatagrams(){tcpRelays.values.forEach {it.close()};tcpRelays.clear();sable.close();udpOutboxes.values.forEach {it.close()};udpOutboxes.clear();udpSessions.values.forEach {runCatching {it.close()}};udpSessions.clear()}
-    @PostConstruct fun attach() { manager.attachRemoteController(this);RemoteLlm.provider=::llmChat;RemoteLlm.conversationProvider=::llmConversation;directRelay?.sender={id,message->send(id,message)};directRelay?.connectedCheck={connected(it)} }
+    @PostConstruct fun attach() { manager.attachRemoteController(this);RemoteLlm.provider=::llmChat;RemoteLlm.conversationProvider=::llmConversation;RemoteLlm.modelLimitProvider={size,pinned->val id=pinned ?: streamingLlmRunners.sorted().firstOrNull {llmReady(it)};id?.let {llmAdmin(it,"probe").path("modelLimits").path(size).asInt().takeIf {value->value>0}}};directRelay?.sender={id,message->send(id,message)};directRelay?.connectedCheck={connected(it)} }
     override fun afterConnectionEstablished(session:WebSocketSession) {
         val id=session.attributes["runnerId"] as? String ?: run { session.close(CloseStatus.POLICY_VIOLATION);return }
         if(session.attributes["sableUdp"]==true) {

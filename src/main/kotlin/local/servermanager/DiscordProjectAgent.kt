@@ -33,7 +33,7 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
     private val worker=Executors.newVirtualThreadPerTaskExecutor()
     private val routing=ConcurrentHashMap.newKeySet<String>()
     private val jobs=ProjectAgentJobs()
-    private val engine=ProjectAgentEngine(store,{session->ProjectAgentTools(directory.resolve("project-agent-logs")) {name,path->store.register(session.guild,session.user,name,path)}})
+    private val engine=ProjectAgentEngine(store,{session->ProjectAgentTools(directory.resolve("project-agent-logs"),DiscordProjectAgentFiles({current()?.getTextChannelById(session.channel) ?: error("채널이 없습니다.")},{privateAccess(current() ?: error("연결 없음"),session)})) {name,path->store.register(session.guild,session.user,name,path)}})
     companion object {
         fun command()=Commands.slash("agent","Qwen 프로젝트 에이전트 · 개인 채널·도구·승인")
             .addSubcommands(
@@ -44,6 +44,9 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
                 SubcommandData("project","기존 폴더를 내 프로젝트의 기본 작업 위치로 등록").addOption(OptionType.STRING,"name","프로젝트 이름",true).addOption(OptionType.STRING,"path","관리 앱 컴퓨터의 폴더 전체 경로",true),
                 SubcommandData("run","이 프로젝트 채널에서 작업 요청").addOptions(OptionData(OptionType.STRING,"prompt","목표와 완료 조건",true).setMaxLength(6000),
                     OptionData(OptionType.STRING,"model","이번 요청의 모델 (기본 모델 생략 가능)",false).addChoice("Qwen 14B","14b").addChoice("Qwen 30B","30b"),OptionData(OptionType.BOOLEAN,"think","이번 요청의 Thinking (기본 true)",false)),
+                SubcommandData("context","채널 문맥 조회·초기화·자동 압축 설정").addOptions(
+                    OptionData(OptionType.STRING,"action","문맥 작업",true).addChoice("상태","status").addChoice("초기화","reset").addChoice("압축 기준","configure").addChoice("지금 압축","compact"),
+                    OptionData(OptionType.INTEGER,"limit","자동 압축 입력 토큰 기준 (1024~3584)",false).setRequiredRange(1024,3584)),
                 SubcommandData("link","관리 웹 소유자 계정 연결").addOption(OptionType.STRING,"code","웹 AI 설정에서 발급한 일회용 코드",true),
                 SubcommandData("stop","이 채널의 작업·명령·대기 승인을 중단"))
     }
@@ -101,6 +104,22 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
                         created.sendMessage("Qwen 프로젝트 채널입니다. 홈: `$home` · 도구 실행: 관리 앱 컴퓨터\nThinking 기본 켜짐 · 명시적 승인 기본 켜짐. 대화·결과는 이 채널을 볼 수 있는 사람에게 보입니다. Discord 서버 관리자는 비공개 채널에도 접근할 수 있습니다. $natural").setAllowedMentions(emptyList()).queue({}, {})
                         hook.editOriginalEmbeds(embed.setDescription("${event.user.asMention} 님의 ${project?.name ?: "기본"} 채널이 ${created.asMention}에 할당되었습니다.").build()).setAllowedMentions(emptyList()).queue({}, {})
                     }
+                    "context"->{
+                        var session=store.channel(event.channel.id) ?: error("에이전트 채널에서 사용하세요.")
+                        check(session.user==event.user.id);privateAccess(event.jda,session)
+                        val action=event.getOption("action")!!.asString
+                        if(action!="status"){
+                            runCatching {jobs.stop(session.channel,session.user)};engine.stop(session.channel,session.user)
+                            session=store.context(session.channel,session.user,action=="reset",if(action=="configure")event.getOption("limit")?.asLong?.toInt() ?: error("limit을 입력하세요.")else null)
+                            if(action=="compact"){
+                                val job=jobs.begin(session.channel,session.user)
+                                try {val compact=ProjectAgentMemory.compress(session.history,inference(session));privateAccess(event.jda,session);store.history(session.channel,compact,session.contextEpoch)}finally{jobs.finish(session.channel,job)}
+                                session=store.channel(session.channel)!!
+                            }
+                        }
+                        val llm=inference(session);val maximum=llm.modelLimit()
+                        hook.editOriginal("${if(action=="reset")"문맥을 초기화했습니다. 프로젝트 정보는 유지됩니다.\n" else ""}문맥 약 ${session.history.sumOf {ProjectAgentContext.estimatedTokens(it.content)}} tokens (대화 기록 추정) · 압축 기준 ${session.contextLimit}\n실행 창 8192 · 출력 예약 4096 · 모델 최대 ${maximum?.toString() ?: "확인 불가"}").queue({}, {})
+                    }
                     "stop"->{jobs.stop(event.channel.id,event.user.id);engine.stop(event.channel.id,event.user.id);hook.editOriginal("현재 작업과 대기 승인을 중단했습니다.").queue({}, {})}
                     "run"->{
                         val session=store.channel(event.channel.id) ?: error("/agent channel로 만든 채널에서 실행하세요.")
@@ -116,9 +135,9 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
     fun message(event:MessageReceivedEvent) {
         if(event.jda!==current() || event.author.isBot || event.isWebhookMessage || !event.isFromGuild)return
         val session=store.channel(event.channel.id) ?: return
-        if(session.user!=event.author.id || event.message.contentRaw.isBlank())return
+        if(session.user!=event.author.id || (event.message.contentRaw.isBlank() && event.message.attachments.isEmpty()))return
         if(!routing.add(session.channel)){event.channel.sendMessage("이 채널에서 작업 중입니다. 승인 요청을 처리하거나 /agent stop으로 중단한 뒤 다시 요청하세요.").setAllowedMentions(emptyList()).queue({}, {});return}
-        worker.submit {try {privateAccess(event.jda,session);start(event.jda,session,event.member?.effectiveName ?: event.author.effectiveName,event.message.contentRaw.take(6000),null,null,true)}catch(e:Exception){event.channel.sendMessage("에이전트 요청 실패: ${safe(e)}").setAllowedMentions(emptyList()).queue({}, {})}finally {routing.remove(session.channel)}}
+        worker.submit {try {privateAccess(event.jda,session);start(event.jda,session,event.member?.effectiveName ?: event.author.effectiveName,(event.message.contentRaw+if(event.message.attachments.isEmpty())"" else "\n첨부 파일: "+event.message.attachments.joinToString {"${it.fileName} (message=${event.messageId}, attachment=${it.id})"}).take(6000),null,null,true)}catch(e:Exception){event.channel.sendMessage("에이전트 요청 실패: ${safe(e)}").setAllowedMentions(emptyList()).queue({}, {})}finally {routing.remove(session.channel)}}
     }
     fun button(event:ButtonInteractionEvent) {
         if(event.jda!==current() || !event.componentId.startsWith("qa:"))return
@@ -135,22 +154,39 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
         val job=jobs.begin(session.channel,session.user)
         try {
         val channel=jda.getTextChannelById(session.channel) ?: error("채널이 없습니다.")
+        check(store.channel(session.channel)?.contextEpoch==session.contextEpoch) {"문맥 설정이 바뀌었습니다. 다시 요청하세요."}
         val saved=store.preferences(session.guild,session.user);val preferences=saved.copy(think=thinkOverride ?: saved.think)
         val chosen=qwen.config();val model=modelOverride ?: preferences.model ?: chosen.model
-        val inference=ProjectAgentInference {messages,think,progress->val response=QwenRequests.conversation(model,messages,think,chosen.runnerId,progress).answer;check(!response.limited) {"Qwen 출력 한도에 도달했습니다. 요청을 작게 나눠주세요."};response.text}
-        if(route && !engine.route(prompt,inference,userName,session.user))return
+        val inference=inference(session,model)
+        if(route && !engine.route(prompt,inference,userName,session.user,session.history))return
         val actor=authorize(jda,session.guild,session.user)
         check(!job.cancelled.get() && !Thread.currentThread().isInterrupted) {"작업을 중단했습니다."}
         val main=channel.sendMessageEmbeds(EmbedBuilder().setTitle("Qwen $model · 시작").setDescription(prompt.take(1800)).build()).setComponents(ActionRow.of(Button.danger("qa:stop:${job.id}","에이전트 중지"))).setAllowedMentions(emptyList()).complete()
         val events=DiscordProjectAgentDisplay(channel,main,prompt,model,job.id)
         var lastCheck=0L
         fun active() {
-            check(!job.cancelled.get()) {"사용자가 작업을 중단했습니다."}
+            check(!job.cancelled.get() && store.channel(session.channel)?.contextEpoch==session.contextEpoch) {"사용자가 작업을 중단했습니다."}
             check(jda===current() && config().enabled && identity.resolveDiscord(session.user,session.guild)==actor) {"소유자 연결 또는 Discord 연결이 철회되었습니다."}
             if(System.nanoTime()-lastCheck>java.util.concurrent.TimeUnit.SECONDS.toNanos(3)){privateAccess(jda,session);lastCheck=System.nanoTime()}
         }
         try {engine.run(session.channel,session.user,userName,prompt,preferences,inference,::active,events::emit)}catch(e:Exception){events.emit(ProjectAgentEvent("done",text=if(job.cancelled.get())"작업 중단: 사용자가 중지했습니다." else "작업 중단: ${safe(e)}"))}
         }finally{jobs.finish(session.channel,job)}
+    }
+    private fun inference(session:ProjectAgentChannel,override:String?=null):ProjectAgentInference {
+        val chosen=qwen.config();val model=override ?: store.preferences(session.guild,session.user).model ?: chosen.model
+        return object:ProjectAgentInference {
+            private var last:QwenUsage?=null;private var helperInput=0L;private var helperOutput=0L;private var helperCalls=0
+            override fun generate(messages:List<ProjectAgentMessage>,think:Boolean,progress:(QwenProgress)->Unit):String {
+                val response=QwenRequests.conversation(model,messages,think,chosen.runnerId,progress).answer
+                val main=messages.firstOrNull()?.content?.startsWith("You are 루오노타르")==true
+                if(!main){helperInput+=response.inputTokens ?: 0;helperOutput+=response.tokens;helperCalls++}
+                last=if(main)QwenUsage(response.inputTokens,response.tokens,messages.sumOf {ProjectAgentContext.estimatedTokens(it.content)},response.modelContext,helperInput=helperInput,helperOutput=helperOutput,helperCalls=helperCalls)
+                    else (last ?: QwenUsage()).copy(helperInput=helperInput,helperOutput=helperOutput,helperCalls=helperCalls)
+                check(!response.limited) {"Qwen 출력 한도에 도달했습니다. 문맥을 압축하거나 요청을 나눠주세요."};return response.text
+            }
+            override fun usage()=last
+            override fun modelLimit():Int?=runCatching {RemoteLlm.modelLimitProvider?.invoke(model,chosen.runnerId) ?: if(chosen.runnerId==null)LocalLlm().modelContext(model) else null}.getOrNull()
+        }
     }
     private fun safe(e:Exception)=if(e is IllegalArgumentException || e is IllegalStateException)e.message.orEmpty().take(1200) else "연결·실행 오류입니다. 봇 권한과 실행 로그를 확인하세요."
     override fun close(){jobs.close();engine.close();worker.shutdownNow()}
@@ -167,48 +203,48 @@ internal object ProjectAgentChannels {
     }
 }
 
-/** Model output edits the channel's main reply; verbose tool data belongs in a turn thread, never the model context. */
-internal class DiscordProjectAgentDisplay(private val channel:TextChannel,private val main:Message,private val request:String,private val model:String,private val jobId:String,editIntervalMillis:Long=750) {
-    private val mapper=jacksonObjectMapper();private val turns=mutableMapOf<Int,Message>();private val threads=mutableMapOf<Int,ThreadChannel>()
-    private val activity=ArrayDeque<String>();private var response=""
+/** Plain model messages; embeds contain turn status, permission requests and condensed results only. */
+internal class DiscordProjectAgentDisplay(private val channel:TextChannel,private val main:Message,private val request:String,private val model:String,private val jobId:String,private val editIntervalMillis:Long=750) {
+    private val turns=mutableMapOf<Int,Message>();private val threads=mutableMapOf<Int,ThreadChannel>()
+    private val replies=mutableMapOf<Int,DiscordAgentText>();private val logs=mutableMapOf<Int,Pair<StringBuilder,DiscordAgentText>>()
+    private var usage:QwenUsage?=null;private var finished=false
     private val edits=CoalescedMessageEdits<Pair<net.dv8tion.jda.api.entities.MessageEmbed,Boolean>>({snapshot,complete->
         val buttons=if(snapshot.second)emptyList() else listOf(ActionRow.of(Button.danger("qa:stop:$jobId","에이전트 중지")))
         main.editMessageEmbeds(snapshot.first).setComponents(buttons).setAllowedMentions(emptyList()).queue({complete()},{complete()})
     },intervalMillis=editIntervalMillis)
-    private fun render(status:String,seconds:Double=0.0,finished:Boolean=false) {
-        val card=EmbedBuilder().setTitle("Qwen $model · $status").setDescription((response.ifBlank {request}).take(3500))
-        if(activity.isNotEmpty())card.addField("이번 요청에서 읽은 파일·실행한 도구",activity.joinToString("\n").takeLast(1000),false)
-        if(seconds>0)card.setFooter("요청 소요 ${"%.1f".format(java.util.Locale.ROOT,seconds)}초")
-        edits.offer(card.build() to finished,finished)
-    }
+    private fun footer()=usage?.let {"문맥 약 ${it.estimatedContext}/8192 · 입력 ${it.input ?: "미수신"} · 출력 ${it.output ?: "미수신"} · 모델 최대 ${it.modelContext ?: "확인 불가"} · 보조 수신 ${it.helperCalls}회 입력 ${it.helperInput}/출력 ${it.helperOutput}"} ?: "입력·출력 토큰 대기"
+    private fun render(status:String,done:Boolean=false){edits.offer(EmbedBuilder().setTitle("Qwen $model · $status").setFooter(footer()).build() to done,done)}
+    private fun reply(turn:Int)=replies.getOrPut(turn){DiscordAgentText(channel,editIntervalMillis)}
     @Synchronized fun emit(event:ProjectAgentEvent) {
-        when(event.kind) {
-            "thinking"->{response="";render("턴 ${event.turn} · 모델 응답 대기")}
-            "stream"->{if(event.text.isNotBlank()){response=event.text;render("턴 ${event.turn} · 답변 생성 중 (실행 전 제안)")}else if(!event.output.isNullOrBlank()){response="‘${event.output.takeLast(1500)}’";render("턴 ${event.turn} · Thinking")}}
-            "message"->{response=event.text;render("턴 ${event.turn} · 모델 응답 · ${"%.1f".format(java.util.Locale.ROOT,event.seconds)}초")}
+        if(finished)return
+        when(event.kind){
+            "usage"->{usage=event.usage;render("턴 ${event.turn} · 결과 확인")}
+            "status"->render("턴 ${event.turn} · ${event.text}")
+            "thinking"->{usage=event.usage;render("턴 ${event.turn} · 모델 응답 대기")}
+            "stream"->{if(event.text.isNotBlank())reply(event.turn).offer(event.text) else if(!event.output.isNullOrBlank())reply(event.turn).offer("‘${event.output.takeLast(1500)}’")}
+            "message"->{reply(event.turn).offer(event.text);render("턴 ${event.turn} · 모델 응답")}
             "reviewing"->render("턴 ${event.turn} · 독립 위험 검토")
             "approval","tool_start","denied"->{
                 val plan=event.plan!!
                 val card=EmbedBuilder().setTitle("턴 ${event.turn} : ${plan.tool.name}").setDescription(plan.description.take(2800))
-                    .addField("실행 컴퓨터·폴더","관리 앱 OS 사용자\n${plan.cwd}".take(1000),false)
-                    .addField("프로젝트 경계", "코드 검사: ${plan.scope}\n실제 대상: ${plan.resolvedTargets.joinToString()}\n감시 Qwen: ${event.risk?.projectScope ?: "UNKNOWN"}".take(1000),false)
-                    .addField("독립 검토",event.risk?.let {"${it.action} · ${it.risk}\n${it.reason}"}.orEmpty().take(1000),false)
-                val actions=if(event.kind=="approval")listOf(ActionRow.of(Button.success("qa:allow:${event.token}","이 요청 허용"),Button.danger("qa:deny:${event.token}","거절"))) else emptyList()
+                    .addField("실행 폴더",plan.cwd.take(1000),false)
+                    .addField("영향 경로",plan.resolvedTargets.joinToString("\n").take(1000),false)
+                    .addField("독립 검토",event.risk?.let {"${it.action} · ${it.risk} · ${it.projectScope}\n${it.reason}"}.orEmpty().take(1000),false).setFooter(footer())
+                if(plan.gradleFingerprint!=null)card.addField("Gradle 프로젝트 신뢰","허용하면 현재 빌드 설정의 일반 build·test·check·assemble을 자동 승인 모드에서 재사용합니다. Gradle 캐시·의존성 다운로드를 포함하며 설정 변경 시 다시 확인합니다.",false)
+                val actions=if(event.kind=="approval")listOf(ActionRow.of(Button.success("qa:allow:${event.token}","이 요청 허용"),Button.danger("qa:deny:${event.token}","거절")))else emptyList()
                 val message=turns[event.turn]?.also {it.editMessageEmbeds(card.build()).setComponents(actions).complete()} ?: channel.sendMessageEmbeds(card.build()).setComponents(actions).setAllowedMentions(emptyList()).complete().also {turns[event.turn]=it}
-                if(event.kind=="approval")message.replyFiles(FileUpload.fromData(mapper.writeValueAsBytes(plan),"approval-exact-request.json")).setAllowedMentions(emptyList()).complete()
-                if(event.kind=="tool_start") {
-                    activity.addLast("${plan.tool.name}: "+plan.tool.arguments.path("path").asText(plan.cwd));while(activity.size>8)activity.removeFirst()
-                    if(!plan.readOnly) {val thread=message.createThreadChannel("턴 ${event.turn} : ${plan.tool.name}".take(95)).complete();threads[event.turn]=thread;thread.sendFiles(FileUpload.fromData(mapper.writeValueAsBytes(plan),"tool-input.json")).complete()}
+                if(event.kind=="tool_start"){
+                    if(!plan.readOnly){val thread=message.createThreadChannel("턴 ${event.turn} : ${plan.tool.name}".take(95)).complete();threads[event.turn]=thread;logs[event.turn]=StringBuilder() to DiscordAgentText(thread)}
                     render("턴 ${event.turn} · 도구 실행")
                 }
             }
+            "tool_output"->logs[event.turn]?.let {(text,writer)->text.append(event.text);writer.offer(text.toString())}
             "tool_end"->{
-                val detail=if(event.plan!!.readOnly)"조회: ${event.plan.resolvedTargets.joinToString()}" else event.text.take(3500)
-                turns[event.turn]?.editMessageEmbeds(EmbedBuilder().setTitle("턴 ${event.turn} : ${event.plan.tool.name} · ${"%.1f".format(java.util.Locale.ROOT,event.seconds)}초").setDescription(detail).build())?.setComponents(emptyList())?.complete()
-                threads[event.turn]?.sendFiles(FileUpload.fromData(event.output.orEmpty().toByteArray(Charsets.UTF_8),"tool-result.txt"))?.complete()
-                render("턴 ${event.turn} · 도구 완료")
+                logs[event.turn]?.let {(text,writer)->writer.offer(text.toString().ifBlank {"출력 없음"},true)}
+                turns[event.turn]?.editMessageEmbeds(EmbedBuilder().setTitle("턴 ${event.turn} : ${event.plan!!.tool.name} · ${"%.1f".format(java.util.Locale.ROOT,event.seconds)}초").setDescription(event.text.take(3500)).setFooter(footer()).build())?.setComponents(emptyList())?.queue({}, {})
+                render("턴 ${event.turn} · 결과 검토 후 다음 단계")
             }
-            "done"->{val stopped=event.text.startsWith("작업 중단");response=if(stopped && response.isNotBlank())response.take(2000)+"\n\n"+event.text else event.text;render(if(stopped)"중단" else "종료",event.seconds,true);turns.values.forEach {it.editMessageComponents(emptyList()).queue({}, {})}}
+            "done"->{reply(event.turn).offer(event.text,true);finished=true;render("${if(event.text.startsWith("작업 중단"))"중단" else "종료"} · ${"%.1f".format(java.util.Locale.ROOT,event.seconds)}초",true);turns.values.forEach {it.editMessageComponents(emptyList()).queue({}, {})}}
         }
     }
 }
