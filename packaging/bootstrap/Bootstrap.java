@@ -18,8 +18,11 @@ public class Bootstrap {
   return new int[]{Integer.parseInt(core[0]),Integer.parseInt(core[1]),Integer.parseInt(core[2]),split.length==2?Integer.parseInt(split[1]):Integer.MAX_VALUE};
  }
  static int compare(String a,String b){int[] x=versionParts(a),y=versionParts(b);for(int i=0;i<4;i++){int c=Integer.compare(x[i],y[i]);if(c!=0)return c;}return 0;}
+ static boolean approvedRollback(String target,String current)throws Exception{return compare(target,current)<0 && compare(target,"0.6.0")>=0 && !target.contains("-beta.") && target.equals(text(updates.resolve("rollback-approved.txt"),""));}
+ static void activate(String version)throws Exception{atomic(updates.resolve("active.txt"),version);if(compare(version,bundled)<0)atomic(updates.resolve("rollback-active.txt"),version);else Files.deleteIfExists(updates.resolve("rollback-active.txt"));}
  static Path verified(String version)throws Exception {
-  if(compare(version,bundled)<=0)return resources.resolve("server-manager.jar");
+  if(version.equals(bundled))return resources.resolve("server-manager.jar");
+  if(compare(version,bundled)<0 && !version.equals(text(updates.resolve("rollback-active.txt"),"")) && !version.equals(text(updates.resolve("rollback-approved.txt"),"")))throw new SecurityException("Unapproved downgrade");
   Path dir=updates.resolve(version);byte[] manifest=Files.readAllBytes(dir.resolve("update.properties"));
   Signature verifier=Signature.getInstance("Ed25519");verifier.initVerify(KeyFactory.getInstance("Ed25519").generatePublic(new X509EncodedKeySpec(Files.readAllBytes(resources.resolve("update-public-key.der")))));verifier.update(manifest);
   if(!verifier.verify(Files.readAllBytes(dir.resolve("update.sig"))))throw new SecurityException("Update signature mismatch");
@@ -59,23 +62,23 @@ public class Bootstrap {
     if(System.getenv("SERVER_MANAGER_DATA")!=null&&!Files.exists(home.resolve("data-location.txt")))atomic(home.resolve("data-location.txt"),validateData(System.getenv("SERVER_MANAGER_DATA")).toString()+"\n");
     if(System.getenv("SERVER_MANAGER_DATA")==null&&!Files.exists(home.resolve("data-location.txt"))){if(service)atomic(home.resolve("data-location.txt"),home.resolve("data").toString()+"\n");else chooseData(null);}
     Runtime.getRuntime().addShutdownHook(new Thread(Bootstrap::stopChild));
-    String active=text(updates.resolve("active.txt"),bundled);if(compare(active,bundled)<0)active=bundled;
+    String active=text(updates.resolve("active.txt"),bundled);if(compare(active,bundled)<0 && !active.equals(text(updates.resolve("rollback-active.txt"),"")))active=bundled;
     boolean rolledBack=false;
     while(true){
-     Path jar;try{jar=verified(active);}catch(Exception e){atomic(home.resolve("update-error.txt"),e.getMessage());active=bundled;jar=verified(active);atomic(updates.resolve("active.txt"),active);}
+     Path jar;try{jar=verified(active);}catch(Exception e){atomic(home.resolve("update-error.txt"),e.getMessage());active=bundled;jar=verified(active);activate(active);}
      Path data=Path.of(text(home.resolve("data-location.txt"),home.resolve("data").toString()));Files.createDirectories(data);
      Path ready=home.resolve("ready-"+UUID.randomUUID()+".txt");
      List<String> command=new ArrayList<>(List.of(System.getProperty("java.home")+"/bin/java","-jar",jar.toString()));command.addAll(args);
      ProcessBuilder builder=new ProcessBuilder(command).directory(home.toFile()).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.appendTo(home.resolve("logs/app.log").toFile()));
-     builder.environment().put("SERVER_MANAGER_DATA",data.toString());builder.environment().put("SERVER_MANAGER_HOME",home.toString());builder.environment().put("SERVER_MANAGER_SUPERVISED","1");builder.environment().put("SERVER_MANAGER_EXPECTED_VERSION",active);builder.environment().put("SERVER_MANAGER_READY_FILE",ready.toString());child=builder.start();
+     builder.environment().put("SERVER_MANAGER_DATA",data.toString());builder.environment().put("SERVER_MANAGER_HOME",home.toString());builder.environment().put("SERVER_MANAGER_SUPERVISED","1");builder.environment().put("SERVER_MANAGER_BOOTSTRAP_PROTOCOL","2");builder.environment().put("SERVER_MANAGER_EXPECTED_VERSION",active);builder.environment().put("SERVER_MANAGER_READY_FILE",ready.toString());child=builder.start();
      if(recovery){System.exit(child.waitFor());return;}
      for(int i=0;i<120&&child.isAlive()&&!Files.exists(ready);i++)Thread.sleep(500);
      boolean healthy=Files.exists(ready);Files.deleteIfExists(ready);
-     if(!healthy){stopChild();if(compare(active,bundled)>0&&!rolledBack){atomic(home.resolve("failed-update-version.txt"),active);atomic(home.resolve("update-error.txt"),"새 버전이 시작되지 않아 이전 버전으로 복구했습니다.");active=text(updates.resolve("previous.txt"),bundled);atomic(updates.resolve("active.txt"),active);rolledBack=true;continue;}throw new IllegalStateException("앱을 시작하지 못했습니다. "+home.resolve("logs/app.log"));}
+     if(!healthy){stopChild();if(!active.equals(bundled)&&!rolledBack){atomic(home.resolve("failed-update-version.txt"),active);atomic(home.resolve("update-error.txt"),"새 버전이 시작되지 않아 이전 버전으로 복구했습니다.");active=text(updates.resolve("previous.txt"),bundled);activate(active);rolledBack=true;continue;}throw new IllegalStateException("앱을 시작하지 못했습니다. "+home.resolve("logs/app.log"));}
      if(!service){if(Files.exists(data.resolve("security/setup-code.txt")))new ProcessBuilder("/usr/bin/open","-t",data.resolve("security/setup-code.txt").toString()).start();openBrowser(config);service=true;}
      int code=child.waitFor();child=null;if(code!=75)return;
      String pending=text(updates.resolve("pending.txt"),active);
-     if(compare(pending,active)>0){verified(pending);atomic(updates.resolve("previous.txt"),active);active=pending;atomic(updates.resolve("active.txt"),active);Files.deleteIfExists(updates.resolve("pending.txt"));}
+     if(compare(pending,active)>0 || approvedRollback(pending,active)){verified(pending);atomic(updates.resolve("previous.txt"),active);active=pending;activate(active);Files.deleteIfExists(updates.resolve("pending.txt"));Files.deleteIfExists(updates.resolve("rollback-approved.txt"));rolledBack=false;}
      Path pendingData=home.resolve("pending-data-location.txt");if(Files.exists(pendingData)){String next=Files.readString(pendingData).trim();atomic(home.resolve("data-location.txt"),validateData(next).toString()+"\n");Files.delete(pendingData);}
     }
    }
