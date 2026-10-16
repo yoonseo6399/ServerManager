@@ -770,6 +770,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             val hostedProcess=process as? HostedProcess;val position=instanceRoot(id).resolve("console.seq");var lastSaved=0L
             FileOutputStream(log.toFile(),true).bufferedWriter().use { writer ->
             process.inputStream.bufferedReader().useLines { lines -> lines.forEach { line ->
+                if(LogNoise.dropped(line))return@forEach
                 val kind=if(line.contains("ERROR") || line.contains("Exception")) "error" else if(line.contains("WARN")) "warn" else "output"
                 if(line.contains("logged in with entity id")||line.contains("joined the game"))activity[id]?.incrementAndGet()
                 if(processes[id]===process)stopMonitors[id]?.log(line)

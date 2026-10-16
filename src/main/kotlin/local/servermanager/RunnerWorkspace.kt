@@ -56,13 +56,14 @@ class RunnerWorkspace(private val base:Path,private val history:Path,private val
     fun matches(directory:Path)=base==directory
     @Synchronized fun busy()=uploads.values.any {System.currentTimeMillis()-it.at<=15*60*1000}
     @Synchronized fun execute(req:WorkspaceRequest):Any {
-        if(req.op !in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE"))stopped()
+        if(req.op !in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW"))stopped()
         uploads.entries.removeIf { (_,u)->if(System.currentTimeMillis()-u.at>15*60*1000){u.temporary.deleteIfExists();true}else false }
         recover()
         val p=path(req.path)
         return when(req.op) {
             "LOG_LIST" -> LogFiles(logDirectory,base).list()
             "LOG_PAGE" -> LogFiles(logDirectory,base).page(req.path,req.offset,100,req.revision)
+            "LOG_WINDOW" -> LogFiles(logDirectory,base).window(req.path,req.offset,(req.data?.toIntOrNull() ?: 300).coerceIn(1,100),req.to.takeIf {it.isNotEmpty()})
             "LIST" -> {
                 require(p.isDirectory());require(req.offset in 0..100000)
                 val entries=Files.list(p).use {it.filter {f->!Files.isSymbolicLink(f) && !f.name.startsWith(".remote-save-")}.sorted().limit(100001).toList()};require(entries.size<=100000) {"폴더의 파일이 너무 많습니다"}
