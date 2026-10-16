@@ -79,4 +79,17 @@ class RunnerUpdateTest {
             verify(service,timeout(3000)).install("0.6.2",false,true)
         }finally{agent.shutdownGracefully()}
     }
+    @Test fun `activation uses staged manifest version rather than failed concurrent selection telemetry`() {
+        val service=mock(RunnerUpdater::class.java);`when`(service.pending()).thenReturn(true)
+        `when`(service.status()).thenReturn(RunnerUpdateStatus("FAILED","0.7.0-beta.3"))
+        val folder=temp.resolve("updates/0.7.0-beta.2").createDirectories()
+        folder.resolve("update.properties").writeText("version=0.7.0-beta.2\n")
+        temp.resolve("updates/pending.txt").writeText("0.7.0-beta.2")
+        val agent=RunnerAgent(temp,RunnerIdentity("https://localhost","fixture","fixture","unused","MAC"),service)
+        try {
+            assertTrue(agent.restartForUpdate())
+            assertEquals("0.7.0-beta.2",ActivationGuard(temp).read()!!.to)
+            assertEquals("0.7.0-beta.2",UpdateCoordinator(temp).current(UpdateComponents.RUNNER_CONTROL)!!.target)
+        }finally{agent.shutdownGracefully()}
+    }
 }
