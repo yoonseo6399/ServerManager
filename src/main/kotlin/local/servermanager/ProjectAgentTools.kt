@@ -23,7 +23,7 @@ write_file {path,content}; delete_path {path}; run_command {command,cwd?,timeout
 build/test {command,cwd?,timeout_seconds?}; git {args:[literal argv],cwd?}; make_new_project {name,path?,repo?}.
 list_attachments {}; read_attachment {message_id,attachment_id,start_line?,lines?}; save_attachment {message_id,attachment_id,path}; upload_file {path}.
 Discord files are restricted to THIS project channel. Read UTF-8 text/code only; no image/PDF interpretation, automatic execution or extraction. Upload is a publication action subject to independent approval; never upload secrets.
-All paths may be absolute or relative to the project home; no fixed allowlist. Read files before overwriting them.
+All paths may be absolute or relative to the project home; no fixed allowlist. Read files before overwriting them. Preserve original line endings and final newline unless asked otherwise. read_file line-number prefixes are display metadata, NEVER copy them into write_file content.
 make_new_project creates a directory and optionally clones an HTTPS Git repository into it, then registers the project.
 Commands run on the MANAGEMENT APP COMPUTER as its OS user, never on the Ollama inference runner.
 Reads/searches return verbatim bounded source, no summarizer by default. summarize:true explicitly requests a summary.
@@ -99,7 +99,15 @@ No automatic administrator escalation. Never ask tools to change approval settin
             "read_file"->{
                 require(path.isRegularFile() && path.fileSize()<=1_048_576) {"1MB 이하 일반 파일만 읽습니다. 큰 파일은 검색 도구나 범위 명령을 사용하세요."}
                 val start=args.path("start_line").asInt(1);require(start>=1);val count=args.path("lines").asInt(120).coerceIn(1,400)
-                path.bufferedReader().use {reader->result(reader.lineSequence().drop(start-1).take(count).mapIndexed {i,line->"${i+start}: ${line.take(2000)}"}.joinToString("\n").take(48000))}
+                val bytes=Files.newInputStream(path).use {it.readNBytes(1_048_577)};require(bytes.size<=1_048_576)
+                val text=bytes.toString(Charsets.UTF_8)
+                val endings=Regex("\\r\\n|\\r|\\n").findAll(text).map {when(it.value){"\r\n"->"CRLF";"\r"->"CR";else->"LF"}}.toSet()
+                val trailing=Regex("(?:\\r\\n|\\r|\\n)+$").find(text)?.value.orEmpty()
+                val tailCount=Regex("\\r\\n|\\r|\\n").findAll(trailing).count()
+                val lines=text.reader().buffered().use {it.lineSequence().drop(start-1).take(count+1).toList()}
+                val source=lines.take(count).mapIndexed {i,line->"${i+start}: ${line.take(2000)}"}.joinToString("\n")
+                result("FILE METADATA (not source): line_endings=${endings.joinToString("+").ifEmpty {"NONE"}}; trailing_line_breaks=$tailCount; ends_with_newline=${tailCount>0}. Preserve original line endings and final newline when editing.\n"+
+                    (if(lines.size>count || lines.any {it.length>2000} || source.length>48000)"PARTIAL SOURCE: more lines/characters exist; do not overwrite unread content.\n" else "")+"NUMBERED SOURCE (prefixes like 1: are display metadata, NOT file content; never copy these prefixes):\n"+source.take(48000))
             }
             "find_files","search_text"->{
                 val out=StringBuilder();var scanned=0;var hits=0

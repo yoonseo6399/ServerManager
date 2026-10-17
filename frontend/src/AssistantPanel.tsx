@@ -17,7 +17,7 @@ export function AssistantPanel(){
  useEffect(()=>{if(!tasks.some(t=>['PREPARING','APPLYING'].includes(t.state)))return;const timer=setInterval(()=>{load().catch(e=>setError(e.message));},2000);return()=>clearInterval(timer);},[tasks]);
  async function run(action:()=>Promise<unknown>){setBusy(true);setError('');try{try{await action();}catch(e){if(!(e instanceof ApiError)||e.status!==428)throw e;await auth.login(true);await action();}await load();}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
  function root(index:number,field:keyof Root,value:string){setPolicy({...policy,roots:policy.roots.map((r,i)=>i===index?{...r,[field]:value}:r)});}
- return <section className="discord-settings" aria-labelledby="assistant-title"><h2 id="assistant-title">Qwen 비서 · 파일과 개인 정보 조회</h2>
+ return <section className="discord-settings" aria-labelledby="assistant-title"><h2 id="assistant-title">로컬 비서 · 파일과 개인 정보 조회</h2>
  <p>Discord의 <code>/agent</code>는 전체 경로·명령을 다루는 프로젝트 에이전트입니다. <code>/agent setting</code>에서 개인 기본 모델·Thinking·명시적 승인을 설정하고 <code>/agent channel</code>로 대화를 이어가세요. 아래 웹 파일 초안은 기존 제한 모드를 유지하며, 복사본과 클라우드 검토 후 최종 승인으로 반영합니다. 메일·일정 조회도 별도로 사용할 수 있습니다.</p>
  {error&&<p role="alert" className="alert error-banner">{error}</p>}
  <details><summary>파일 접근 권한과 편집 엔진</summary><p>관리 앱 컴퓨터의 기존 텍스트 파일 1~5개, 각 48KB까지 지원합니다. 관련 구간을 골라 작은 변경을 만듭니다. 새 파일·삭제·이동·비밀 값·관리 앱 데이터 접근은 지원하지 않습니다. 파일 접근·수정은 현재 macOS 관리 앱에서만 지원합니다. Linux와 Windows에서는 접근을 차단합니다. 파일 하나의 교체는 원자적이며, 여러 파일 도중 충돌하면 외부 변경을 보존하면서 복구를 시도하고 사본을 남깁니다.</p>
@@ -45,10 +45,10 @@ export function AssistantPanel(){
  {!terminal(t)&&<button disabled={busy} onClick={()=>run(()=>api(`/admin/assistant/tasks/${t.id}/cancel`,'POST'))}>거절·취소</button>}
  {terminal(t)&&<button disabled={busy} onClick={()=>run(()=>api(`/admin/assistant/tasks/${t.id}`,'DELETE'))}>기록·임시 복사본 삭제</button>}</div>
  {t.backups.length>0&&<p>복구용 원본: {t.backups.join(', ')}</p>}<details><summary>진행 기록</summary><pre style={{whiteSpace:'pre-wrap'}}>{t.logs.join('\n')}</pre></details></article>)}
- <details><summary>Gmail·캘린더를 Qwen으로 요약</summary><p>내 계정에서 연결한 Google 계정만 조회합니다. 조회 조건은 사용자가 정하며, 메일·일정의 문장으로 파일·명령 권한을 얻을 수 없습니다. 결과를 선택한 Qwen 컴퓨터로 보내며 메인 클라우드 검토에는 보내지 않습니다.</p>
+ <details><summary>Gmail·캘린더를 로컬 모델로 요약</summary><p>내 계정에서 연결한 Google 계정만 조회합니다. 조회 조건은 사용자가 정하며, 메일·일정의 문장으로 파일·명령 권한을 얻을 수 없습니다. 결과를 선택한 로컬 추론 컴퓨터로 보내며 메인 클라우드 검토에는 보내지 않습니다.</p>
  <fieldset disabled={busy}><label>조회 대상<select value={source} onChange={e=>setSource(e.target.value)}><option value="gmail">Gmail 검색</option><option value="calendar">캘린더 일정</option></select></label>
  {source==='gmail'?<label>Gmail 검색 조건<input value={query} maxLength={500} onChange={e=>setQuery(e.target.value)} placeholder="is:unread newer_than:7d"/></label>:<><label>시작<input type="datetime-local" value={from} onChange={e=>setFrom(e.target.value)}/></label><label>종료<input type="datetime-local" value={until} onChange={e=>setUntil(e.target.value)}/></label></>}
- <label><input type="checkbox" checked={googleConsent} onChange={e=>setGoogleConsent(e.target.checked)}/>조회 결과 일부를 Qwen 컴퓨터로 보내 요약하는 데 동의합니다</label>
+ <label><input type="checkbox" checked={googleConsent} onChange={e=>setGoogleConsent(e.target.checked)}/>조회 결과 일부를 로컬 추론 컴퓨터로 보내 요약하는 데 동의합니다</label>
  <button disabled={!googleConsent} onClick={()=>run(async()=>{const result=await api<{answer:string;notice:string}>('/admin/assistant/google','POST',{source,query,from:from?new Date(from).toISOString():'',until:until?new Date(until).toISOString():'',consent:googleConsent});setAnswer(result.notice+'\n\n'+result.answer);})}>조회·요약</button>{answer&&<pre style={{whiteSpace:'pre-wrap'}}>{answer}</pre>}</fieldset></details>
  <details><summary>Discord 소유자 계정 연결</summary><p>관리 웹 소유자 계정과 Discord 계정을 연결해야 파일 비서를 사용할 수 있습니다. Discord 최고 관리자 역할도 확인합니다. 아래 코드를 <code>/agent link code:코드</code>에 입력하세요. 코드·연결은 앱 재시작 때 사라집니다.</p>
  <button disabled={busy} onClick={()=>run(async()=>{const result=await api<{code:string}>('/admin/assistant/discord-link','POST');setCode(result.code);})}>5분 연결 코드 발급</button>

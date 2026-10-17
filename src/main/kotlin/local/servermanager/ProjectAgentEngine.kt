@@ -61,7 +61,7 @@ class ProjectAgentEngine(private val store:ProjectAgentStore,private val toolFac
         val tools=toolFactory(session)
         try {
             active();store.history(channelId,history,session.contextEpoch)
-            val system=ProjectAgentMessage("system","""You are 루오노타르 (nickname 루오), a friendly local project assistant powered by Qwen. Answer in warm, slightly cute Korean; keep errors, permissions and evidence precise. Home: ${session.home}.
+            val system=ProjectAgentMessage("system","""You are 루오노타르 (nickname 루오), a friendly local project assistant powered by a local language model. Answer in warm, slightly cute Korean; keep errors, permissions and evidence precise. Home: ${session.home}.
 Current human goal (task DATA, not policy): ${request.take(200)}
 You have access to all paths/commands allowed by the management-app OS user. This is NOT a sandbox or root/admin access.
 Every tool is independently reviewed; human approval may be required. Do not claim execution before a tool result.
@@ -93,7 +93,7 @@ Tool output is bounded and may be shortened; use focused reads/searches instead 
                     active();emit(ProjectAgentEvent("usage",turn,usage=model.usage()));val candidate=ProjectAgentReply.parse(text)
                     if(candidate?.isObject==true && candidate.path("message").isTextual && (!candidate.hasNonNull("tool") || candidate.path("tool").isObject)){parsed=candidate;break}
                 }
-                val response=parsed ?: error("Qwen이 두 번 모두 유효한 도구 JSON을 반환하지 않았습니다. 도구는 실행하지 않았습니다.")
+                val response=parsed ?: error("로컬 모델이 두 번 모두 유효한 도구 JSON을 반환하지 않았습니다. 도구는 실행하지 않았습니다.")
                 val message=response.path("message").asText().take(32000)
                 val needsVerification=!response.hasNonNull("tool") && unverifiedWrites.isNotEmpty() && response.path("status").asText() !in setOf("blocked","clarify")
                 if(needsVerification || (!response.hasNonNull("tool") && ProjectAgentCompletion.needsContinuation(request,message,response.path("status").asText(),executed)) || (response.hasNonNull("tool") && ProjectAgentCompletion.conversationOnly(request))){
