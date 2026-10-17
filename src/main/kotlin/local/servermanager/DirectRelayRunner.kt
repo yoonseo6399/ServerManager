@@ -82,6 +82,11 @@ class DirectRelayRunnerRole(home:Path,private val send:(RunnerMessage)->Boolean,
     @Volatile private var announced:RelayConsentState?=null
 
     fun busy()=(hub?.streamCount() ?: 0)>0 || agents.values.any {it.streamCount()>0}
+    /** Replacement drain: players and tunnels already in place continue; no new player can enter. */
+    fun pauseNewWork(){hub?.pauseGame()}
+    /** Cancelled replacement: reopen exactly what the manager last configured. */
+    fun resumeNewWork(){val config=hubConfig;val active=hub;if(config!=null && active!=null && consent.read().allowed)lastBindOk=active.listen(config.gamePort,config.securePort,bindAddress)}
+    fun streamTotal()=(hub?.streamCount() ?: 0)+agents.values.sumOf {it.streamCount()}
     private fun reportConsent(state:RelayConsentState) {
         announced=state
         send(RunnerMessage("relay-consent",state=if(state.allowed)"ALLOWED" else "DENIED",version="DRP1",detail=mapper.writeValueAsString(state)))

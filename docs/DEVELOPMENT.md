@@ -8,6 +8,14 @@
 
 이미 받은 업데이트가 대기하는 동안 다른 버전 요청이 실패하면 상태의 latest는 잠시 실패 요청을 가리킬 수 있다. 활성화 확인과 적용 상태는 실제 pending 매니페스트의 버전을 우선하도록 바꿨다. 서명 검증과 패키지 선택은 유지했다. fix/runner-update-target 관련 업데이트 테스트 23개 통과. 공개 0.6.2는 변경하지 않고 새 안정판으로 게시한다.
 
+## 2026-10-16 — 0.7.0-beta.3 최종 통합 및 게시 사고 기록
+
+Qwen·실행기 선택·승인된 안정판 롤백에 실제 대기 매니페스트 대상 우선 수정을 통합했다. 관련 백엔드 66개·브라우저 4개와 빌드 통과. 전체·다른 OS 생략. beta.2 CI 취소 이후 공개 여부 검증이 실패했지만 셸의 다음 삭제 명령이 실행돼 공개 beta.2 릴리즈를 삭제하는 실수가 있었다. 즉시 사용자에게 알리고 사과했으며 tag 69ebb60과 안정판은 유지했다. 같은 버전 파일을 다시 만들지 않고 beta.3으로 대체한다. 검증과 파괴적 명령은 서로 다른 도구 호출로 분리한다.
+
+## 2026-10-16 — 0.7.0-beta.2 Qwen + 업데이트/롤백 통합
+
+feat/qwen-project-agent와 0.6.2 실행기 선택·승인 롤백을 베타 통합했다. RunnerMain의 세션 기능 보고 충돌은 RELEASE_SELECTION_V1/ROLLBACK_V1과 OLLAMA_AGENT_V2를 모두 유지하도록 해결했다. 사용자 지시에 따라 단독 구현하며 전체 테스트·다른 OS는 생략한다. Qwen 세부 동작과 제한은 docs/qwen-project-agent.md, 업데이트/설치판 요구 사항은 docs/runner-release-updates.md 참조. 베타는 안정판 main에 병합하지 않는다.
+
 ## 2026-10-16 — 0.6.2 실행기 선택 업데이트·명시적 안정판 롤백
 
 feat/runner-release-picker를 단독 통합했다. 실행기별 릴리즈 목록은 실행기 현재 버전을 기준으로 계산하고 명시적 베타 요청은 자동 채널 필터와 구분한다. 연결별 기능 협상, 소유자/등록자·최근 패스키 확인, 정확한 대상 재검증과 상태·로그를 제공한다. 구형 실행기에는 최초 안정판 원격 업데이트를 안내한다.
@@ -573,3 +581,30 @@ Final `DISCORD_MUSIC_LIVE_TEST=true` Gradle test + bootJar passed (268 discovere
 ## 2026-10-15 — 0.5.1 Qwen web settings
 
 `release/0.5.1` = v0.5.0 plus origin/main (0.4.14 merge record). Adds the web "Qwen (Ollama)" section: pin a runner, choose 14B/30B, remote Ollama check (`llm-request` states probe/unload), unload button, and a guarantee that only one Qwen model is resident (other Qwen tags are unloaded and verified gone before each request; unrelated models are untouched). `/local-llm` model option is optional and defaults to the web setting; a pinned runner never falls back to the manager computer. The uncommitted transfer-integrity experiment and transfer-progress changes in the development checkout are NOT included.
+
+## 2026-10-16 — 0.7.0-beta.4 Qwen workflow and memory
+
+Integrates fix/qwen-live-output f744af6 and feat/qwen-workflow 7e01e25 (initial 52085ca) on published beta.3. Plain Markdown replies, actual Thinking streaming, owner/run-bound stop, live process logs, independent long-result summaries and explicit multi-step review/continue instructions. Channel context reset/configure/compact/status with epoch-bound persistence, automated compression and Ollama token/model-limit metadata. Narrow consented Gradle build policy with configuration fingerprints. Channel-bound UTF-8 attachment read/save/upload tools. Legacy conversation serialization retained through a separate private metadata file. 51 focused tests passed; relevant 27 repeated after storage compatibility hardening. Full suite and other OS omitted by user direction. Actual Discord/model quality remains unverified for this iteration. TCP app-replacement continuity is DEFERRED: existing controller-owned paths still block updates; no gate removed and no zero-disconnect claim. Stable main remains 0.6.3.
+
+Beta.4 integration: frontend production build and local bootJar passed. Additional elapsed-status update tested with 10 workflow/display tests. Release CI will skip the full backend suite as explicitly requested.
+
+## 2026-10-17 — 0.7.0-beta.5 log window
+
+`release/0.7.0-beta.5` = published beta.4 (0558142) + `feat/log-window-on-beta4` (632edf6). Adds whole-file log window with server-side search and the `[MunitionRackDebug]` noise filter. Music, Qwen runner and transfer-progress work from the older 0.4.14-based branch was dropped because beta.4 already contains newer implementations or lacks the base commit (bbcc7f7). Backend tests: 102 failures identical to beta.4 on this Windows environment (symlink permissions); frontend build not run.
+
+Beta.5 follow-up (`feat/update-wait-notice`): GAME_HOST replacement now runs from the live controller connection with relay drain, and server pages show update-wait reasons. See `docs/dev-notes/fix-game-host-replacement.md`. Compiled only; no tests were run.
+
+## 2026-10-17 — 0.7.0-beta.6 Qwen completion and audience routing
+
+Based on published beta.5 de4318f; merges fix/qwen-routing 9bbd0e3. Repairs tool-less promises, preserves raw bounded read results by default and replaces slow model-based Discord addressee classification with a private rolling participant/reply ledger. Owner/approval gates remain in force. Real Qwen tests exposed and fixed flattened tool JSON being treated as completion, malformed risk-review responses and completion without explicitly requested reread verification. Risk provider now uses JSON Schema/temperature0; update BOTH manager and inference runner.
+
+Final targeted regression61 cases passed. Two actual local Qwen3 30B tests passed separately: raw source + conversation-only followup73.2892s (zero read-summary calls or followup file tools); read/write/reread84.7598s (one write approval, seven model calls). Actual entire file bytes equal existing-line\nvalue=42\nCHAIN_VERIFIED_7D31\n: original preserved and requested line appended at the exact requested end. Temp files only; no Discord sends or production file edits. Full suite and other OS omitted by owner request; actual14B/Discord unverified. Frontend production build passed before backend-only followups. Final packaging/signature verification follows publication.
+
+
+## 2026-10-17 — 0.7.0-beta.7 local model catalog and real benchmark
+
+Published beta.6 base, feat/local-model-catalog b89ea21. Adds Gemma4 12B/31B and Qwen3-Coder30B to Discord agent defaults/one-off runs and the owner web settings through a shared stable-ID catalog. Preserves legacy14b/30b defaults. Unsupported Coder Thinking disabled per request without changing stored user preference; managed model unloading includes Gemma, unrelated models untouched. Read-file results expose original newline metadata/display-prefix and partial-source warnings. Known numeric Ollama memory failures are surfaced safely; arbitrary server text remains private. Update BOTH manager and inference runner.
+
+62 focused backend regression cases, frontend production build and model-settings Playwright1 passed. Real current-Mac tests: 30b file172.6897s/Python50.1764s, qwen3-coder-30b file45.4876s/Python1.9387s, gemma4-12b file62.0748s/Python36.2204s. All3 actual complete file bytes and read/write/reread verified, and generated Python executed. Gemma31B fails loading before generation: required18.0GiB vs available15.5GiB after512MiB overhead. No memory-limit changes or quantization fallback. Initial failures retained, not hidden: missing terminal LF / copied line labels / malformed Python; shared read metadata improved before final comparisons. Benchmark path-alias assertion and live-test cache reuse corrected; skipped cached runs excluded. See docs/benchmarks/local-models-2026-10-17.{md,json}. Single run per tiny task, native backends/Thinking differ, existing apps/swap retained; not a universal leaderboard. Full suite/other OS/actual Discord omitted by user direction. Packaging/public signature verification follows.
+
+Beta.7 publication COMPLETE: tag/source9b4d801, signed CI39019991413 SUCCESS with full suite explicitly skipped. Public prerelease has9assets, draft=false; stable/latest preserved. Verified all checksum entries against GitHub SHA256 digests, actual downloaded JAR/update.properties/update.sig/SHA256SUMS sizes+hashes, pinned Ed25519 manifest signature and signed JAR version/size/hash. Embedded version0.7.0-beta.7, LocalModels/LocalLlm/ProjectAgentReply/Routing classes and all3new model tags present. JAR SHA256 0d1ce873eb61428f324ae7badc49799277cbd461edc4b467ab6baa5803948306. Installer archives packaged in CI, not executed on other OS. All benchmark models unloaded after trials. Published tag/assets remain immutable. https://github.com/yoonseo6399/ServerManager/releases/tag/v0.7.0-beta.7

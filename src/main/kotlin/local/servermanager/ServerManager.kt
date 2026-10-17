@@ -499,6 +499,7 @@ class ServerManager {
         val hostedProcess=p as? HostedProcess;val position=profileDir(id).resolve("console.seq");var lastSaved=0L
         java.io.FileOutputStream(log.toFile(),true).bufferedWriter().use { writer ->
             p.inputStream.bufferedReader().useLines { lines -> lines.forEach { raw ->
+                if(LogNoise.dropped(raw))return@forEach
                 val line=raw.replace(Regex("\u001B\\[[0-?]*[ -/]*[@-~]"), "")
                 playerActivity(r,line)
                 if(r.process===p)r.stopMonitor?.log(line)
@@ -630,7 +631,7 @@ class ServerManager {
         }
     }
     fun remoteLog(id:String,runnerId:String,kind:String,line:String) {
-        if(instance(id).runnerId!=runnerId)return
+        if(instance(id).runnerId!=runnerId || LogNoise.dropped(line))return
         val r=runtime(id)
         playerActivity(r,line)
         synchronized(r) { r.event(if(kind in setOf("error","warn","output")) kind else "output",line.take(4096)) }
@@ -720,6 +721,16 @@ class ServerManager {
     }
     fun expireIdleCheck(id:String) {
         val r=runtime(id);synchronized(r){if(r.idleCheckPending&&System.nanoTime()-r.idleRequestAt>20_000_000_000L){r.idleCheckPending=false;r.idleRequestId=null;r.activityVersion++}}
+    }
+    /** Fallback for servers that have no console.log here: searches the retained in-memory console, numbering lines by event sequence. */
+    fun eventWindow(id:String,from:Long,limit:Int,query:String?):LogFiles.Window {
+        require(from>=1 && limit in 1..500 && (query?.length ?: 0)<=200) { "로그 조회 범위를 확인하세요" }
+        val needle=query?.trim()?.lowercase()?.takeIf {it.isNotEmpty()};val r=runtime(id)
+        return synchronized(r) {
+            val rows=r.events.filter {it.seq>=from && it.kind!="system" && it.kind!="input" && (needle==null || it.text.lowercase().contains(needle))}
+            val page=rows.take(limit).map {LogFiles.Row(it.seq,it.kind,it.text)}
+            LogFiles.Window(page,r.events.lastOrNull()?.seq ?: 0,page.firstOrNull()?.no ?: 0,page.lastOrNull()?.no ?: 0,if(rows.size>limit)rows[limit].seq else null)
+        }
     }
     fun eventPage(id:String,before:Long?,after:Long?,limit:Int):Map<String,Any?> {
         require(limit in 1..500) { "로그 조회 개수는 1~500입니다" }

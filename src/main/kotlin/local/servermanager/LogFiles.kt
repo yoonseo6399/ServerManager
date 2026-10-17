@@ -6,10 +6,26 @@ import java.io.ByteArrayOutputStream
 import java.util.zip.GZIPInputStream
 import kotlin.io.path.*
 
+/** Lines from mods that flood the console. They are neither stored nor shown, and are skipped when reading older files. */
+object LogNoise {
+    private val marker="[MunitionRackDebug]".toByteArray()
+    fun dropped(line:String)=line.contains("[MunitionRackDebug]")
+    /** Mod tags sit right after the logger prefix, so only the head of a line is inspected. */
+    fun dropped(bytes:ByteArray,length:Int):Boolean {
+        val end=minOf(length,512)-marker.size
+        var i=0
+        while(i<=end){var j=0;while(j<marker.size && bytes[i+j]==marker[j])j++;if(j==marker.size)return true;i++}
+        return false
+    }
+}
+
 /** Raw files only. Neither parsed logs nor indexes are written to disk. */
 class LogFiles(private val directory: Path,private val serverDirectory:Path=directory.resolve("server")) {
     data class Entry(val path:String,val name:String,val size:Long,val modifiedAt:String,val compressed:Boolean)
     data class Line(val seq:Long,val time:String?,val kind:String,val text:String)
+    /** [no] counts only lines that are not dropped as noise, starting at 1. */
+    data class Row(val no:Long,val kind:String,val text:String)
+    data class Window(val lines:List<Row>,val total:Long,val first:Long,val last:Long,val next:Long?)
     data class Page(val events:List<Line>,val nextOffset:Long?,val revision:String,val bytesRead:Long)
     private fun allowed(name:String)=name=="console.log" || Regex("server/logs/[^/]+\\.log(?:\\.gz)?").matches(name) || Regex("server/crash-reports/[^/]+\\.txt").matches(name)
     private fun resolve(name:String):Path {
@@ -59,4 +75,78 @@ class LogFiles(private val directory: Path,private val serverDirectory:Path=dire
             return Page(events,if(eof)null else position,revision,position-offset)
         }
     }
+    private class Index(val fileKey:String) {val offsets=ArrayList<Long>();var scanned=0L;var lines=0L;var tail=false;var done=false}
+    private fun kindOf(text:String)=when { text.contains("ERROR")||text.contains("Exception")||text.startsWith("Caused by:")->"error";text.contains("WARN")->"warn";else->"output" }
+    /** Streams lines from [start]. [onLine] gets the line's start offset, the offset after it, its (possibly truncated) bytes, and whether a newline ended it; return false to stop. */
+    private fun scan(p:Path,gzip:Boolean,start:Long,onLine:(Long,Long,ByteArray,Int,Boolean)->Boolean) {
+        val channel=Files.newByteChannel(p,setOf(StandardOpenOption.READ,LinkOption.NOFOLLOW_LINKS))
+        if(!gzip)channel.position(start)
+        val raw=java.nio.channels.Channels.newInputStream(channel)
+        val input=try { if(gzip)GZIPInputStream(raw) else raw }catch(e:Exception){raw.close();throw e}
+        input.use { stream->
+            if(gzip){var skipped=0L;while(skipped<start){val n=stream.skip(start-skipped);require(n>0) { "로그 커서가 파일 범위를 벗어났습니다" };skipped+=n}}
+            val buffer=ByteArray(64*1024);val line=ByteArray(MAX_LINE);var length=0;var lineStart=start;var position=start
+            while(true) {
+                val n=stream.read(buffer);if(n<0)break
+                for(i in 0 until n) {
+                    val b=buffer[i];position++
+                    require(!gzip || position<=128L*1024*1024) { "압축 로그는 펼친 크기 128 MiB까지 조회할 수 있습니다" }
+                    if(b==10.toByte()){
+                        val end=if(length>0 && length<=MAX_LINE && line[length-1]==13.toByte())length-1 else length
+                        if(!onLine(lineStart,position,line,end,true))return
+                        lineStart=position;length=0
+                    } else if(length<MAX_LINE)line[length++]=b
+                }
+            }
+            if(position>lineStart){val end=if(length>0 && line[length-1]==13.toByte())length-1 else length;onLine(lineStart,position,line,end,false)}
+        }
+    }
+    /** Sparse line index kept in memory only. Plain logs only ever grow, so the scan resumes where the last one stopped. */
+    private fun index(p:Path,gzip:Boolean,attrs:BasicFileAttributes):Index {
+        val key=p.toAbsolutePath().toString()
+        val fileKey=if(gzip)"${attrs.size()}:${attrs.lastModifiedTime()}" else "${attrs.fileKey()}"
+        if(indexes.size>16)indexes.clear()
+        val index=indexes.compute(key) { _,old-> if(old!=null && old.fileKey==fileKey && (gzip || old.scanned<=attrs.size())) old else Index(fileKey) }!!
+        synchronized(index) {
+            if(gzip && index.done)return index
+            index.tail=false
+            try {scan(p,gzip,index.scanned) { start,end,bytes,length,complete->
+                val noise=LogNoise.dropped(bytes,length)
+                if(!complete){index.tail=!noise;return@scan true}
+                if(!noise){if(index.lines%STEP==0L)index.offsets.add(start);index.lines++}
+                index.scanned=end
+                true
+            }} catch(e:Exception){indexes.remove(key);throw e}
+            if(gzip)index.done=true
+        }
+        return index
+    }
+    /**
+     * Line-numbered view of a whole file. With [query], lines from [from] on are searched server-side (case-insensitive) and only matches return;
+     * [Window.next] says where to continue, so callers can keep loading while the user scrolls.
+     */
+    fun window(name:String,from:Long,limit:Int,query:String?=null):Window {
+        require(from>=1 && limit in 1..500 && (query?.length ?: 0)<=200) { "로그 조회 범위를 확인하세요" }
+        val p=resolve(name);val gzip=name.endsWith(".gz")
+        val attrs=Files.readAttributes(p,BasicFileAttributes::class.java,LinkOption.NOFOLLOW_LINKS)
+        val index=index(p,gzip,attrs);val total:Long;val offsets:List<Long>
+        synchronized(index){total=index.lines+(if(index.tail)1 else 0);offsets=ArrayList(index.offsets)}
+        val needle=query?.trim()?.lowercase()?.takeIf {it.isNotEmpty()}
+        if(from>total)return Window(emptyList(),total,0,0,null)
+        val slot=((from-1)/STEP).toInt().coerceAtMost((offsets.size-1).coerceAtLeast(0))
+        var no=slot*STEP;val rows=ArrayList<Row>();var next:Long?=null;val deadline=System.nanoTime()+3_000_000_000L
+        scan(p,gzip,offsets.getOrElse(slot){0L}) { _,_,bytes,length,_->
+            if(LogNoise.dropped(bytes,length))return@scan true
+            no++
+            if(no<from)return@scan true
+            if(rows.size>=limit){next=no;return@scan false}
+            val text=String(bytes,0,length,Charsets.UTF_8)
+            if(needle==null || text.lowercase().contains(needle))rows.add(Row(no,kindOf(text),text))
+            if(needle!=null && System.nanoTime()>deadline){next=no+1;return@scan false}
+            true
+        }
+        if(next!=null && next!!>total)next=null
+        return Window(rows,total,rows.firstOrNull()?.no ?: 0,rows.lastOrNull()?.no ?: 0,next)
+    }
+    private companion object {const val STEP=1000L;const val MAX_LINE=16*1024;val indexes=java.util.concurrent.ConcurrentHashMap<String,Index>()}
 }

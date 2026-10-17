@@ -14,7 +14,7 @@ export function MainAgentSettings(){
   setKey('');await load();setNotice('저장했습니다. 다음 메인 작업부터 적용됩니다.');
  }catch(e){setError((e as Error).message);}finally{setBusy(false);}}
  return <section className="discord-settings" aria-labelledby="main-agent-heading"><h2 id="main-agent-heading">메인 에이전트</h2>
- <p><code>/agent</code>는 선택한 메인 모델이 서브 작업을 분배·병합하는 메인 명령입니다. Gemini를 직접 실행하려면 <code>/sub-agent</code>를 사용하세요.</p>
+ <p><code>/cloud-agent</code>는 선택한 클라우드 메인 모델이 서브 작업을 분배·병합하는 명령입니다. <code>/agent</code>는 로컬 프로젝트 에이전트이며, Gemini를 직접 실행하려면 <code>/sub-agent</code>를 사용하세요.</p>
  {error&&<p role="alert" className="alert error-banner">{error}</p>}{notice&&<p role="status" className="notice alert">{notice}</p>}
  <p>OpenAI API 키: {view?.keyConfigured?'설정됨':'미설정'}</p>
  <form onSubmit={e=>{e.preventDefault();save();}}><fieldset className="discord-fieldset" disabled={busy||!view}>

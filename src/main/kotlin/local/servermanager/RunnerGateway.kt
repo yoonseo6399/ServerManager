@@ -62,9 +62,26 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
     private data class PendingWorkspace(val runner:String,val instance:String,val future:java.util.concurrent.CompletableFuture<com.fasterxml.jackson.databind.JsonNode>)
     private val workspaceRequests=ConcurrentHashMap<String,PendingWorkspace>()
     private val workspaceSlots=java.util.concurrent.Semaphore(32)
-    private data class PendingLlm(val runner:String,val future:java.util.concurrent.CompletableFuture<com.fasterxml.jackson.databind.JsonNode>)
+    private data class PendingLlm(val runner:String,val future:java.util.concurrent.CompletableFuture<com.fasterxml.jackson.databind.JsonNode>,val progress:(QwenProgress)->Unit={})
     private val llmRequests=ConcurrentHashMap<String,PendingLlm>()
     private val llmRunners=ConcurrentHashMap.newKeySet<String>()
+    private val restartRunners=ConcurrentHashMap.newKeySet<String>()
+    private val restartRequests=ConcurrentHashMap<String,java.util.concurrent.CompletableFuture<String?>>()
+    fun restartSupported(id:String)=id in restartRunners
+    /** Returns null when the runner accepted the restart, otherwise its refusal reason. */
+    fun requestRestart(id:String):String? {
+        check(connected(id) && registry.active(id)!=null) {"실행기를 온라인으로 연결하세요"}
+        check(restartSupported(id)) {"이 실행기는 원격 재시작을 지원하지 않습니다. 먼저 새 버전으로 업데이트하세요"}
+        val future=java.util.concurrent.CompletableFuture<String?>()
+        check(restartRequests.putIfAbsent(id,future)==null) {"이미 재시작을 요청했습니다"}
+        try {
+            check(send(id,RunnerMessage("restart-request"))) {"실행기 연결이 끊겼습니다"}
+            return future.get(10,TimeUnit.SECONDS)
+        } catch(e:java.util.concurrent.TimeoutException){throw IllegalStateException("실행기가 응답하지 않았습니다")}
+        finally {restartRequests.remove(id,future)}
+    }
+    private val agentLlmRunners=ConcurrentHashMap.newKeySet<String>()
+    private val streamingLlmRunners=ConcurrentHashMap.newKeySet<String>()
     private val llmAnswered=ConcurrentHashMap.newKeySet<String>()
     /** ALLOWED: the runner owner enabled Qwen; DENIED: connected but not enabled; UNKNOWN: offline or older than 0.5.0. */
     fun llmCapability(id:String):String = when {
@@ -74,14 +91,15 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
         else -> "UNKNOWN"
     }
     fun llmReady(id:String)=connected(id) && registry.active(id)!=null && id in llmRunners
-    private fun llmCall(id:String,state:String,prompt:String,think:Boolean,seconds:Long):com.fasterxml.jackson.databind.JsonNode {
+    private fun llmCall(id:String,state:String,prompt:String,think:Boolean,seconds:Long,progress:(QwenProgress)->Unit={}):com.fasterxml.jackson.databind.JsonNode {
         check(llmReady(id)) {"지정한 실행기가 오프라인이거나 Qwen 실행을 허용하지 않았습니다. 실행기의 llm-enabled 설정을 확인하세요."}
-        val key=java.util.UUID.randomUUID().toString();val pending=PendingLlm(id,java.util.concurrent.CompletableFuture());llmRequests[key]=pending
+        val key=java.util.UUID.randomUUID().toString();val pending=PendingLlm(id,java.util.concurrent.CompletableFuture(),progress);llmRequests[key]=pending
         try {
             check(send(id,RunnerMessage("llm-request",token=key,state=state,command=prompt,detail=if(think)"THINK" else "NO_THINK"))) {"실행기 연결을 확인하세요"}
             return pending.future.get(seconds,TimeUnit.SECONDS)
         }
-        catch(e:java.util.concurrent.TimeoutException){throw IllegalStateException("실행기의 Qwen 응답이 시간 제한을 초과했습니다")}
+        catch(e:java.util.concurrent.TimeoutException){send(id,RunnerMessage("llm-cancel",token=key));throw IllegalStateException("실행기의 Qwen 응답이 시간 제한을 초과했습니다")}
+        catch(e:InterruptedException){send(id,RunnerMessage("llm-cancel",token=key));Thread.currentThread().interrupt();throw IllegalStateException("실행기의 Qwen 생성을 중단했습니다.",e)}
         catch(e:java.util.concurrent.ExecutionException){throw IllegalStateException(e.cause?.message ?: "실행기의 Qwen 요청 실패")}
         finally {llmRequests.remove(key)}
     }
@@ -97,6 +115,12 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
     fun llmChat(size:String,prompt:String,think:Boolean,runnerId:String?=null):RemoteLlm.Result? {
         val id=runnerId ?: llmRunners.sorted().firstOrNull {llmReady(it)} ?: return null
         val answer=mapper.treeToValue(llmCall(id,size,prompt,think,190),LocalLlm.Answer::class.java)
+        return RemoteLlm.Result(answer,registry.active(id)?.name ?: id)
+    }
+    fun llmConversation(size:String,messages:List<ProjectAgentMessage>,think:Boolean,runnerId:String?,progress:(QwenProgress)->Unit):RemoteLlm.Result? {
+        val id=runnerId ?: streamingLlmRunners.sorted().firstOrNull {llmReady(it)} ?: return null
+        check(id in streamingLlmRunners && llmReady(id)) {"선택한 실행기가 실시간 출력·중지를 지원하지 않습니다. 관리 앱과 실행기를 새 Qwen 베타로 업데이트하세요."}
+        val answer=mapper.treeToValue(llmCall(id,"agent:$size",mapper.writeValueAsString(messages),think,190,progress),LocalLlm.Answer::class.java)
         return RemoteLlm.Result(answer,registry.active(id)?.name ?: id)
     }
 
@@ -117,7 +141,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
     private val io=Executors.newCachedThreadPool()
     private data class GameStream(val id:Int,val runnerId:String,val instanceId:String,val socket:Socket,val opened:CountDownLatch=CountDownLatch(1))
     @jakarta.annotation.PreDestroy fun closeDatagrams(){tcpRelays.values.forEach {it.close()};tcpRelays.clear();sable.close();udpOutboxes.values.forEach {it.close()};udpOutboxes.clear();udpSessions.values.forEach {runCatching {it.close()}};udpSessions.clear()}
-    @PostConstruct fun attach() { manager.attachRemoteController(this);RemoteLlm.provider=::llmChat;directRelay?.sender={id,message->send(id,message)};directRelay?.connectedCheck={connected(it)} }
+    @PostConstruct fun attach() { manager.attachRemoteController(this);RemoteLlm.provider=::llmChat;RemoteLlm.conversationProvider=::llmConversation;RemoteLlm.modelLimitProvider={size,pinned->val id=pinned ?: streamingLlmRunners.sorted().firstOrNull {llmReady(it)};id?.let {llmAdmin(it,"probe").path("modelLimits").path(size).asInt().takeIf {value->value>0}}};directRelay?.sender={id,message->send(id,message)};directRelay?.connectedCheck={connected(it)} }
     override fun afterConnectionEstablished(session:WebSocketSession) {
         val id=session.attributes["runnerId"] as? String ?: run { session.close(CloseStatus.POLICY_VIOLATION);return }
         if(session.attributes["sableUdp"]==true) {
@@ -129,7 +153,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
             return
         }
         tcpRelays.remove(id)?.close()
-        llmRunners.remove(id);llmAnswered.remove(id)
+        restartRunners.remove(id);llmRunners.remove(id);agentLlmRunners.remove(id);streamingLlmRunners.remove(id);llmAnswered.remove(id)
         registry.tcpRelayCapability(id,false)
         registry.connected(id)
         sessions.put(id,session)?.takeIf { it!==session }?.let { previous ->
@@ -151,12 +175,16 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
         val event=runCatching { mapper.readValue<RunnerMessage>(message.payload) }.getOrNull() ?: return
         if(directRelay?.core?.onRunnerMessage(id,event)==true)return
         when(event.type) {
+            "restart-capability" -> if(event.state=="RESTART_V1" && registry.active(id)!=null)restartRunners.add(id) else restartRunners.remove(id)
+            "restart-result" -> restartRequests[id]?.complete(if(event.state=="ACCEPTED")null else (event.detail ?: "REFUSED").take(60))
             "relay-capability" -> {
                 registry.tcpRelayCapability(id,event.state=="TCP_V1")
                 if(event.state=="TCP_V1")tcpRelays.computeIfAbsent(id) {TcpRelayPeer({send(id,it)},{stream,bytes,count->sendBinary(id,stream,bytes,count)})}
                 syncTcpRelay(id)
             }
-            "llm-capability" -> {llmAnswered.add(id);if(event.state=="OLLAMA_V1" && registry.active(id)!=null)llmRunners.add(id) else llmRunners.remove(id)}
+            "llm-capability" -> {llmAnswered.add(id);if(event.state in setOf("OLLAMA_V1","OLLAMA_AGENT_V2","OLLAMA_AGENT_V3") && registry.active(id)!=null)llmRunners.add(id) else llmRunners.remove(id);if(event.state in setOf("OLLAMA_AGENT_V2","OLLAMA_AGENT_V3") && registry.active(id)!=null)agentLlmRunners.add(id) else agentLlmRunners.remove(id);if(event.state=="OLLAMA_AGENT_V3" && registry.active(id)!=null)streamingLlmRunners.add(id) else streamingLlmRunners.remove(id)}
+            "llm-progress" -> if(id in streamingLlmRunners)event.token?.let {key->llmRequests[key]?.takeIf {it.runner==id}?.let {pending->event.detail?.takeIf {it.length<=32768}?.let {raw->runCatching {pending.progress(mapper.readValue<QwenProgress>(raw).bounded())}}}}
+            "llm-thinking" -> event.token?.let {key->llmRequests[key]?.takeIf {it.runner==id}?.let {runCatching {it.progress(QwenProgress(thinking=event.detail.orEmpty().take(1500)))}}}
             "llm-result" -> event.token?.let {key->llmRequests[key]?.takeIf {it.runner==id}?.let {pending->
                 if(event.state=="OK")runCatching {mapper.readTree(event.detail ?: "")}.onSuccess {pending.future.complete(it)}.onFailure {pending.future.completeExceptionally(IllegalStateException("실행기 Qwen 응답을 읽지 못했습니다"))}
                 else pending.future.completeExceptionally(IllegalStateException(event.detail?.take(500) ?: "실행기의 Qwen 요청 실패"))
@@ -255,7 +283,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
             tcpRelays.remove(id)?.close()
             udpOutboxes.remove(id)?.close();udpSessions.remove(id)?.let {runCatching {it.close()}};sable.removeRunner(id)
             tokens.remove(id);registry.disconnected(id);manager.remoteDisconnected(id);directRelay?.core?.onDisconnect(id)
-            llmRunners.remove(id);llmAnswered.remove(id);llmRequests.values.filter {it.runner==id}.forEach {it.future.completeExceptionally(IllegalStateException("실행기가 연결 해제됐습니다"))}
+            restartRunners.remove(id);llmRunners.remove(id);agentLlmRunners.remove(id);streamingLlmRunners.remove(id);llmAnswered.remove(id);llmRequests.values.filter {it.runner==id}.forEach {it.future.completeExceptionally(IllegalStateException("실행기가 연결 해제됐습니다"))}
             workspaceRequests.values.filter {it.runner==id}.forEach {it.future.completeExceptionally(IllegalStateException("실행기가 연결 해제됐습니다. 파일을 다시 확인하세요"))}
             sockets.values.filter { it.runnerId==id }.forEach { closeStream(it,false) }
         }
