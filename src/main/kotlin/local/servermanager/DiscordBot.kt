@@ -61,8 +61,9 @@ data class DiscordBotStatus(val state:String, val message:String, val inviteUrl:
 
 @Service
 class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, private val desktop:DesktopLifecycle,private val remoteFiles:RemoteFiles=RemoteFiles(manager),private val assistant:AssistantHarness?=null,private val assistantIdentity:AssistantIdentity?=null,private val assistantGoogle:AssistantGoogle?=null):ListenerAdapter() {
-    private val settings=DiscordSettingsStore(manager.root.resolve("security/discord"))
-    private val panels=DiscordPanelStore(manager.root.resolve("security/discord"))
+    private val control:ServerControlPort=ServerManagerControl(manager)
+    private val settings=DiscordSettingsStore(control.dataRoot.resolve("security/discord"))
+    private val panels=DiscordPanelStore(control.dataRoot.resolve("security/discord"))
     private val lifecycle=Executors.newSingleThreadExecutor()
     private val generation=AtomicLong()
     private val alerts=DiscordAlerts()
@@ -70,7 +71,7 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
     private val panelInflight=ConcurrentHashMap.newKeySet<String>()
     private val panelFingerprint=ConcurrentHashMap<String,String>()
     private val observedStates=ConcurrentHashMap<String,String>()
-    private val signalSubscription=manager.onSignal { signal ->
+    private val signalSubscription=control.onSignal { signal ->
         if(settings.view().config.enabled) {
             alerts.offer(signal)
             if(signal.kind=="error") {
@@ -80,15 +81,26 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
         }
     }
     @Volatile private var client:JDA?=null
-    private val codeAgent=DiscordCodeAgent({view().config},{client},{AgentApiKeyStore(manager.root.resolve("security/agent")).read()},manager.root.resolve("security/agent"))
+    private val codeAgent=DiscordCodeAgent({view().config},{client},{AgentApiKeyStore(control.dataRoot.resolve("security/agent")).read()},control.dataRoot.resolve("security/agent"))
     private val assistantCommands=if(assistant!=null && assistantIdentity!=null)DiscordAssistant(assistant,assistantIdentity,{view().config},{client},assistantGoogle) else null
-    private val projectAgent=assistantIdentity?.let {identity->DiscordProjectAgent(manager.root.resolve("security/agent"),identity,{view().config},{client},{actor->assistant?.engine?.policy(actor)?.roots.orEmpty()})}
+    private val projectAgent=assistantIdentity?.let {identity->DiscordProjectAgent(control.dataRoot.resolve("security/agent"),identity,{view().config},{client},{actor->assistant?.engine?.policy(actor)?.roots.orEmpty()})}
     private val music by lazy { runCatching { run {
-        val directory=manager.root.resolve("security/discord")
+        val directory=control.dataRoot.resolve("security/discord")
         val library=DiscordMusicLibraryStore(directory)
         DiscordMusic({view().config},{client},DiscordMusicPlayback(library),directory,library)
     } }.getOrNull() }
     @Volatile private var musicAudioReady=false
+    /** Module permissions: policy and audit live under security/discord; the ceiling is only editable locally. */
+    val permissions=PermissionService(control.dataRoot.resolve("security/discord"))
+    private fun isSuperAdmin(guild:String,roles:Set<String>)=view().config.superAdmins.any {it.guildId==guild && it.roleId in roles}
+    /** Feature modules (music, agents, permission management). New features plug in here; see docs/architecture/discord-modules.md. */
+    private val modules=DiscordModuleRegistry(permissions,::isSuperAdmin).also {registry->
+        registry.add(DiscordCodeAgentModule(codeAgent))
+        assistantCommands?.let {registry.add(DiscordAssistantModule(it))}
+        projectAgent?.let {registry.add(DiscordProjectAgentModule(it))}
+        registry.add(DiscordMusicModule({music},{musicAudioReady},{client}))
+        registry.add(DiscordPermissionModule(permissions,::isSuperAdmin))
+    }
     @Volatile private var message="봇 토큰을 입력하고 연동을 켜세요."
     @Volatile private var connecting=false
     private val requests=mutableMapOf<String,Long>()
@@ -104,7 +116,7 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
     }
     @Synchronized fun save(request:DiscordSave):DiscordSettingsView {
         val before=view()
-        val next=settings.save(request) { runCatching { manager.instance(it) }.isSuccess }
+        val next=settings.save(request) { runCatching { control.instance(it) }.isSuccess }
         val reconnect=before.config.enabled!=next.config.enabled || !request.token.isNullOrBlank() || request.clearToken || client==null
         alerts.clear();panelFingerprint.clear()
         if(reconnect) connect() else client?.let { registerCommands(it) }
@@ -118,7 +130,7 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
         connecting=view().config.enabled
         message=if(connecting) "Discord에 연결 중입니다." else "Discord 연동이 꺼져 있습니다."
         lifecycle.submit {
-            runCatching { music?.disconnectAll() }
+            runCatching { modules.disconnect() }
             old?.shutdownNow()
             if(epoch!=generation.get() || !view().config.enabled) return@submit
             try {
@@ -147,7 +159,7 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
     }
     override fun onStatusChange(event:StatusChangeEvent) {
         if(event.jda!==client) return
-        if(event.newStatus==JDA.Status.SHUTDOWN) { runCatching { music?.disconnectAll() };connecting=false;message="Discord 연결이 종료되었습니다. 토큰과 네트워크를 확인한 뒤 다시 연결하세요." }
+        if(event.newStatus==JDA.Status.SHUTDOWN) { runCatching { modules.disconnect() };connecting=false;message="Discord 연결이 종료되었습니다. 토큰과 네트워크를 확인한 뒤 다시 연결하세요." }
         else if(event.newStatus==JDA.Status.CONNECTED) { connecting=false;message="Discord에 연결되었습니다." }
     }
     override fun onGuildJoin(event:GuildJoinEvent) { if(event.jda===client) registerCommands(event.jda) }
@@ -165,33 +177,24 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
                     SubcommandData("stop","내 역할에 허용된 서버 정상 종료").addOptions(OptionData(OptionType.STRING,"server","Minecraft 서버",true).setAutoComplete(true)),
                     SubcommandData("restart","내 역할에 허용된 서버 재시작").addOptions(OptionData(OptionType.STRING,"server","Minecraft 서버",true).setAutoComplete(true)))
             guild.upsertCommand(command).queue({}, { if(jda===client) message="명령 등록 실패: 봇 초대 권한과 서버 ID를 확인하세요." })
-            codeAgent.register(jda,id)
-            assistantCommands?.register(jda,id)
-            projectAgent?.register(jda,id)
-            music?.register(jda,id)
+            modules.register(jda,id)
         }
     }
     fun choices(guild:String?,roles:Set<String>,start:Boolean,query:String):List<Pair<String,String>> = choices(guild,roles,if(start) "start" else "status",query)
     fun choices(guild:String?,roles:Set<String>,action:String,query:String):List<Pair<String,String>> {
         val config=view().config
-        return manager.list().map { it["config"] as Instance }
+        return control.list().map { it["config"] as Instance }
             .filter { DiscordAccess.allowed(config,guild,roles,it.id,action) && (it.name.contains(query,true) || it.id.startsWith(query)) }
             .take(25).map { "${it.name} · ${it.id.take(8)}".take(100) to it.id }
     }
     override fun onCommandAutoCompleteInteraction(event:CommandAutoCompleteInteractionEvent) {
+        if(modules.autoComplete(event)) return
         if(event.jda!==client || event.name!="mc") return
         val choices=choices(event.guild?.id,event.member?.roles?.map { it.id }?.toSet() ?: emptySet(),event.subcommandName ?: "status",event.focusedOption.value)
         event.replyChoices(choices.map { Command.Choice(it.first,it.second) }).queue({}, {})
     }
     override fun onSlashCommandInteraction(event:SlashCommandInteractionEvent) {
-        if(event.name=="agent") {projectAgent?.handle(event);return}
-        if(event.name in setOf("assistant","assistant-link","assistant-google")) {assistantCommands?.handle(event);return}
-        if(event.name in setOf("cloud-agent","sub-agent","agent-keys","local-llm")) {codeAgent.handle(event);return}
-        if(event.name=="music") {
-            if(!musicAudioReady) event.reply("음악 오디오 기능을 시작하지 못했습니다. 서버 관리자에게 오디오 설정을 확인해 달라고 요청하세요.").setEphemeral(true).queue({}, {})
-            else music?.handle(event) ?: event.reply("음악 기능을 시작하지 못했습니다. 서버 관리자에게 오디오 설정을 확인해 달라고 요청하세요.").setEphemeral(true).queue({}, {})
-            return
-        }
+        if(modules.command(event)) return
         if(event.jda!==client || event.name!="mc") return
         val guild=event.guild
         val id=event.getOption("server")?.asString
@@ -209,13 +212,7 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
         }, {})
     }
     override fun onButtonInteraction(event:ButtonInteractionEvent) {
-        if(event.componentId.startsWith("qa:")) {projectAgent?.button(event);return}
-        if(event.componentId.startsWith("as:")) {assistantCommands?.button(event);return}
-        if(event.componentId.startsWith("music:")) {
-            if(musicAudioReady)music?.handleButton(event)
-            else event.reply("음악 오디오 기능을 시작하지 못했습니다. 봇 오디오 설정을 확인하세요.").setEphemeral(true).queue({}, {})
-            return
-        }
+        if(modules.button(event)) return
         if(event.jda!==client || !event.componentId.startsWith("sm:")) return
         val parts=event.componentId.split(':')
         val guild=event.guild
@@ -234,14 +231,10 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
         }, {})
     }
     override fun onStringSelectInteraction(event:net.dv8tion.jda.api.events.interaction.component.StringSelectInteractionEvent) {
-        if(event.componentId.startsWith("music:")) {
-            if(musicAudioReady)music?.handleSelect(event)
-            else event.reply("음악 오디오 기능을 시작하지 못했습니다. 봇 오디오 설정을 확인하세요.").setEphemeral(true).queue({}, {})
-        }
+        modules.select(event)
     }
     override fun onMessageReceived(event:net.dv8tion.jda.api.events.message.MessageReceivedEvent) {
-        projectAgent?.message(event)
-        if(event.jda===client && musicAudioReady)music?.handleMessage(event)
+        modules.message(event)
     }
     fun execute(guild:String,roles:Set<String>,user:String,requestId:String,id:String,action:String,actor:StartActor?=null):String = desktop.gate.read {
         if(desktop.stopping) "관리 앱 업데이트 중입니다. 잠시 후 다시 시도하세요."
@@ -258,27 +251,27 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
         if(requests.putIfAbsent(requestId,now)!=null) return "이미 처리한 명령입니다. /mc status로 상태를 확인하세요."
         if(requests.size>10000) { requests.remove(requestId);return "요청이 많습니다. 잠시 후 다시 시도하세요." }
         return try {
-            val i=manager.instance(id);val state=manager.view(id)["state"]
+            val i=control.instance(id);val state=control.view(id)["state"]
             if(action=="status") {
-                val players=manager.view(id)["players"] as? PlayerSample
-                val power=manager.view(id)["powerSaving"] as? PowerStatus
+                val players=control.view(id)["players"] as? PlayerSample
+                val power=control.view(id)["powerSaving"] as? PowerStatus
                 "${i.name}: ${stateLabel(state.toString())}${players?.let { " · 접속 ${it.count}명" } ?: " · 접속 인원 알 수 없음"}${power?.let { " · "+powerLabel(it) } ?: ""}"
             } else if(action=="start") {
                 if(state in setOf("RUNNING","STARTING")) return "${i.name}: 이미 실행 중이거나 시작 중입니다."
                 val key="$guild:$user"
                 if(now-(lastStart[key] ?: 0)<10000) return "시작 요청은 10초 후 다시 보낼 수 있습니다."
                 lastStart[key]=now
-                manager.startAs(id,starter)
+                control.startAs(id,starter)
                 audit.append("discord:$guild:$user","discord start $id",200,"discord")
                 "${i.name}: 시작을 요청했습니다. /mc status로 준비 상태를 확인하세요."
             } else if(action=="stop") {
                 if(state !in setOf("RUNNING","STARTING")) return "${i.name}: 실행 중인 서버가 없습니다."
-                manager.stop(id,false)
+                control.stop(id,false)
                 audit.append("discord:$guild:$user","discord stop $id",200,"discord")
                 "${i.name}: 저장 후 정상 종료를 요청했습니다."
             } else {
                 if(state!="RUNNING") return "${i.name}: 실행 중인 서버만 재시작할 수 있습니다."
-                manager.restartAs(id,starter)
+                control.restartAs(id,starter)
                 audit.append("discord:$guild:$user","discord restart $id",200,"discord")
                 "${i.name}: 저장 후 재시작을 요청했습니다."
             }
@@ -291,11 +284,11 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
         val jda=client
         if(jda==null || jda.status!=JDA.Status.CONNECTED || !view().config.enabled) { alerts.clear();return }
         alerts.drain().forEach { (signal,count) ->
-            val name=runCatching { manager.instance(signal.instanceId).name }.getOrNull() ?: return@forEach
+            val name=runCatching { control.instance(signal.instanceId).name }.getOrNull() ?: return@forEach
             val routes=view().config.alerts.filter { it.instanceId==signal.instanceId && it.accepts(signal) }
             if(routes.isEmpty())return@forEach
             val report=signal.exit?.crashReport
-            val reportBytes=report?.let {name->if(manager.instance(signal.instanceId).syncEnabled())CrashReports.attachment(manager.serverDir(signal.instanceId),name) else runCatching {
+            val reportBytes=report?.let {name->if(control.instance(signal.instanceId).syncEnabled())CrashReports.attachment(control.serverDir(signal.instanceId),name) else runCatching {
                 require(CrashReports.validName(name));val out=java.io.ByteArrayOutputStream();remoteFiles.download(signal.instanceId,"crash-reports/$name",out,CrashReports.MAX_BYTES.toLong());out.toByteArray().takeIf {it.isNotEmpty()}
             }.getOrNull()}
             val reportSummary=reportBytes?.let {DiscordErrorBuffer.fromReport(it)}
@@ -318,7 +311,7 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
                     val title=if(signal.kind=="start") "🟢 서버 시작 완료" else if(signal.kind=="error") "⚠️ 오류 감지" else if(signal.exit?.reason=="IDLE") "🌙 무인 절전 종료" else if(signal.exit?.requested==false||signal.detail.contains("예기치")) "🛑 비정상 종료" else "⏹ 서버 종료"
                     val canAttach=channel.guild.selfMember.hasPermission(channel,net.dv8tion.jda.api.Permission.MESSAGE_ATTACH_FILES)
                     val attachment=reportBytes?.takeIf {canAttach}
-                    val restart=(manager.view(signal.instanceId)["autoRestart"] as? AutoRestartStatus)?.takeIf {signal.kind=="stop"&&it.config.enabled}
+                    val restart=(control.view(signal.instanceId)["autoRestart"] as? AutoRestartStatus)?.takeIf {signal.kind=="stop"&&it.config.enabled}
                     val restartText=restart?.let {if(it.remainingSeconds!=null)"\n자동 재시작 대기: 파일·클라우드 인계 완료 후 ${it.remainingSeconds}초 이내 (최대 3회/10분)." else if(it.message!=null)"\n${it.message}" else ""}.orEmpty()
                     val reportText=if(report!=null&&!canAttach)"\n크래시 리포트를 보내려면 봇에 파일 첨부 권한을 허용하세요. 관리 웹의 로그 파일에서도 확인할 수 있습니다." else if(report!=null&&attachment==null)"\n크래시 리포트가 8 MiB를 넘거나 읽을 수 없어 첨부하지 못했습니다. 관리 웹의 로그 파일에서 확인하세요." else ""
                     val embedBuilder=EmbedBuilder().setTitle("$title · ${name.take(80)}")
@@ -349,7 +342,7 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
             val key=DiscordPanelStore.key(route)
             if(!panelInflight.add(key)) return@forEach
             val channel=jda.getGuildById(route.guildId)?.getTextChannelById(route.channelId)
-            val state=runCatching { manager.view(route.instanceId) }.getOrNull()
+            val state=runCatching { control.view(route.instanceId) }.getOrNull()
             if(channel==null || state==null) { panelInflight.remove(key);return@forEach }
             val status=state["state"].toString()
             val previous=observedStates.put(key,status)
@@ -421,7 +414,7 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
             rows.filter { it.id !in keep }.forEach { it.delete().queue({}, { if(client!=null) message="전용 채널 정리 실패: 메시지 관리 권한을 확인하세요." }) }
         }, { if(client!=null) message="전용 채널을 읽지 못했습니다. 메시지 기록 보기 권한을 확인하세요." })
     }
-    @PreDestroy fun close() { generation.incrementAndGet();runCatching { music?.close() };projectAgent?.close();codeAgent.close();assistantCommands?.close();signalSubscription.close();alerts.clear();client?.shutdownNow();client=null;lifecycle.shutdownNow() }
+    @PreDestroy fun close() { generation.incrementAndGet();modules.close();signalSubscription.close();alerts.clear();client?.shutdownNow();client=null;lifecycle.shutdownNow() }
     private fun stateLabel(value:String)=mapOf("NEW" to "설치 필요","STOPPED" to "정지됨","STARTING" to "시작 중","RUNNING" to "실행 중","STOPPING" to "종료 중","FAILED" to "오류","INSTALLING" to "설치 중","IMPORTING" to "가져오는 중","IMPORT_FAILED" to "가져오기 실패","TRANSFERRING" to "파일 전송 중","SYNCING" to "파일 인계 중","SYNC_FAILED" to "인계 재시도 대기","UNKNOWN" to "연결 확인 중")[value] ?: value
 }
 
