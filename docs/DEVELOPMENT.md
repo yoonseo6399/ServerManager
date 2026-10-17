@@ -616,3 +616,7 @@ Beta.7 publication COMPLETE: tag/source9b4d801, signed CI39019991413 SUCCESS wit
 ## 2026-10-17 — 0.7.0-beta.9
 
 `feat/0.7.0-beta.9-result-store` on release/0.7.0-beta.8. Adds `read_result` with verbatim storage of long command output (`ProjectAgentResults`), the requirement ledger with completion gate and per-channel task notes (`ProjectAgentLedger`, `ProjectAgentStore.notes`), in-process `rg`/`search`, `PROJECT_AGENT_INPUT_BUDGET`, real-time intervention (`ProjectAgentEngine.steer`, owner messages during a run), and carries `bbcc7f7` world transfer preparation speed-up plus runner folder scan progress ordering. Music autoplay/repeat, runner Qwen and the log window from the old uncommitted work already exist on this line in newer form and were not re-applied. Released as v0.7.0-beta.9 (tag CI builds and signs).
+
+## 2026-10-18 — 0.7.0-beta.10 (unreleased)
+
+`feat/0.7.0-beta.10-modules` on release/0.7.0-beta.9. Discord features are now `DiscordModule`s routed by `DiscordModuleRegistry` (music, agent, ai, assistant, permission); `PermissionService` + `/permission` (deny/ceiling/default policy, audit; ALLOW does not widen legacy checks); `ServerControlPort` is the only server-control path from the bot; sources moved into feature folders with packages unchanged (CI path filters updated). Docs: `docs/architecture/`, tests: `docs/testing/beta10-test-guide.md`. `/mc` and `sm:` are still handled by DiscordBot (reserved names). Not released: no tag, not pushed.
