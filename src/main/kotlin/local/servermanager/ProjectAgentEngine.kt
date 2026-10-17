@@ -197,7 +197,7 @@ Tool output is bounded and may be shortened; use focused reads/searches instead 
                 active();emit(ProjectAgentEvent("status",turn,if(plan.sandboxed || (plan.readOnly && !plan.tool.arguments.path("summarize").asBoolean(false)))"조회 원문 전달 중" else "도구 결과 요약 중"))
                 executed++
                 if(result.exitCode!=-1){
-                    if(verifyAfterWrite && call.name=="write_file")unverifiedWrites.addAll(plan.resolvedTargets)
+                    if(verifyAfterWrite && (call.name=="write_file" || call.name=="edit_file"))unverifiedWrites.addAll(plan.resolvedTargets)
                     if(call.name=="read_file")unverifiedWrites.removeAll(plan.resolvedTargets.toSet())
                 }
                 val raw=!plan.sandboxed && plan.readOnly && !plan.tool.arguments.path("summarize").asBoolean(false)
