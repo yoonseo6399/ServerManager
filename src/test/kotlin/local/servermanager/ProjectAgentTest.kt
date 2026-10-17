@@ -109,7 +109,10 @@ class ProjectAgentTest {
         assertTrue(root.resolve("luonotar").isDirectory());assertContains(created.text,"/agent channel project:luonotar")
         assertEquals("luonotar",store.projects("guild","owner").single().name)
         val result=tools.execute(root,tools.plan(root,call("run_command",mapOf("command" to "i=0; while [ \"\u0024i\" -lt 1000 ]; do printf 'line-%s\\n' \"\u0024i\"; i=\u0024((i+1)); done")))){}
-        assertTrue(result.full.length>7000);assertTrue(result.text.length<2600);assertContains(result.text,"생략");assertContains(result.text,"line-999")
+        // Long output is stored verbatim (not summarized); the model gets a short head plus an id and reads the rest with read_result.
+        assertTrue(result.full.length>7000);assertTrue(result.text.length<2600);assertContains(result.text,"read_result");assertNotNull(result.stored)
+        val tail=tools.execute(root,tools.plan(root,call("read_result",mapOf("id" to result.stored!!,"start_line" to 1000,"lines" to 5)))){}
+        assertContains(tail.text,"line-999")
     }
     @Test fun `build and test tools actually compile and run a tiny Java project`() {
         val (_,session,_)=setup();val project=Path.of(session.home);project.resolve("Example.java").writeText("public class Example { public static void main(String[] x) { if (2+2!=4) throw new AssertionError(); System.out.println(\"checked\"); } }")
