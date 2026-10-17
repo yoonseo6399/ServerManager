@@ -12,7 +12,7 @@ JDA 이벤트 ─▶ DiscordBot ─▶ DiscordModuleRegistry ─▶ 모듈 (musi
                  └─ /mc, sm: 버튼 (아직 모듈이 아님, DiscordAccess 사용)
 ```
 
-- 코드 위치: `src/main/kotlin/local/servermanager/` (패키지는 `local.servermanager`). 핵심 파일은 `DiscordModule.kt`(인터페이스와 레지스트리), `DiscordModules.kt`(기존 기능 어댑터), `DiscordPermissionModule.kt`(`/permission`).
+- 코드 위치: `src/main/kotlin/local/servermanager/discord/` (패키지는 `local.servermanager`, 폴더 구조는 `docs/architecture/source-layout.md`). 핵심 파일은 `DiscordModule.kt`(인터페이스와 레지스트리), `DiscordModules.kt`(기존 기능 어댑터), `DiscordPermissionModule.kt`(`/permission`).
 - 등록 위치: `DiscordBot`의 `modules` 초기화 블록 한 곳. 새 모듈은 여기에 `registry.add(...)` 한 줄을 더한다.
 - 기존 기능 클래스(`DiscordMusic`, `DiscordProjectAgent` …)는 그대로 두고 얇은 어댑터가 `DiscordModule`로 감싼다. 동작은 바뀌지 않는다.
 
@@ -50,7 +50,7 @@ JDA 이벤트 ─▶ DiscordBot ─▶ DiscordModuleRegistry ─▶ 모듈 (musi
 
 ### 4.1 모듈 클래스
 
-`src/main/kotlin/local/servermanager/DiscordHelloModule.kt`
+`src/main/kotlin/local/servermanager/discord/DiscordHelloModule.kt` (기능이 커지면 `discord/hello/` 같은 하위 폴더를 만든다)
 
 ```kotlin
 package local.servermanager

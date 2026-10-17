@@ -34,14 +34,14 @@
 
 ### 3.2 Windows 임시 완화 (macOS/Linux는 건너뜀)
 
-`src/main/kotlin/local/servermanager/GeminiKeyPool.kt`의 `writePrivate` 안 두 줄을 `runCatching { ... }`로 감싼다.
+`src/main/kotlin/local/servermanager/ai/GeminiKeyPool.kt`의 `writePrivate` 안 두 줄을 `runCatching { ... }`로 감싼다.
 
 ```kotlin
 directory.createDirectories();runCatching{Files.setPosixFilePermissions(directory,PosixFilePermissions.fromString("rwx------"))}
 atomicText(path,text);runCatching{Files.setPosixFilePermissions(path,PosixFilePermissions.fromString("rw-------"))}
 ```
 
-테스트가 끝나면 `git checkout -- src/main/kotlin/local/servermanager/GeminiKeyPool.kt`로 원복하고 `git status`에 이 파일이 없는지 확인한다. 원복하지 않은 채 커밋하지 않는다.
+테스트가 끝나면 `git checkout -- src/main/kotlin/local/servermanager/ai/GeminiKeyPool.kt`로 원복하고 `git status`에 이 파일이 없는지 확인한다. 원복하지 않은 채 커밋하지 않는다.
 
 ### 3.3 이번 변경의 테스트만
 
