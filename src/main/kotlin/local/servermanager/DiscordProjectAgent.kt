@@ -220,6 +220,10 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
         if(event.author.isBot || session.user!=event.author.id || (event.message.contentRaw.isBlank() && event.message.attachments.isEmpty()))return
         if(destination==AgentAddressee.HUMAN)return
         if(destination==AgentAddressee.UNCERTAIN){channel.sendMessage("최근 대화에 여러 사람이 참여해 누구에게 하신 말씀인지 확실하지 않아요. 루오에게 요청하신 거라면 `루오, …` 또는 `/agent run`으로 불러주세요.").setAllowedMentions(emptyList()).queue({}, {});return}
+        // Real-time intervention: while a run is in progress the owner's message steers it instead of being rejected.
+        val steering=try {engine.steer(session.channel,session.user,event.message.contentRaw+(if(event.message.attachments.isEmpty())"" else "\n(첨부 파일 ${event.message.attachments.size}개: list_attachments로 확인)"))}
+            catch(e:Exception){channel.sendMessage("개입을 반영하지 못했습니다: ${safe(e)}").setAllowedMentions(emptyList()).queue({}, {});return}
+        if(steering){event.message.addReaction(net.dv8tion.jda.api.entities.emoji.Emoji.fromUnicode("🧭")).queue({}, {});return}
         if(!routing.add(session.channel)){channel.sendMessage("이 채널에서 작업 중입니다. 승인 요청을 처리하거나 /agent stop으로 중단한 뒤 다시 요청하세요.").setAllowedMentions(emptyList()).queue({}, {});return}
         channel.sendTyping().queue({}, {})
         worker.submit {try {privateAccess(event.jda,session);start(event.jda,session,event.member?.effectiveName ?: event.author.effectiveName,(event.message.contentRaw+if(event.message.attachments.isEmpty())"" else "\n첨부 파일: "+event.message.attachments.joinToString {"${it.fileName} (message=${event.messageId}, attachment=${it.id})"}).take(6000),null,null,null)}catch(e:Exception){channel.sendMessage("에이전트 요청 실패: ${safe(e)}").setAllowedMentions(emptyList()).queue({}, {})}finally {routing.remove(session.channel)}}
@@ -310,6 +314,7 @@ internal class DiscordProjectAgentDisplay(private val channel:TextChannel,privat
         when(event.kind){
             "usage"->{usage=event.usage;render("턴 ${tn(event.turn)} · 결과 확인")}
             "status"->render("턴 ${tn(event.turn)} · ${event.text}")
+            "steer"->render("턴 ${tn(event.turn)} · 🧭 개입 반영: ${event.text.take(120).replace('\n',' ')}")
             "thinking"->{usage=event.usage;render("턴 ${tn(event.turn)} · 모델 응답 대기")}
             "stream"->{if(event.text.isNotBlank())reply(event.turn).offer(event.text) else if(!event.output.isNullOrBlank())reply(event.turn).offer("‘${event.output.takeLast(1500)}’")}
             "message"->{reply(event.turn).offer(event.text);render("턴 ${tn(event.turn)} · 모델 응답")}

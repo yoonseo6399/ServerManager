@@ -612,3 +612,7 @@ Beta.7 publication COMPLETE: tag/source9b4d801, signed CI39019991413 SUCCESS wit
 ## 2026-10-17 — 0.7.0-beta.8
 
 `feat/0.7.0-beta.8-harness-roles` on release/0.7.0-beta.7 (main e4e688d). Admin-web login CSRF refresh, Discord friend roles for the Qwen agent (model limits, READ/EDIT tiers, shared projects), read-only `sh` command line and `edit_file`, configurable turn limit. See `docs/dev-notes/feat-qwen-friend-harness.md`. Released as v0.7.0-beta.8 (tag CI builds and signs). Merged with beta.6 routing and beta.7 model catalog; owner grant covers all catalog models, friend roles use catalog IDs.
+
+## 2026-10-17 — 0.7.0-beta.9 (unreleased)
+
+`feat/0.7.0-beta.9-result-store` on release/0.7.0-beta.8. Adds `read_result` with verbatim storage of long command output (`ProjectAgentResults`), real-time intervention (`ProjectAgentEngine.steer`, owner messages during a run), and carries `bbcc7f7` world transfer preparation speed-up plus runner folder scan progress ordering. Music autoplay/repeat, runner Qwen and the log window from the old uncommitted work already exist on this line in newer form and were not re-applied. Not released: no tag.
