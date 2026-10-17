@@ -47,6 +47,7 @@ class ProjectAgentStore(private val directory:Path) {
     @Synchronized fun gradleTrusted(guild:String,user:String,fingerprint:String)=fingerprint in data.gradleConsent[key(guild,user)].orEmpty()
     @Synchronized fun trustGradle(guild:String,user:String,fingerprint:String){persist(data.copy(gradleConsent=data.gradleConsent+(key(guild,user) to (data.gradleConsent[key(guild,user)].orEmpty().toList().takeLast(99).toSet()+fingerprint))))}
     @Synchronized fun channel(id:String)=data.channels[id]
+    @Synchronized fun channelsOf(guild:String,user:String)=data.channels.values.count {it.guild==guild && it.user==user}
     @Synchronized fun addChannel(value:ProjectAgentChannel) {
         require(data.channels.size<500);persist(data.copy(channels=data.channels+(value.channel to value)))
     }
