@@ -112,8 +112,8 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
         check(inference.tryAcquire()) {"다른 로컬 모델 요청이 진행 중입니다."}
         try {
             unloadQwen(tag(size))
-            val body=mapper.writeValueAsString(mapOf("model" to tag(size),"messages" to messages,"format" to "json","think" to think,"stream" to true,
-                "keep_alive" to "1m","options" to mapOf("num_ctx" to 8192,"num_predict" to 4096)))
+            val body=mapper.writeValueAsString(mapOf("model" to tag(size),"messages" to messages,"format" to ProjectAgentFormats.forMessages(messages),"think" to think,"stream" to true,
+                "keep_alive" to "1m","options" to (mapOf("num_ctx" to 8192,"num_predict" to 4096)+if(messages.firstOrNull()?.content?.startsWith("Independent command-risk reviewer")==true)mapOf("temperature" to 0)else emptyMap())))
             val request=HttpRequest.newBuilder(endpoint.resolve("/api/chat")).timeout(Duration.ofMinutes(3)).header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build()
             val start=System.nanoTime();val opened=java.util.concurrent.atomic.AtomicReference<java.io.InputStream?>()
             val cancelled=java.util.concurrent.atomic.AtomicBoolean(false)

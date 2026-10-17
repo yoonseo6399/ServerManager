@@ -50,7 +50,7 @@ class ProjectAgentRoutingTest {
             messages.first().content.startsWith("Tool-result")-> {summaries++;error("Read must not be summarized")}
             else->when(actor++){
                 0->"""{"message":"hello.txt 내용을 확인해 볼게요!","tool":null}"""
-                1->{assertTrue(messages.any {it.content.contains("No tool was requested")});"""{"message":"읽을게요","tool":{"name":"read_file","arguments":{"path":"hello.txt"}}}"""}
+                1->{assertTrue(messages.any {it.content.contains("No operation from this reply")});"""{"message":"읽을게요","tool":{"name":"read_file","arguments":{"path":"hello.txt"}}}"""}
                 else->{assertTrue(messages.any {it.content.contains("ORIGINAL_FILE_MARKER")});"""{"message":"원문을 확인했습니다.","status":"completed","tool":null}"""}
             }
         }}
@@ -69,6 +69,35 @@ class ProjectAgentRoutingTest {
         }},{}){}}
         assertEquals(1,summaries)
     }
+    @Test fun `flattened tool intent is executed through approval instead of being accepted as a final answer`() {
+        val store=ProjectAgentStore(temp.resolve("settings"));store.addChannel(ProjectAgentChannel("g","c","u",null,temp.toString()));val file=temp.resolve("chain.txt");file.writeText("original\n")
+        var actor=0;var approvals=0
+        ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->engine.run("c","u","파일 끝에 added 추가",ProjectAgentPreferences(),ProjectAgentInference {messages,_,_->when {
+            messages.first().content.startsWith("Independent")->"""{"action":"ALLOW","risk":"LOW","projectScope":"INSIDE","reason":"write"}"""
+            actor++==0->"""{"message":"Appending added","tool_name":"write_file","arguments":{"path":"chain.txt","content":"original\nadded\n"}}"""
+            else->"""{"message":"추가했습니다.","tool":null}"""
+        }},{}){e->if(e.kind=="approval"){approvals++;engine.approve("c","u",e.token!!,true){}}}}
+        assertEquals("original\nadded\n",file.readText());assertEquals(1,approvals)
+        assertNull(ProjectAgentReply.parse("""{"message":"done","tool":null,"tool_name":"write_file","arguments":{}}"""))
+        assertNull(ProjectAgentReply.parse("""{"message":"done","tool_name":"unknown","arguments":{}}"""))
+        assertNull(ProjectAgentReply.parse("""{"message":"just a promise"}"""))
+    }
+    @Test fun `requested reread after saving is required before completion and final bytes preserve original plus insertion`() {
+        val store=ProjectAgentStore(temp.resolve("settings"));store.addChannel(ProjectAgentChannel("g","c","u",null,temp.toString()));val file=temp.resolve("chain.txt");file.writeText("original\n")
+        var actor=0;val events=mutableListOf<ProjectAgentEvent>()
+        ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->engine.run("c","u","chain.txt에 added를 추가하고 저장 후 다시 읽어서 검증해",ProjectAgentPreferences(),ProjectAgentInference {messages,_,_->when {
+            messages.first().content.startsWith("Independent")->"""{"action":"ALLOW","risk":"LOW","projectScope":"INSIDE","reason":"safe"}"""
+            else->when(actor++){
+                0->"""{"message":"읽기","tool":{"name":"read_file","arguments":{"path":"chain.txt"}}}"""
+                1->"""{"message":"저장","tool":{"name":"write_file","arguments":{"path":"chain.txt","content":"original\nadded\n"}}}"""
+                2->"""{"message":"검증 완료했습니다.","tool":null}"""
+                3->{assertTrue(messages.any {it.content.contains("Human explicitly requested rereading")});"""{"message":"재조회","tool":{"name":"read_file","arguments":{"path":"chain.txt"}}}"""}
+                else->"""{"message":"재조회로 검증했습니다.","tool":null}"""
+            }
+        }},{}){e->events.add(e);if(e.kind=="approval")engine.approve("c","u",e.token!!,true){}}}
+        assertContentEquals("original\nadded\n".toByteArray(),file.readBytes());assertEquals(listOf("read_file","write_file","read_file"),events.filter {it.kind=="tool_end"}.map {it.plan!!.tool.name})
+        assertTrue(events.any {it.kind=="status" && it.text.contains("재조회 검증 요청")});assertEquals("재조회로 검증했습니다.",events.last().text)
+    }
     @Test fun `repeated empty promises terminate honestly rather than pretending completion or looping`() {
         val store=ProjectAgentStore(temp.resolve("settings"));store.addChannel(ProjectAgentChannel("g","c","u",null,temp.toString()));var calls=0;val events=mutableListOf<ProjectAgentEvent>()
         ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {it.run("c","u","안녕.txt 파일을 읽어줘",ProjectAgentPreferences(),ProjectAgentInference {_,_,_->calls++;"""{"message":"파일을 읽어볼게요","tool":null}"""},{},events::add)}
@@ -80,6 +109,7 @@ class ProjectAgentRoutingTest {
         assertFalse(ProjectAgentCompletion.needsContinuation("파일 읽어줘","어느 파일의 경로인지 알려 주세요.","clarify",0))
         assertTrue(ProjectAgentCompletion.needsContinuation("폴더 찾아줘","I will find it.","completed",1))
         assertTrue(ProjectAgentCompletion.needsContinuation("README.md 확인해줘","완료했습니다.","completed",0))
+        assertFalse(ProjectAgentCompletion.needsContinuation("파일을 다시 읽으라는 말이 아니야. 우리 대화에서 방금 무엇을 요청했는지 알려줘. 파일 도구를 쓰지 말고 대화 기록만 보고 답해줘.","안녕.txt를 읽어달라고 요청하셨어요.","completed",0))
         val text=(1..500).joinToString("\n"){"$it: exact source line"};val bounded=ProjectAgentRawResult.fit(text,100)
         assertTrue(bounded.startsWith("1: exact source line\n2:"));assertContains(bounded,"요약하지 않음");assertContains(bounded,"start_line:")
     }
