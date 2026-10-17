@@ -39,6 +39,12 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
             return mapper.readTree(bytes)
         }
     }
+    /** Only recognized numeric memory diagnostics may leave Ollama; never echo arbitrary response/input text. */
+    private fun error(status:Int,bytes:ByteArray):String {
+        val reason=runCatching {mapper.readTree(bytes).path("error").asText()}.getOrDefault("")
+        val memory=Regex("model requires ([0-9.]+) (GiB|GB) but only ([0-9.]+) (GiB|GB) are available(?: \\(after [0-9.]+ (?:MiB|GiB) overhead\\))?").matchEntire(reason)
+        return "Ollama HTTP $status"+(memory?.let {" · 모델 메모리 부족: 필요 ${it.groupValues[1]} ${it.groupValues[2]}, 사용 가능 ${it.groupValues[3]} ${it.groupValues[4]}"} ?: "")
+    }
     /** Names of models currently held in memory, or empty when Ollama cannot be asked. */
     fun loaded():List<String> = runCatching {get("/api/ps").path("models").map {it.path("name").asText()}.filter {it.isNotBlank()}}.getOrDefault(emptyList())
     fun unload(model:String) {
@@ -97,7 +103,7 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
         val response=try {pending.get(185,TimeUnit.SECONDS)} catch(e:Exception) {
             pending.cancel(true);throw IllegalStateException("Ollama 요청 실패 또는 3분 제한 초과입니다. 로컬 모델·메모리·Ollama 상태를 확인하세요.",e)
         }
-        check(response.statusCode()==200) {"Ollama HTTP ${response.statusCode()}: 실행 상태와 설치된 모델 태그를 확인하세요."}
+        check(response.statusCode()==200) {error(response.statusCode(),bytes.toByteArray())}
         val result=mapper.readTree(bytes.toByteArray())
         check(result.path("done").asBoolean() && !result.has("error")) {"Ollama가 완료된 응답을 반환하지 않았습니다."}
         val text=result.path("message").path("content").asText()
@@ -123,7 +129,7 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
                 response.body().use {stream->
                     opened.set(stream)
                     check(!cancelled.get()) {"Ollama 생성을 중단했습니다."}
-                    check(response.statusCode()==200) {"Ollama HTTP ${response.statusCode()}"}
+                    check(response.statusCode()==200) {error(response.statusCode(),stream.readNBytes(4096))}
                     val bounded=object:java.io.FilterInputStream(stream){var count=0
                         override fun read():Int=super.read().also {if(it>=0){count++;check(count<=524288)}}
                         override fun read(b:ByteArray,off:Int,len:Int):Int=super.read(b,off,len).also {if(it>0){count+=it;check(count<=524288)}}
@@ -141,7 +147,7 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
                     Answer(content.toString(),limited,(System.nanoTime()-start)/1e9,tokens,thinking.takeLast(4000).toString(),inputTokens,modelContext(size))
                 }
             }
-            return try {pending.get(185,TimeUnit.SECONDS)} catch(e:Exception){cancelled.set(true);headers.cancel(true);pending.cancel(true);runCatching {opened.get()?.close()};runCatching {headers.getNow(null)?.body()?.close()};if(e is InterruptedException)Thread.currentThread().interrupt();throw IllegalStateException(if(e is InterruptedException)"Ollama 생성을 중단했습니다." else "Ollama 대화 실패 또는 3분 제한 초과입니다.",e)}
+            return try {pending.get(185,TimeUnit.SECONDS)} catch(e:Exception){cancelled.set(true);headers.cancel(true);pending.cancel(true);runCatching {opened.get()?.close()};runCatching {headers.getNow(null)?.body()?.close()};if(e is InterruptedException)Thread.currentThread().interrupt();val failure=generateSequence<Throwable>(e){it.cause}.firstOrNull {it is IllegalStateException && it.message.orEmpty().startsWith("Ollama HTTP ")};throw IllegalStateException(when {e is InterruptedException->"Ollama 생성을 중단했습니다.";failure!=null->failure.message;else->"Ollama 대화 실패 또는 3분 제한 초과입니다."},e)}
         }finally {inference.release()}
     }
 
