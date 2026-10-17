@@ -314,6 +314,7 @@ internal class DiscordProjectAgentDisplay(private val channel:TextChannel,privat
         when(event.kind){
             "usage"->{usage=event.usage;render("턴 ${tn(event.turn)} · 결과 확인")}
             "status"->render("턴 ${tn(event.turn)} · ${event.text}")
+            "ledger"->render("턴 ${tn(event.turn)} · 📋 ${event.text.take(200)}")
             "steer"->render("턴 ${tn(event.turn)} · 🧭 개입 반영: ${event.text.take(120).replace('\n',' ')}")
             "thinking"->{usage=event.usage;render("턴 ${tn(event.turn)} · 모델 응답 대기")}
             "stream"->{if(event.text.isNotBlank())reply(event.turn).offer(event.text) else if(!event.output.isNullOrBlank())reply(event.turn).offer("‘${event.output.takeLast(1500)}’")}

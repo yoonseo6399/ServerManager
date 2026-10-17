@@ -29,7 +29,7 @@ class ProjectAgentShell(home:Path) {
     private var deadline=0L
 
     companion object {
-        val names=setOf("pwd","ls","cat","head","tail","wc","grep","find","sed","sort","uniq","echo","git")
+        val names=setOf("pwd","ls","cat","head","tail","wc","grep","rg","find","sed","sort","uniq","echo","git")
         const val LIMIT=48000
         private const val SECONDS=20L
         private val noise=setOf(".git","node_modules","build",".gradle",".idea","target","dist","__pycache__",".next",".venv")
@@ -107,6 +107,13 @@ class ProjectAgentShell(home:Path) {
             if(name=="git")gitArgv(command.drop(1).map {it.text})
         }}
     }
+    /** Runs one already-split command (no line parsing), for backend-built calls such as the search tool. */
+    fun runArgv(argv:List<String>,active:()->Unit={}):Result {
+        require(argv.isNotEmpty() && argv.size<=64 && argv[0] in names) {"지원하지 않는 명령입니다."}
+        deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(SECONDS)
+        val out=exec(argv,null,active)
+        return Result(cap(out.text.trimEnd('\n')),out.status)
+    }
     fun run(line:String,active:()->Unit={}):Result {
         val steps=parse(line);deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(SECONDS)
         val out=StringBuilder();var status=0
@@ -162,6 +169,7 @@ class ProjectAgentShell(home:Path) {
                 "head","tail" -> headTail(name=="head",args,stdin)
                 "wc" -> wc(args,stdin)
                 "grep" -> grep(args,stdin,active)
+                "rg" -> rg(args,stdin,active)
                 "find" -> find(args,active)
                 "sed" -> sed(args,stdin)
                 "sort" -> sort(args,stdin)
@@ -271,6 +279,52 @@ class ProjectAgentShell(home:Path) {
             }
             override fun visitFileFailed(file:Path,exc:IOException)=FileVisitResult.CONTINUE
         })
+    }
+    /**
+     * ripgrep-style search translated onto the in-process grep: recursive and numbered by default, `-g GLOB`, `-t TYPE`,
+     * `-e`, `-C/-A/-B`, `-m`, `-i -l -c -v -F -w` and `--files`. Nothing is executed outside this class; ignore files,
+     * hidden-file and negated-glob switches are refused instead of being half supported.
+     */
+    private fun rg(args:List<String>,stdin:String?,active:()->Unit):Out {
+        val types=mapOf("kotlin" to "*.kt","kt" to "*.kt","kts" to "*.kts","java" to "*.java","ts" to "*.ts","tsx" to "*.tsx","js" to "*.js","py" to "*.py","md" to "*.md",
+            "json" to "*.json","css" to "*.css","rust" to "*.rs","go" to "*.go","yaml" to "*.yml","html" to "*.html","sh" to "*.sh")
+        val flags=mutableListOf<String>();val globs=mutableListOf<String>();val explicit=mutableListOf<String>();val positional=mutableListOf<String>()
+        var files=false;var i=0
+        fun value(name:String)=args.getOrNull(++i) ?: throw IllegalArgumentException("$name 값이 필요합니다.")
+        while(i<args.size) {
+            val a=args[i]
+            when {
+                a=="--files" -> files=true
+                a in setOf("-i","-l","-c","-v","-F","-w","-s") -> if(a!="-s")flags.add(a)
+                a in setOf("-n","--line-number","--no-heading","--color=never","--with-filename","-H") -> {}
+                a=="-g" || a=="--glob" -> globs.add(value(a).also {require(!it.startsWith("!")) {"제외 glob(!)은 지원하지 않습니다."}})
+                a.startsWith("--glob=") -> globs.add(a.substringAfter('=').also {require(!it.startsWith("!")) {"제외 glob(!)은 지원하지 않습니다."}})
+                a=="-t" || a=="--type" -> globs.add(types[value(a)] ?: throw IllegalArgumentException("지원하는 파일 종류: ${types.keys.sorted().joinToString()}"))
+                a=="-e" || a=="--regexp" -> explicit.add(value(a))
+                a=="-A" || a=="-B" || a=="-C" -> {flags.add(a);flags.add(number(value(a)).coerceAtMost(10).toString())}
+                a=="-m" || a=="--max-count" -> {flags.add("-m");flags.add(number(value(a)).toString())}
+                a=="--" -> {positional.addAll(args.drop(i+1));i=args.size}
+                a.startsWith("-") && a!="-" -> throw IllegalArgumentException("$a: 지원하지 않는 옵션입니다. 지원: --files -i -l -c -v -F -w -g -t -e -A -B -C -m")
+                else -> positional.add(a)
+            }
+            i++
+        }
+        if(files) {
+            val findArgs=mutableListOf<String>()
+            findArgs.addAll(positional.ifEmpty {listOf(".")});findArgs.addAll(listOf("-type","f"))
+            require(globs.size<=1) {"--files에는 glob을 하나만 쓸 수 있습니다."}
+            globs.firstOrNull()?.let {findArgs.addAll(listOf("-name",it))}
+            return find(findArgs,active)
+        }
+        val patterns=explicit.toMutableList();val paths=positional.toMutableList()
+        if(patterns.isEmpty()) {require(paths.isNotEmpty()) {"검색 패턴이 필요합니다."};patterns.add(paths.removeAt(0))}
+        val argv=mutableListOf<String>()
+        val readsStdin=paths.isEmpty() && stdin!=null
+        argv.add(if(readsStdin)"-n" else "-rn");argv.addAll(flags)
+        globs.forEach {argv.add("--include=$it")}
+        patterns.forEach {argv.add("-e");argv.add(it)}
+        if(!readsStdin)argv.addAll(paths.ifEmpty {listOf(".")}) else argv.addAll(paths)
+        return grep(argv,stdin,active)
     }
     private fun grep(args:List<String>,stdin:String?,active:()->Unit):Out {
         var recursive=false;var numbered=false;var ignore=false;var invert=false;var count=false;var listOnly=false;var fixed=false;var word=false;var noName=false;var forceName=false

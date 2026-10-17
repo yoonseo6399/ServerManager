@@ -21,6 +21,18 @@ class ProjectAgentStore(private val directory:Path) {
     private val metadata=if(metadataFile.exists())mapper.readValue<ProjectAgentMetadata>(metadataFile.readText())else ProjectAgentMetadata()
     private var data=(if(file.exists())mapper.readValue<ProjectAgentData>(file.readText()) else ProjectAgentData()).let {loaded->loaded.copy(gradleConsent=metadata.gradleConsent,channels=loaded.channels.mapValues {(id,channel)->channel.copy(contextLimit=metadata.limits[id] ?: 2867,contextEpoch=metadata.epochs[id] ?: 0)})}
     private fun key(guild:String,user:String)="$guild:$user"
+    private val notesFile=directory.resolve("project-agent-notes.json")
+    private var notes:Map<String,ProjectAgentNotes> = runCatching {if(notesFile.exists())mapper.readValue<Map<String,ProjectAgentNotes>>(notesFile.readText()) else emptyMap()}.getOrDefault(emptyMap())
+    /** Short per-channel carry-over (last request/result, touched files, unfinished items). Separate file so older releases never see it. */
+    @Synchronized fun notes(channel:String):ProjectAgentNotes?=notes[channel]
+    @Synchronized fun saveNotes(channel:String,value:ProjectAgentNotes) {
+        val next=(notes+(channel to value)).entries.sortedByDescending {it.value.updated}.take(500).associate {it.key to it.value}
+        GeminiKeyPoolStore(directory).writePrivate(notesFile,mapper.writeValueAsString(next));notes=next
+    }
+    @Synchronized fun clearNotes(channel:String) {
+        if(channel !in notes)return
+        val next=notes-channel;GeminiKeyPoolStore(directory).writePrivate(notesFile,mapper.writeValueAsString(next));notes=next
+    }
     private fun persist(next:ProjectAgentData) {
         // Keep the legacy file readable by older beta releases after an application rollback.
         val primary=mapper.valueToTree<com.fasterxml.jackson.databind.node.ObjectNode>(next)
@@ -61,15 +73,19 @@ class ProjectAgentStore(private val directory:Path) {
         val previous=data.channels[channel] ?: error("에이전트 채널이 아닙니다.");check(previous.user==user)
         require(limit==null || limit in 1024..3584) {"압축 기준은 1024~3584 토큰입니다. 실행 창 8192 중 출력·안전 여유를 제외한 범위입니다."}
         val next=previous.copy(history=if(reset)emptyList() else previous.history,contextLimit=limit ?: previous.contextLimit,contextEpoch=previous.contextEpoch+1)
-        persist(data.copy(channels=data.channels+(channel to next)));return next
+        persist(data.copy(channels=data.channels+(channel to next)))
+        if(reset)runCatching {clearNotes(channel)}
+        return next
     }
 }
 
 object ProjectAgentContext {
     /** Conservative budget for an 8K context with room left for Thinking and the final JSON. */
+    /** Input budget for one model call. 3600 fits the default 8K window; PROJECT_AGENT_INPUT_BUDGET (3600..12000) raises it only for a runner with a larger window. */
+    val budget:Int get()=(System.getenv("PROJECT_AGENT_INPUT_BUDGET")?.toIntOrNull() ?: 3600).coerceIn(3600,12000)
     fun estimatedTokens(text:String):Int=(text.count {it.code<128}+2)/3+text.count {it.code>=128}*2
     fun forModel(system:ProjectAgentMessage,history:List<ProjectAgentMessage>,requester:ProjectAgentMessage?=null):List<ProjectAgentMessage> {
-        var remaining=3600-estimatedTokens(system.content)-estimatedTokens(requester?.content.orEmpty());require(remaining>500)
+        var remaining=budget-estimatedTokens(system.content)-estimatedTokens(requester?.content.orEmpty());require(remaining>500)
         val selected=mutableListOf<ProjectAgentMessage>()
         for(message in history.asReversed()) {
             if(remaining<100 || selected.size>=16)break
