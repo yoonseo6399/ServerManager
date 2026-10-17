@@ -809,9 +809,14 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         val stage=diagnosticRoot(id)?.resolve("stage-${UUID.randomUUID()}")?.createDirectories() ?: folders.stage(id)
         try {
             manifest.directories.forEach { FileInventory.safePath(stage,it).createDirectories() }
+            val scanStats=FileInventory.ScanStats()
+            fun listing(count:Int,bytes:Long)=FolderImportProgress("SCANNING",count,bytes,message="실행기 폴더의 파일 목록을 만들고 있습니다. 이전에 검사한 파일은 다시 읽지 않습니다",
+                step="실행기 파일 목록 작성",stepNo=2,stepTotal=3,reused=scanStats.reused.get(),hashed=scanStats.hashed.get())
             val before=serverDir(id).takeIf {it.exists()}?.let {base->
                 FileInventory.collectCached(base,scanStats) {count,bytes->progress(listing(count,bytes))}.let {(f,d)->RunnerFileManifest(f,d)}
             } ?: RunnerFileManifest(emptyMap(),emptySet())
+            progress(FolderImportProgress("SCANNING",before.files.size,before.files.values.sumOf {it.size},message="관리 서버 목록과 비교해 받을 파일을 정하고 있습니다",
+                step="달라진 파일 비교",stepNo=3,stepTotal=3,reused=scanStats.reused.get(),hashed=scanStats.hashed.get()),true)
             val existing=before.files
             val changed=manifest.files.filter {(path,file)->existing[path]!=file};val total=changed.values.sumOf {it.size};var downloaded=0L;var completed=0
             progress(FolderImportProgress(if(changed.isEmpty())"VERIFYING" else "UPLOADING",0,0,changed.size,total,"동일한 파일은 재사용하고 변경 파일만 다운로드합니다"),true)
@@ -824,14 +829,9 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                     val response=http("POST","/api/runners/transfer/$id/files",HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(group)),"application/json")
                     transferResponse(response,"파일 묶음 다운로드 대기")
                     val parts=TransferBatch.decode(response.body())
-            val scanStats=FileInventory.ScanStats()
-            fun listing(count:Int,bytes:Long)=FolderImportProgress("SCANNING",count,bytes,message="실행기 폴더의 파일 목록을 만들고 있습니다. 이전에 검사한 파일은 다시 읽지 않습니다",
-                step="실행기 파일 목록 작성",stepNo=2,stepTotal=3,reused=scanStats.reused.get(),hashed=scanStats.hashed.get())
                     check(parts.map {it.path}.toSet()==group.toSet() && parts.size==group.size)
                     parts.forEach {part->check(part.offset==0L && part.bytes.size.toLong()==changed.getValue(part.path).size)}
                     parts.forEach {part->val target=FileInventory.safePath(stage,part.path);target.parent.createDirectories();target.writeBytes(part.bytes)}
-            progress(FolderImportProgress("SCANNING",before.files.size,before.files.values.sumOf {it.size},message="관리 서버 목록과 비교해 받을 파일을 정하고 있습니다",
-                step="달라진 파일 비교",stepNo=3,stepTotal=3,reused=scanStats.reused.get(),hashed=scanStats.hashed.get()),true)
                     advanced(parts.sumOf {it.bytes.size.toLong()},parts.size)
                 } else group.forEach {relative->
                     val file=changed.getValue(relative);val target=FileInventory.safePath(stage,relative);target.parent.createDirectories()
@@ -975,6 +975,8 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                 progress(FolderImportProgress("SCANNING",count,bytes,message="원래 폴더의 파일 목록을 만들고 있습니다. 이전에 검사한 파일은 다시 읽지 않습니다",
                     step="원래 폴더 파일 목록 작성",stepNo=1,stepTotal=3,reused=scanStats.reused.get(),hashed=scanStats.hashed.get()))}
             val manifest=RunnerFileManifest(files,dirs)
+            progress(FolderImportProgress("SCANNING",files.size,files.values.sumOf {it.size},message="관리 서버가 이어받기를 지원하는지 확인하고 있습니다",
+                step="관리 서버 연결 확인",stepNo=2,stepTotal=3,reused=scanStats.reused.get(),hashed=scanStats.hashed.get()),true)
             val capability=awaitTransfer(id,"이어받기 지원 확인 대기",allowMissing=true) {http("GET",protocolPath("/api/runners/transfer/$id/transfer-state?transferId=00000000-0000-0000-0000-000000000000"))}
             val resumable=if(capability.statusCode()==404)false else {transferResponse(capability,"이어받기 지원 확인 대기");true}
             val body=mutableMapOf<String,Any>("manifest" to manifest)
@@ -991,8 +993,6 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             if(request==null)atomicText(instanceRoot(id).resolve("upload.pending"),plan.transferId)
             val total=if(plan.totalFiles>0)plan.totalBytes else plan.changedFiles.sumOf {files.getValue(it).size};val totalFiles=if(plan.totalFiles>0)plan.totalFiles else plan.changedFiles.size
             var uploaded=plan.completedBytes;var completed=plan.completedFiles
-            progress(FolderImportProgress("SCANNING",files.size,files.values.sumOf {it.size},message="관리 서버가 이어받기를 지원하는지 확인하고 있습니다",
-                step="관리 서버 연결 확인",stepNo=2,stepTotal=3,reused=scanStats.reused.get(),hashed=scanStats.hashed.get()),true)
             val progressLock=Any()
             fun advanced(bytes:Long=0,done:Int=0)=synchronized(progressLock){uploaded+=bytes;completed+=done;progress(FolderImportProgress("UPLOADING",completed,uploaded,totalFiles,total))}
             progress(FolderImportProgress("UPLOADING",completed,uploaded,totalFiles,total),true)
