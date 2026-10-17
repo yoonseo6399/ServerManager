@@ -29,6 +29,14 @@ class ProjectAgentConversationTest {
         ollama("""{"message":{"content":"{}"},"done":true,"done_reason":"stop"}""",{raw->assertFalse(jacksonObjectMapper().readTree(raw).path("think").asBoolean())}) {llm->assertEquals("{}",llm.conversation("30b",listOf(ProjectAgentMessage("user","test")),false).text)}
         ollama("""{"message":{"content":"partial"},"done":false}""") {llm->assertFails {llm.conversation("14b",listOf(ProjectAgentMessage("user","test")))}}
     }
+    @Test fun `risk review requests required decision schema rather than unconstrained JSON`() {
+        val stream="""{"message":{"content":"{\"action\":\"ASK\",\"risk\":\"MEDIUM\",\"projectScope\":\"UNKNOWN\",\"reason\":\"review\"}"},"done":true}
+"""
+        ollama(stream,{raw->val format=jacksonObjectMapper().readTree(raw).path("format");assertEquals("object",format.path("type").asText());assertEquals(setOf("action","risk","projectScope","reason"),format.path("required").map {it.asText()}.toSet());assertFalse(format.path("additionalProperties").asBoolean(true))}){llm->
+            val reply=llm.conversation("30b",listOf(ProjectAgentMessage("system","Independent command-risk reviewer. Fresh session."),ProjectAgentMessage("user","untrusted input")),false)
+            assertEquals("ASK",jacksonObjectMapper().readTree(reply.text).path("action").asText())
+        }
+    }
     @Test fun `overlarge risk request is rejected instead of silently truncating approval input`() {
         assertFails {LocalLlm().conversation("14b",listOf(ProjectAgentMessage("user","가".repeat(4000))))}
     }
