@@ -116,11 +116,13 @@ data class PermissionDecision(val allowed: Boolean?, val reason: String)   // nu
 | `ai.cloud` | MEDIUM | LEGACY | `/cloud-agent`, `/sub-agent`, `/agent-keys` | |
 | `ai.local` | LOW | LEGACY | `/local-llm` | |
 | `assistant.use` | MEDIUM | LEGACY | `/assistant*` | |
+| `minecraft.status` | LOW | LEGACY | `/mc` 전체 | |
+| `minecraft.control` | MEDIUM | LEGACY | `/mc start·stop·restart`, `sm:` 패널 버튼 | |
 
 중요한 점 두 가지.
 
 1. **ALLOW 규칙은 아직 권한을 "더하지" 않는다.** 모든 현재 권한이 `LEGACY`이므로 ALLOW 규칙이 있어도 모듈의 기존 검사(`/agent access` 역할, 음악 채널 규칙, 최고 관리자 등)가 그대로 적용된다. 지금 `/permission`으로 할 수 있는 것은 **거부 규칙, 비활성화, 상한**이다. 기본값이 `DENY`인 새 권한이 추가되면 그때부터 ALLOW가 실제로 권한을 연다.
-2. **서버 제어(`/mc`)는 아직 이 서비스와 연결되지 않았다.** `DiscordAccess`의 서버별 역할 규칙이 계속 판단한다. 모듈화할 때 `minecraft.status|start|stop|restart` 권한을 선언하고 `DiscordAccess`를 서비스 규칙으로 옮긴다(`docs/architecture/server-control-api.md`).
+2. **서버 제어(`/mc`)**: `minecraft.status`(LOW), `minecraft.control`(MEDIUM, start·stop·restart와 패널 버튼)이 추가 게이트다. 서버별 허가는 여전히 `DiscordAccess`의 역할 규칙이 판단하고, 이 서비스는 거부 규칙·상한만 더한다. `DiscordAccess`를 서비스 규칙으로 옮기는 일은 미구현이다.
 
 ## 7. 코드에서 쓰는 방법
 

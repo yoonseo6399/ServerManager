@@ -120,7 +120,7 @@ registry.add(DiscordHelloModule())
 | `ai` | `/cloud-agent`, `/sub-agent`, `/agent-keys`, `/local-llm` | 없음 | `ai.cloud`(MEDIUM), `ai.local`(LOW) | |
 | `assistant` | `/assistant`, `/assistant-link`, `/assistant-google` | `as:` | `assistant.use`(MEDIUM) | 비서 기능이 설정된 경우에만 등록. |
 | `permission` | `/permission` | 없음 | 없음 | 최고 관리자 전용. 자기 자신은 게이트하지 않는다. |
-| (본체) | `/mc` | `sm:` | 없음 | `DiscordAccess`(서버별 역할 규칙)로 판단. 모듈화는 다음 단계. |
+| `minecraft` | `/mc` | `sm:` | `minecraft.status`(LOW), `minecraft.control`(MEDIUM) | 어댑터. 로직은 `DiscordBot`(`mcCommand`, `mcButton`)에 남고, 서버별 허가는 `DiscordAccess`가 판단. `/mc start·stop·restart`와 패널 버튼은 `minecraft.control` 거부 규칙에 막힌다. 이름 `/mc`, `sm:`은 이 모듈만 쓸 수 있다. |
 
 기존 기능은 모두 `LEGACY` 기본값이라 **업데이트 직후 동작이 바뀌지 않는다.** `/permission`으로 명시적 거부 규칙을 만들 때만 새 동작이 생긴다.
 

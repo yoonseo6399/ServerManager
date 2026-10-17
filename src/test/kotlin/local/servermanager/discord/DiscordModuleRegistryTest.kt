@@ -44,10 +44,12 @@ class DiscordModuleRegistryTest {
 
     @Test fun `the bot reserves the mc command and the sm prefix`() {
         val r=registry()
-        assertFailsWith<IllegalArgumentException> {r.add(Fake("minecraft",setOf("mc")))}
+        assertFailsWith<IllegalArgumentException> {r.add(Fake("imposter",setOf("mc")))}
         assertFailsWith<IllegalArgumentException> {r.add(Fake("panel",setOf("panel"),setOf("sm:")))}
         assertFailsWith<IllegalArgumentException> {r.add(Fake("panel2",setOf("panel2"),setOf("s")))}
         assertTrue(r.all.isEmpty())
+        r.add(Fake("minecraft",setOf("mc"),setOf("sm:")))
+        assertEquals("minecraft",r.forCommand("mc")?.id);assertEquals("minecraft",r.forComponent("sm:1:start")?.id)
     }
 
     @Test fun `permissions declared by a module are registered with the service`() {

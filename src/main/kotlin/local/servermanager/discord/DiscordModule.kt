@@ -54,6 +54,8 @@ class DiscordModuleRegistry(private val permissions:PermissionService?,private v
     val all:List<DiscordModule> get()=modules.values.toList()
     companion object {
         /** Handled by the bot itself (Minecraft control panel); a module may not shadow them. */
+        /** Only the built-in Minecraft control module may use these. */
+        const val OWNER_OF_RESERVED="minecraft"
         val RESERVED_COMMANDS=setOf("mc")
         val RESERVED_PREFIXES=setOf("sm:")
     }
@@ -62,8 +64,8 @@ class DiscordModuleRegistry(private val permissions:PermissionService?,private v
         require(Regex("[a-z][a-z0-9_]{0,30}").matches(module.id)) {"모듈 ID가 올바르지 않습니다: ${module.id}"}
         require(module.id !in modules) {"이미 등록된 모듈입니다: ${module.id}"}
         require(module.commands.isNotEmpty() || module.componentPrefixes.isNotEmpty() || module.messagePermission!=null || module.permissions.isNotEmpty()) {"${module.id}: 처리할 명령이나 컴포넌트가 없습니다."}
-        module.commands.forEach {require(it !in RESERVED_COMMANDS) {"명령 /$it 은(는) 봇 본체가 예약했습니다."}}
-        module.componentPrefixes.forEach {prefix->require(RESERVED_PREFIXES.none {r->r.startsWith(prefix) || prefix.startsWith(r)}) {"컴포넌트 접두사 $prefix 은(는) 봇 본체가 예약했습니다."}}
+        if(module.id!=OWNER_OF_RESERVED)module.commands.forEach {require(it !in RESERVED_COMMANDS) {"명령 /$it 은(는) minecraft 모듈이 예약했습니다."}}
+        if(module.id!=OWNER_OF_RESERVED)module.componentPrefixes.forEach {prefix->require(RESERVED_PREFIXES.none {r->r.startsWith(prefix) || prefix.startsWith(r)}) {"컴포넌트 접두사 $prefix 은(는) 봇 본체가 예약했습니다."}}
         module.commands.forEach {name->byCommand[name]?.let {require(false) {"명령 /$name 은(는) 이미 ${it.id} 모듈이 사용합니다."}}}
         module.componentPrefixes.forEach {prefix->modules.values.firstOrNull {m->m.componentPrefixes.any {p->p.startsWith(prefix) || prefix.startsWith(p)}}?.let {
             require(false) {"컴포넌트 접두사 $prefix 은(는) ${it.id} 모듈과 겹칩니다."}}}

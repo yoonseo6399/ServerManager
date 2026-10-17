@@ -92,9 +92,11 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
     @Volatile private var musicAudioReady=false
     /** Module permissions: policy and audit live under security/discord; the ceiling is only editable locally. */
     val permissions=PermissionService(control.dataRoot.resolve("security/discord"))
+    fun modulesDenial(guildId:String?,roles:Set<String>,permission:String):String? = modules.denial(guildId,roles,permission)
     private fun isSuperAdmin(guild:String,roles:Set<String>)=view().config.superAdmins.any {it.guildId==guild && it.roleId in roles}
     /** Feature modules (music, agents, permission management). New features plug in here; see docs/architecture/discord-modules.md. */
     private val modules=DiscordModuleRegistry(permissions,::isSuperAdmin).also {registry->
+        registry.add(DiscordMinecraftModule(this))
         registry.add(DiscordCodeAgentModule(codeAgent))
         assistantCommands?.let {registry.add(DiscordAssistantModule(it))}
         projectAgent?.let {registry.add(DiscordProjectAgentModule(it))}
@@ -188,13 +190,18 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
             .take(25).map { "${it.name} · ${it.id.take(8)}".take(100) to it.id }
     }
     override fun onCommandAutoCompleteInteraction(event:CommandAutoCompleteInteractionEvent) {
-        if(modules.autoComplete(event)) return
+        modules.autoComplete(event)
+    }
+    /** Called by [DiscordMinecraftModule]; the /mc logic stays here because it shares panels, alerts and request tracking. */
+    fun mcAutoComplete(event:CommandAutoCompleteInteractionEvent) {
         if(event.jda!==client || event.name!="mc") return
         val choices=choices(event.guild?.id,event.member?.roles?.map { it.id }?.toSet() ?: emptySet(),event.subcommandName ?: "status",event.focusedOption.value)
         event.replyChoices(choices.map { Command.Choice(it.first,it.second) }).queue({}, {})
     }
     override fun onSlashCommandInteraction(event:SlashCommandInteractionEvent) {
-        if(modules.command(event)) return
+        modules.command(event)
+    }
+    fun mcCommand(event:SlashCommandInteractionEvent) {
         if(event.jda!==client || event.name!="mc") return
         val guild=event.guild
         val id=event.getOption("server")?.asString
@@ -212,7 +219,9 @@ class DiscordBot(private val manager:ServerManager, private val audit:AuditLog, 
         }, {})
     }
     override fun onButtonInteraction(event:ButtonInteractionEvent) {
-        if(modules.button(event)) return
+        modules.button(event)
+    }
+    fun mcButton(event:ButtonInteractionEvent) {
         if(event.jda!==client || !event.componentId.startsWith("sm:")) return
         val parts=event.componentId.split(':')
         val guild=event.guild
