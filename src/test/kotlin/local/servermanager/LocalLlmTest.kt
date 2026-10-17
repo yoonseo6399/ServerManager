@@ -36,6 +36,13 @@ class LocalLlmTest {
             assertTrue(it.chat("30b","question",true).limited)
         }
     }
+    @Test fun `known memory diagnostics are actionable but arbitrary server text stays private`() {
+        stub(status=500,body="""{"error":"model requires 18.0 GiB but only 15.5 GiB are available (after 512.0 MiB overhead)"}""") {
+            val message=assertFails {it.chat("gemma4-31b","test")}.message.orEmpty()
+            assertContains(message,"18.0 GiB");assertContains(message,"15.5 GiB")
+        }
+        stub(status=500,body="""{"error":"secret echoed input"}""") {assertEquals("Ollama HTTP 500",assertFails {it.chat("gemma4-31b","test")}.message)}
+    }
     @Test fun `provider failures are not exposed and empty or unfinished answers fail`() {
         stub(status=500,body="secret echoed input") {assertFalse(assertFails {it.chat("14b","question")}.message.orEmpty().contains("secret"))}
         for(body in listOf("""{"done":false,"message":{"content":"partial"}}""","""{"done":true,"message":{"content":""}}"""))stub(body=body) {assertFails {it.chat("14b","question")}}

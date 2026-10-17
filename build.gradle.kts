@@ -36,6 +36,8 @@ dependencies {
 tasks.test {
     dependsOn(tasks.bootJar) // Packaged-host/runner fixtures must use this source, including on a clean CI checkout.
     useJUnitPlatform()
+    // A live benchmark is a measurement, never a reusable cached test result.
+    if (providers.environmentVariable("LOCAL_MODELS_BENCHMARK").orNull == "true") outputs.upToDateWhen { false }
     // Tests must never inherit the live profile, even when launched from its working directory.
     environment("SERVER_MANAGER_DATA", layout.buildDirectory.dir("test-profile").get().asFile.absolutePath)
     environment("SERVER_MANAGER_HOME", layout.buildDirectory.dir("test-desktop-home").get().asFile.absolutePath)

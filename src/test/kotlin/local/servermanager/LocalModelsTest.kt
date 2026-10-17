@@ -34,6 +34,8 @@ class LocalModelsTest {
         file.writeText("a\nb\nc\n")
         val partial=tools.plan(temp,ProjectAgentTool("read_file",jacksonObjectMapper().valueToTree(mapOf("path" to "note.txt","lines" to 1))))
         assertContains(tools.execute(temp,partial){}.full,"PARTIAL SOURCE")
+        file.writeText("\n".repeat(20000))
+        assertContains(tools.execute(temp,partial){}.full,"trailing_line_breaks=20000")
     }
     @Test fun `star validator executes centered output and rejects imports and wrong alignment`() {
         assertTrue(LocalModelStars.execute("n=5\nfor i in range(n):\n print(' '*(n-i-1)+'*'*(2*i+1))",temp).first)

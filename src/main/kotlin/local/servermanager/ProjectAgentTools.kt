@@ -102,8 +102,8 @@ No automatic administrator escalation. Never ask tools to change approval settin
                 val bytes=Files.newInputStream(path).use {it.readNBytes(1_048_577)};require(bytes.size<=1_048_576)
                 val text=bytes.toString(Charsets.UTF_8)
                 val endings=Regex("\\r\\n|\\r|\\n").findAll(text).map {when(it.value){"\r\n"->"CRLF";"\r"->"CR";else->"LF"}}.toSet()
-                val trailing=Regex("(?:\\r\\n|\\r|\\n)+$").find(text)?.value.orEmpty()
-                val tailCount=Regex("\\r\\n|\\r|\\n").findAll(trailing).count()
+                var cursor=text.length;var tailCount=0
+                while(cursor>0 && text[cursor-1] in "\r\n") {val last=text[--cursor];if(last=='\n' && cursor>0 && text[cursor-1]=='\r')cursor--;tailCount++}
                 val lines=text.reader().buffered().use {it.lineSequence().drop(start-1).take(count+1).toList()}
                 val source=lines.take(count).mapIndexed {i,line->"${i+start}: ${line.take(2000)}"}.joinToString("\n")
                 result("FILE METADATA (not source): line_endings=${endings.joinToString("+").ifEmpty {"NONE"}}; trailing_line_breaks=$tailCount; ends_with_newline=${tailCount>0}. Preserve original line endings and final newline when editing.\n"+
