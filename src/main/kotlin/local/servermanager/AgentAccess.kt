@@ -23,7 +23,7 @@ object AgentAccess {
     private val rank=mapOf(READ to 1,EDIT to 2,OWNER to 3)
     fun tierValid(tier:String)=tier==READ || tier==EDIT
     fun resolve(data:AgentAccessData,guild:String,roles:Set<String>,superAdmin:Boolean,actor:String?=null):AgentGrant? {
-        if(superAdmin)return AgentGrant("OWNER",LocalLlm.SIZES.toSet(),OWNER,data.turnCap,data.sharedProjects.filter {it.guildId==guild}.map {it.name}.toSet(),actor)
+        if(superAdmin)return AgentGrant("OWNER",LocalModels.all.map {it.id}.toSet(),OWNER,data.turnCap,data.sharedProjects.filter {it.guildId==guild}.map {it.name}.toSet(),actor)
         val matches=data.roles.filter {it.guildId==guild && it.roleId in roles}
         if(matches.isEmpty())return null
         return AgentGrant("FRIEND",matches.flatMap {it.models}.toSet(),matches.maxBy {rank.getValue(it.tier)}.tier,minOf(matches.maxOf {it.maxTurns},data.turnCap),matches.flatMap {it.projects}.toSet())
@@ -43,7 +43,7 @@ class AgentAccessStore(private val directory:Path) {
     private fun snowflake(id:String)=id.matches(Regex("[1-9][0-9]{16,19}"))
     @Synchronized fun setRole(policy:AgentRolePolicy):AgentRolePolicy {
         require(snowflake(policy.guildId) && snowflake(policy.roleId) && policy.guildId!=policy.roleId) {"Discord 서버·역할 ID를 확인하세요. @everyone은 허용하지 않습니다."}
-        require(policy.models.isNotEmpty() && policy.models.all {it in LocalLlm.SIZES}) {"모델은 14b, 30b 중에서 고르세요."}
+        require(policy.models.isNotEmpty() && policy.models.all {id->LocalModels.all.any {it.id==id}}) {"지원하는 모델 ID를 고르세요."}
         require(AgentAccess.tierValid(policy.tier)) {"권한 단계는 READ 또는 EDIT입니다."}
         require(policy.maxTurns in 1..data.turnCap) {"턴 수는 1~${data.turnCap}입니다."}
         require(policy.projects.size<=20 && policy.projects.all {name->data.sharedProjects.any {it.guildId==policy.guildId && it.name==name}}) {"등록된 공유 프로젝트만 지정할 수 있습니다."}

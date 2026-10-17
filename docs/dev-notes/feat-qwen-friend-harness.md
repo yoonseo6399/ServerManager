@@ -1,8 +1,8 @@
 상태: 구현 완료, 관련 단위 테스트 통과(Windows 임시 완화 상태), 실제 Qwen 30B·실제 Discord 미검증
 
-# feat/0.7.0-beta.6-harness-roles
+# feat/0.7.0-beta.8-harness-roles
 
-베이스: release/0.7.0-beta.5 de4318f. 릴리즈·태그·푸시는 하지 않았다. VERSION만 0.7.0-beta.6으로 올렸다.
+베이스: origin/main e4e688d(0.7.0-beta.7)와 병합. 태그·릴리즈는 하지 않았다. VERSION은 0.7.0-beta.8.
 
 ## 변경
 - 관리 웹 로그인 "권한이 없거나 요청 검증에 실패했습니다": CSRF 토큰이 HTTP 세션(비활성 30분)에 저장되는데 프런트가 로드 시점 토큰을 계속 써서, 탭을 오래 두면 로그인 요청이 403이었다. `frontend/src/http.ts`가 변경 요청의 403에서 `/api/auth/session`으로 토큰을 한 번 갱신해 재시도한다. 보안 설정은 약화하지 않았다. 회귀 테스트 `CsrfRefreshTest`.
