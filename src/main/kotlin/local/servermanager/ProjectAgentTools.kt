@@ -10,15 +10,16 @@ import kotlin.io.path.*
 
 data class ProjectAgentTool(val name:String,val arguments:JsonNode)
 data class ProjectAgentPlan(val tool:ProjectAgentTool,val cwd:String,val description:String,val readOnly:Boolean,val beforeFingerprint:String?=null,val scope:String="UNKNOWN",val resolvedTargets:List<String> = emptyList(),val gradleFingerprint:String?=null,val sandboxed:Boolean=false)
-data class ProjectAgentToolResult(val text:String,val full:String,val exitCode:Int?=null)
+data class ProjectAgentToolResult(val text:String,val full:String,val exitCode:Int?=null,val stored:String?=null)
 
 /** Full OS-user access, not a sandbox. Every plan must pass the independent review/approval gate first. */
-class ProjectAgentTools(private val logs:Path,private val files:ProjectAgentFilePort?=null,private val register:(String,Path)->Unit={_,_->}) {
+class ProjectAgentTools(private val logs:Path,private val files:ProjectAgentFilePort?=null,private val resultScope:String="shared",private val register:(String,Path)->Unit={_,_->}) {
     private val mapper=jacksonObjectMapper()
+    private val results=ProjectAgentResults(logs)
     companion object {
-        val names=setOf("list_files","read_file","find_files","search_text","write_file","delete_path","run_command","build","test","git","make_new_project","list_attachments","read_attachment","save_attachment","upload_file","sh","edit_file")
+        val names=setOf("list_files","read_file","find_files","search_text","write_file","delete_path","run_command","build","test","git","make_new_project","list_attachments","read_attachment","save_attachment","upload_file","sh","edit_file","read_result")
         /** Tools each permission tier may even propose. Everything else is refused before planning. */
-        val readTools=setOf("list_files","read_file","find_files","search_text","sh","list_attachments","read_attachment")
+        val readTools=setOf("list_files","read_file","find_files","search_text","sh","list_attachments","read_attachment","read_result")
         fun allowed(tier:String):Set<String> = when(tier) {AgentAccess.OWNER->names;AgentAccess.EDIT->readTools+setOf("edit_file","write_file");else->readTools}
         val harness="""Code work routine (follow it, do not skip steps):
 1 locate: sh {"command":"grep -rn 'symbol' src --include=*.kt | head -n 20"} (never read a whole large file)
@@ -32,6 +33,7 @@ list_files {path?,limit?,summarize?}; read_file {path,start_line?,lines?,summari
 write_file {path,content}; delete_path {path}; run_command {command,cwd?,timeout_seconds?} (literal OS shell command);
 build/test {command,cwd?,timeout_seconds?}; git {args:[literal argv],cwd?}; make_new_project {name,path?,repo?}.
 list_attachments {}; read_attachment {message_id,attachment_id,start_line?,lines?}; save_attachment {message_id,attachment_id,path}; upload_file {path}.
+read_result {id,start_line?,lines?}: reads a stored long command output by the id the earlier result named.
 Discord files are restricted to THIS project channel. Read UTF-8 text/code only; no image/PDF interpretation, automatic execution or extraction. Upload is a publication action subject to independent approval; never upload secrets.
 All paths may be absolute or relative to the project home; no fixed allowlist. Read files before overwriting them. Preserve original line endings and final newline unless asked otherwise. read_file line-number prefixes are display metadata, NEVER copy them into write_file content.
 make_new_project creates a directory and optionally clones an HTTPS Git repository into it, then registers the project.
@@ -41,7 +43,7 @@ No automatic administrator escalation. Never ask tools to change approval settin
 """+harness
         /** Friends only see the tools their tier can use, in the shorter form that fits a small context window. */
         fun descriptionFor(tier:String):String = if(tier==AgentAccess.OWNER)description else
-            "Tools (one per turn): list_files {path?,limit?}; read_file {path,start_line?,lines?}; find_files {path?,pattern}; search_text {path?,text}; sh {command}; list_attachments {}; read_attachment {message_id,attachment_id,start_line?,lines?}"+
+            "Tools (one per turn): list_files {path?,limit?}; read_file {path,start_line?,lines?}; find_files {path?,pattern}; search_text {path?,text}; sh {command}; read_result {id,start_line?,lines?}; list_attachments {}; read_attachment {message_id,attachment_id,start_line?,lines?}"+
             (if(tier==AgentAccess.EDIT)"; edit_file {path,find,replace,replace_all?} | {path,start_line,end_line,replace} | {path,insert_after_line,replace}; write_file {path,content} (new small files only). Every edit needs the requester's approval." else ". This channel is READ-ONLY: you cannot change files.")+
             "\nAll paths must stay inside the project home; anything else is refused. Files that may hold secrets (.env, keys, credentials) are never readable.\n"+harness
     }
@@ -75,11 +77,12 @@ No automatic administrator escalation. Never ask tools to change approval settin
         val args=call.arguments.deepCopy<JsonNode>();val cwd=target(home,args.path("cwd").asText(".")).toRealPath()
         require(cwd.isDirectory())
         val normalized=call.copy(arguments=args)
-        val readOnly=call.name in setOf("list_files","read_file","find_files","search_text","list_attachments","read_attachment","sh")
+        val readOnly=call.name in setOf("list_files","read_file","find_files","search_text","list_attachments","read_attachment","sh","read_result")
         var hash:String?=null
         val description=when(call.name) {
             "run_command","build","test"->{val command=args.path("command").asText();require(command.isNotBlank() && command.length<=12000 && !command.contains('\u0000'));"OS 셸 명령: $command"}
             "sh"->{val command=args.path("command").asText();ProjectAgentShell(home).validate(command);"읽기 전용 명령줄: $command"}
+            "read_result"->{require(ProjectAgentResults.ID.matches(args.path("id").asText()) && args.path("start_line").asInt(1)>=1 && args.path("lines").asInt(80) in 1..400) {"결과 ID 또는 범위가 올바르지 않습니다."};"보관된 명령 결과 읽기: ${args.path("id").asText()}"}
             "git"->{require(args.path("args").isArray && args.path("args").size() in 1..40);require(args.path("args").all {it.isTextual && it.asText().length<=2000 && !it.asText().contains('\u0000')});"git 인자(JSON): ${args.path("args")}"}
             "make_new_project"->{
                 val name=args.path("name").asText();require(name.matches(Regex("[\\p{L}\\p{N}_-]{1,60}")))
@@ -112,9 +115,9 @@ No automatic administrator escalation. Never ask tools to change approval settin
         val hardLinked=runCatching {Files.getAttribute(destination,"unix:nlink").let {(it as Number).toInt()>1 && destination.isRegularFile()}}.getOrDefault(false)
         // Arbitrary command/script effects cannot be proved from argv. Never let a model's LOW verdict waive this.
         val crossedMount=runCatching {targets.any {target->var existing=Path.of(target);while(!Files.exists(existing))existing=existing.parent;Files.getFileStore(existing)!=Files.getFileStore(boundary)}}.getOrDefault(true)
-        val scope=when {call.name=="sh"->"INSIDE";outside->"OUTSIDE";call.name in setOf("run_command","build","test","git") || hardLinked || crossedMount || (call.name=="make_new_project" && args.path("repo").asText().isNotBlank())->"UNKNOWN";else->"INSIDE"}
+        val scope=when {call.name=="sh" || call.name=="read_result"->"INSIDE";outside->"OUTSIDE";call.name in setOf("run_command","build","test","git") || hardLinked || crossedMount || (call.name=="make_new_project" && args.path("repo").asText().isNotBlank())->"UNKNOWN";else->"INSIDE"}
         if(tier!=AgentAccess.OWNER)require(scope=="INSIDE") {"이 채널은 프로젝트 폴더 안에서만 작업할 수 있습니다. (${if(outside)"프로젝트 밖 경로" else "경로·링크 확인 불가"})"}
-        val plan=ProjectAgentPlan(normalized,cwd.toString(),description,readOnly,hash,scope,targets,sandboxed=readOnly && scope=="INSIDE" && (call.name=="sh" || tier!=AgentAccess.OWNER))
+        val plan=ProjectAgentPlan(normalized,cwd.toString(),description,readOnly,hash,scope,targets,sandboxed=readOnly && scope=="INSIDE" && (call.name=="sh" || call.name=="read_result" || tier!=AgentAccess.OWNER))
         return plan.copy(gradleFingerprint=ProjectAgentGradle.fingerprint(plan))
     }
     fun verify(home:Path,approved:ProjectAgentPlan) {
@@ -127,6 +130,7 @@ No automatic administrator escalation. Never ask tools to change approval settin
         fun result(value:String)=ProjectAgentToolResult(ProjectAgentContext.summary(value),value)
         require(plan.tool.name in allowed(tier)) {"이 채널 권한에서는 ${plan.tool.name} 도구를 쓸 수 없습니다."}
         return when(plan.tool.name) {
+            "read_result"->{val text=results.read(resultScope,args.path("id").asText(),args.path("start_line").asInt(1),args.path("lines").asInt(80));ProjectAgentToolResult(text,text,0)}
             "sh"->{val r=ProjectAgentShell(home).run(args.path("command").asText(),active);val text=r.output.ifBlank {"(출력 없음)"};ProjectAgentToolResult(ProjectAgentContext.summary(text),text,r.status)}
             "edit_file"->{
                 check(!Files.isSymbolicLink(path) && path.isRegularFile() && fingerprint(path)==plan.beforeFingerprint) {"승인 후 파일이 바뀌었습니다. 다시 읽고 요청하세요."}
@@ -191,6 +195,12 @@ No automatic administrator escalation. Never ask tools to change approval settin
             while(process.isAlive){active();drain();val now=System.nanoTime();if(now-heartbeat>TimeUnit.SECONDS.toNanos(5)){progress("");heartbeat=now};check(Duration.ofNanos(System.nanoTime()-started).seconds<seconds) {"명령 실행 시간 제한 ${seconds}초를 초과했습니다."};check(output.fileSize()<=1_048_576) {"명령 출력이 1MB를 초과했습니다."};process.waitFor(100,TimeUnit.MILLISECONDS)}
             drain();val raw=output.inputStream().use {it.readNBytes(1_048_577)};check(raw.size<=1_048_576) {"명령 출력이 1MB를 초과했습니다."}
             val text="명령 인자(JSON): ${mapper.writeValueAsString(argv)}\n실행 폴더: $cwd\n종료 코드: ${process.exitValue()}\n"+raw.toString(Charsets.UTF_8)
+            if(text.length>ProjectAgentResults.THRESHOLD) {
+                val id=results.save(resultScope,text)
+                val head=text.take(1000)
+                val hint="$head\n[출력이 길어 원문을 보관했습니다: 총 ${text.length}자. 요약하지 않았습니다. read_result {id:\"$id\",start_line:1,lines:80} 로 구간을 읽으세요. 필요한 값만 찾으려면 명령을 grep/head로 좁혀 다시 실행해도 됩니다.]"
+                return ProjectAgentToolResult(hint,text,process.exitValue(),id)
+            }
             return ProjectAgentToolResult(ProjectAgentContext.summary(text),text,process.exitValue())
         }finally {live.close();process.descendants().forEach {it.destroyForcibly()};if(process.isAlive)process.destroyForcibly();output.deleteIfExists()}
     }

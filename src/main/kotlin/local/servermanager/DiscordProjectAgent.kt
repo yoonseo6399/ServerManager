@@ -37,7 +37,7 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
     private val routing=ConcurrentHashMap.newKeySet<String>()
     private val seededChannels=ConcurrentHashMap.newKeySet<String>()
     private val jobs=ProjectAgentJobs()
-    private val engine=ProjectAgentEngine(store,{session->ProjectAgentTools(directory.resolve("project-agent-logs"),DiscordProjectAgentFiles({current()?.getTextChannelById(session.channel) ?: error("채널이 없습니다.")},{privateAccess(current() ?: error("연결 없음"),session)})) {name,path->store.register(session.guild,session.user,name,path)}})
+    private val engine=ProjectAgentEngine(store,{session->ProjectAgentTools(directory.resolve("project-agent-logs"),DiscordProjectAgentFiles({current()?.getTextChannelById(session.channel) ?: error("채널이 없습니다.")},{privateAccess(current() ?: error("연결 없음"),session)}),session.channel) {name,path->store.register(session.guild,session.user,name,path)}})
     companion object {
         private fun models(name:String,description:String)=OptionData(OptionType.STRING,name,description,false).also {option->LocalModels.all.forEach {option.addChoice(it.label,it.id)}}
         fun command()=Commands.slash("agent","로컬 프로젝트 에이전트 · 개인 채널·도구·승인")
