@@ -37,15 +37,16 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
     private val jobs=ProjectAgentJobs()
     private val engine=ProjectAgentEngine(store,{session->ProjectAgentTools(directory.resolve("project-agent-logs"),DiscordProjectAgentFiles({current()?.getTextChannelById(session.channel) ?: error("채널이 없습니다.")},{privateAccess(current() ?: error("연결 없음"),session)})) {name,path->store.register(session.guild,session.user,name,path)}})
     companion object {
-        fun command()=Commands.slash("agent","Qwen 프로젝트 에이전트 · 개인 채널·도구·승인")
+        private fun models(name:String,description:String)=OptionData(OptionType.STRING,name,description,false).also {option->LocalModels.all.forEach {option.addChoice(it.label,it.id)}}
+        fun command()=Commands.slash("agent","로컬 프로젝트 에이전트 · 개인 채널·도구·승인")
             .addSubcommands(
                 SubcommandData("setting","내 기본 모델·Thinking·승인 모드 설정")
-                    .addOptions(OptionData(OptionType.STRING,"default","내 기본 Qwen 모델",false).addChoice("Qwen 14B","14b").addChoice("Qwen 30B","30b"),
-                        OptionData(OptionType.BOOLEAN,"explicit_permission","true: 변경·명령마다 승인 / false: 독립 위험 자동 판단",false),OptionData(OptionType.BOOLEAN,"think","Thinking 사용 (기본 true)",false)),
+                    .addOptions(models("default","내 기본 로컬 모델"),
+                        OptionData(OptionType.BOOLEAN,"explicit_permission","true: 변경·명령마다 승인 / false: 독립 위험 자동 판단",false),OptionData(OptionType.BOOLEAN,"think","Thinking 사용 (지원 모델만)",false)),
                 SubcommandData("channel","같은 카테고리에 내 비공개 프로젝트 채널 생성").addOption(OptionType.STRING,"project","등록한 프로젝트 이름 (생략하면 기본 홈)",false),
                 SubcommandData("project","기존 폴더를 내 프로젝트의 기본 작업 위치로 등록").addOption(OptionType.STRING,"name","프로젝트 이름",true).addOption(OptionType.STRING,"path","관리 앱 컴퓨터의 폴더 전체 경로",true),
                 SubcommandData("run","이 프로젝트 채널에서 작업 요청").addOptions(OptionData(OptionType.STRING,"prompt","목표와 완료 조건",true).setMaxLength(6000),
-                    OptionData(OptionType.STRING,"model","이번 요청의 모델 (기본 모델 생략 가능)",false).addChoice("Qwen 14B","14b").addChoice("Qwen 30B","30b"),OptionData(OptionType.BOOLEAN,"think","이번 요청의 Thinking (기본 true)",false)),
+                    models("model","이번 요청의 모델 (생략하면 기본 모델)"),OptionData(OptionType.BOOLEAN,"think","이번 요청의 Thinking (지원 모델만)",false)),
                 SubcommandData("context","채널 문맥 조회·초기화·자동 압축 설정").addOptions(
                     OptionData(OptionType.STRING,"action","문맥 작업",true).addChoice("상태","status").addChoice("초기화","reset").addChoice("압축 기준","configure").addChoice("지금 압축","compact"),
                     OptionData(OptionType.INTEGER,"limit","자동 압축 입력 토큰 기준 (1024~3584)",false).setRequiredRange(1024,3584)),
@@ -88,7 +89,7 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
                     "setting"->{
                         val value=if(event.options.isEmpty())store.preferences(guild.id,event.user.id) else store.settings(guild.id,event.user.id,event.getOption("default")?.asString,event.getOption("think")?.asBoolean,event.getOption("explicit_permission")?.asBoolean)
                         if(event.options.isNotEmpty()){engine.settingsChanged(guild.id,event.user.id);jobs.stopUser(event.user.id)}
-                        embed.setDescription("${event.user.asMention} 님의 기본 에이전트: Qwen ${value.model ?: qwen.config().model} · Thinking ${value.think}\n"+
+                        embed.setDescription("${event.user.asMention} 님의 기본 에이전트: ${LocalModels.label(value.model ?: qwen.config().model)} · Thinking ${if(LocalModels.get(value.model ?: qwen.config().model).supportsThinking)value.think.toString() else "미지원 (자동 꺼짐)"}\n"+
                             if(value.explicitPermission)"명시적 승인: 파일 변경·명령 실행 전 동의가 필요합니다." else "자동 명령 위험판단을 사용합니다. 낮은 위험으로 허용된 요청만 자동 실행하며, 위험·불확실한 명령은 동의를 요청하고 거부 판정은 차단합니다. 모델의 위험 판단은 안전 보증이 아닙니다. 명령은 관리 앱 사용자 권한으로 전체 파일·네트워크에 접근할 수 있습니다.")
                         hook.editOriginalEmbeds(embed.build()).setAllowedMentions(emptyList()).queue({}, {})
                     }
@@ -103,7 +104,7 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
                         val created=action.complete()
                         try {store.addChannel(ProjectAgentChannel(guild.id,created.id,event.user.id,project?.name,home.toString()))}catch(e:Exception){created.delete().queue({}, {});throw e}
                         val natural=if(net.dv8tion.jda.api.requests.GatewayIntent.MESSAGE_CONTENT in event.jda.gatewayIntents)"자연어로 요청하거나 `/agent run`을 사용하세요." else "현재 봇의 메시지 콘텐츠 권한이 없어 `/agent run`을 사용해야 합니다. 자연어 대화는 Discord Developer Portal의 Message Content Intent를 허용한 뒤 봇을 다시 연결하세요."
-                        created.sendMessage("Qwen 프로젝트 채널입니다. 홈: `$home` · 도구 실행: 관리 앱 컴퓨터\nThinking 기본 켜짐 · 명시적 승인 기본 켜짐. 대화·결과는 이 채널을 볼 수 있는 사람에게 보입니다. Discord 서버 관리자는 비공개 채널에도 접근할 수 있습니다. $natural").setAllowedMentions(emptyList()).queue({}, {})
+                        created.sendMessage("로컬 에이전트 프로젝트 채널입니다. 홈: `$home` · 도구 실행: 관리 앱 컴퓨터\nThinking 지원 모델은 기본 켜짐 · 명시적 승인 기본 켜짐. 대화·결과는 이 채널을 볼 수 있는 사람에게 보입니다. Discord 서버 관리자는 비공개 채널에도 접근할 수 있습니다. $natural").setAllowedMentions(emptyList()).queue({}, {})
                         hook.editOriginalEmbeds(embed.setDescription("${event.user.asMention} 님의 ${project?.name ?: "기본"} 채널이 ${created.asMention}에 할당되었습니다.").build()).setAllowedMentions(emptyList()).queue({}, {})
                     }
                     "context"->{
@@ -176,13 +177,14 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
         try {
         val channel=jda.getTextChannelById(session.channel) ?: error("채널이 없습니다.")
         check(store.channel(session.channel)?.contextEpoch==session.contextEpoch) {"문맥 설정이 바뀌었습니다. 다시 요청하세요."}
-        val saved=store.preferences(session.guild,session.user);val preferences=saved.copy(think=thinkOverride ?: saved.think)
-        val chosen=qwen.config();val model=modelOverride ?: preferences.model ?: chosen.model
+        val saved=store.preferences(session.guild,session.user)
+        val chosen=qwen.config();val model=modelOverride ?: saved.model ?: chosen.model
+        val preferences=saved.copy(think=LocalModels.thinking(model,thinkOverride ?: saved.think))
         val inference=inference(session,model)
         // Audience routing is deterministic and immediate; no coding-model inference before acknowledgement.
         val actor=authorize(jda,session.guild,session.user)
         check(!job.cancelled.get() && !Thread.currentThread().isInterrupted) {"작업을 중단했습니다."}
-        val main=channel.sendMessageEmbeds(EmbedBuilder().setTitle("Qwen $model · 요청 인식 완료").setDescription(prompt.take(1800)).setFooter("최근 대화 참여자 ${(audience.audience(session.channel).participantIds+session.user).size}명 · 모델 응답 대기").build()).setComponents(ActionRow.of(Button.danger("qa:stop:${job.id}","에이전트 중지"))).setAllowedMentions(emptyList()).complete()
+        val main=channel.sendMessageEmbeds(EmbedBuilder().setTitle("${LocalModels.label(model)} · 요청 인식 완료").setDescription(prompt.take(1800)).setFooter("최근 대화 참여자 ${(audience.audience(session.channel).participantIds+session.user).size}명 · 모델 응답 대기").build()).setComponents(ActionRow.of(Button.danger("qa:stop:${job.id}","에이전트 중지"))).setAllowedMentions(emptyList()).complete()
         val events=DiscordProjectAgentDisplay(channel,main,prompt,model,job.id)
         var lastCheck=0L
         fun active() {
@@ -203,7 +205,7 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
                 if(!main){helperInput+=response.inputTokens ?: 0;helperOutput+=response.tokens;helperCalls++}
                 last=if(main)QwenUsage(response.inputTokens,response.tokens,messages.sumOf {ProjectAgentContext.estimatedTokens(it.content)},response.modelContext,helperInput=helperInput,helperOutput=helperOutput,helperCalls=helperCalls)
                     else (last ?: QwenUsage()).copy(helperInput=helperInput,helperOutput=helperOutput,helperCalls=helperCalls)
-                check(!response.limited) {"Qwen 출력 한도에 도달했습니다. 문맥을 압축하거나 요청을 나눠주세요."};return response.text
+                check(!response.limited) {"로컬 모델 출력 한도에 도달했습니다. 문맥을 압축하거나 요청을 나눠주세요."};return response.text
             }
             override fun usage()=last
             override fun modelLimit():Int?=runCatching {RemoteLlm.modelLimitProvider?.invoke(model,chosen.runnerId) ?: if(chosen.runnerId==null)LocalLlm().modelContext(model) else null}.getOrNull()
@@ -234,7 +236,7 @@ internal class DiscordProjectAgentDisplay(private val channel:TextChannel,privat
         main.editMessageEmbeds(snapshot.first).setComponents(buttons).setAllowedMentions(emptyList()).queue({complete()},{complete()})
     },intervalMillis=editIntervalMillis)
     private fun footer()=usage?.let {"문맥 약 ${it.estimatedContext}/8192 · 입력 ${it.input ?: "미수신"} · 출력 ${it.output ?: "미수신"} · 모델 최대 ${it.modelContext ?: "확인 불가"} · 보조 수신 ${it.helperCalls}회 입력 ${it.helperInput}/출력 ${it.helperOutput}"} ?: "입력·출력 토큰 대기"
-    private fun render(status:String,done:Boolean=false){edits.offer(EmbedBuilder().setTitle("Qwen $model · $status").setFooter(footer()).build() to done,done)}
+    private fun render(status:String,done:Boolean=false){edits.offer(EmbedBuilder().setTitle("${LocalModels.label(model)} · $status").setFooter(footer()).build() to done,done)}
     private fun reply(turn:Int)=replies.getOrPut(turn){DiscordAgentText(channel,editIntervalMillis)}
     @Synchronized fun emit(event:ProjectAgentEvent) {
         if(finished)return

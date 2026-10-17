@@ -23,6 +23,14 @@ class LocalLlmTest {
             assertEquals(0,req.path("keep_alive").asInt());assertEquals(2048,req.path("options").path("num_predict").asInt());assertFalse(req.has("tools"))
         }) {model->val answer=model.chat(size,"질문");assertEquals("답변",answer.text);assertEquals(7L,answer.tokens);assertFalse(answer.limited)}
     }
+    @Test fun `all added models send exact tags and Coder disables unsupported Thinking`() {
+        for(size in listOf("qwen3-coder-30b","gemma4-12b","gemma4-31b"))stub(body="""{"done":true,"message":{"content":"ok"}}""",checkRequest={raw->
+            val req=jacksonObjectMapper().readTree(raw)
+            assertEquals(LocalModels.tag(size),req.path("model").asText())
+            assertEquals(size!="qwen3-coder-30b",req.path("think").asBoolean())
+        }) {assertEquals("ok",it.chat(size,"test",true).text)}
+    }
+
     @Test fun `thinking option is explicit and token limit is reported as incomplete`() {
         stub(body="""{"done":true,"done_reason":"length","message":{"content":"partial"}}""",checkRequest={assertTrue(jacksonObjectMapper().readTree(it).path("think").asBoolean())}) {
             assertTrue(it.chat("30b","question",true).limited)
@@ -66,11 +74,11 @@ class LocalLlmTest {
         try {
             val status=ollama.llm().probe()
             assertTrue(status.reachable);assertEquals("0.12.0",status.version)
-            assertEquals(mapOf("14b" to true,"30b" to false),status.installed)
+            assertEquals(LocalLlm.SIZES.associateWith {it=="14b"},status.installed)
             assertEquals(listOf("qwen3:30b"),status.loaded);assertContains(status.message,"30B")
         } finally {ollama.stop()}
         val down=LocalLlm(URI("http://127.0.0.1:1")).probe()
-        assertFalse(down.reachable);assertEquals(mapOf("14b" to false,"30b" to false),down.installed)
+        assertFalse(down.reachable);assertEquals(LocalLlm.SIZES.associateWith {false},down.installed)
     }
 
     @Test fun `switching models unloads the other Qwen model first but leaves unrelated models alone`() {
@@ -79,6 +87,15 @@ class LocalLlmTest {
             assertEquals("ok",ollama.llm().chat("14b","질문").text)
             assertEquals(listOf("unload:qwen3:30b","chat:qwen3:14b loaded=llama3:8b"),ollama.calls.toList())
         } finally {ollama.stop()}
+    }
+
+    @Test fun `switching between Gemma and Coder unloads managed models but preserves unrelated models`() {
+        val ollama=FakeOllama(mutableListOf("gemma4:31b","qwen3:14b","unrelated:1"),LocalModels.all.map {it.tag})
+        try {
+            ollama.llm().chat("qwen3-coder-30b","test",true)
+            assertEquals(listOf("unload:gemma4:31b","unload:qwen3:14b","chat:qwen3-coder:30b loaded=unrelated:1"),ollama.calls.toList())
+            assertTrue(ollama.llm().probe().installed.values.all {it})
+        }finally{ollama.stop()}
     }
 
     @Test fun `unloading fails closed when the old model stays resident`() {

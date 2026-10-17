@@ -280,6 +280,15 @@ class RunnerGatewayTest {
             deliver(RunnerMessage("llm-progress",token=agentRequest.token,detail=mapper.writeValueAsString(QwenProgress("streamed thought","partial answer"))));assertEquals("streamed thought",thinking)
             deliver(RunnerMessage("llm-result",state="OK",token=agentRequest.token,detail="""{"text":"done","limited":false,"seconds":1.0,"tokens":5,"thinking":"checking"}"""))
             assertEquals("done",conversation.get(2,java.util.concurrent.TimeUnit.SECONDS)!!.answer.text)
+            for(size in listOf("qwen3-coder-30b","gemma4-12b","gemma4-31b")) {
+                sent.clear()
+                val added=java.util.concurrent.CompletableFuture.supplyAsync {gateway.llmConversation(size,messages,false,"runner") {}}
+                val deadline=System.nanoTime()+2_000_000_000L;while(sent.isEmpty() && System.nanoTime()<deadline)Thread.sleep(2)
+                val wire=mapper.readValue<RunnerMessage>((sent.single() as TextMessage).payload)
+                assertEquals("agent:$size",wire.state)
+                deliver(RunnerMessage("llm-result",state="OK",token=wire.token,detail="""{"text":"new model","limited":false,"seconds":1.0,"tokens":1}"""))
+                assertEquals("new model",added.get(2,java.util.concurrent.TimeUnit.SECONDS)!!.answer.text)
+            }
         } finally {gateway.closeDatagrams()}
     }
     @Test fun `qwen interruption sends cancellation for the exact remote request and ignores late tokens`() {

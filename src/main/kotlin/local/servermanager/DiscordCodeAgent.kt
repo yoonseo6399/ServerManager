@@ -89,7 +89,7 @@ class DiscordCodeAgent(private val config:()->DiscordConfig,private val current:
                             val answer=reply.answer
                             val where=reply.runnerName?.let {" · 실행기 ${it.replace(Regex("[\\p{Cntrl}]")," ").take(40)}"} ?: ""
                             if(event.jda===current()) {
-                                val info="Qwen3 $size$where · ${"%.1f".format(java.util.Locale.ROOT,answer.seconds)}초 · 출력 ${answer.tokens}토큰"+(if(answer.limited)" · 출력 한도 도달: 답변이 미완성일 수 있습니다." else "")
+                                val info="${LocalModels.label(size)}$where · ${"%.1f".format(java.util.Locale.ROOT,answer.seconds)}초 · 출력 ${answer.tokens}토큰"+(if(answer.limited)" · 출력 한도 도달: 답변이 미완성일 수 있습니다." else "")
                                 if(answer.text.length<=1600)hook.editOriginal("$info\n\n${answer.text}").setAllowedMentions(emptyList()).complete()
                                 else hook.editOriginal(info+"\n전체 답변은 첨부 파일에 있습니다.").setAllowedMentions(emptyList())
                                     .setFiles(net.dv8tion.jda.api.utils.FileUpload.fromData(answer.text.toByteArray(Charsets.UTF_8),"qwen-answer.txt")).complete()
