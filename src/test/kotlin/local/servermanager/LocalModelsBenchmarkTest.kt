@@ -84,7 +84,7 @@ class LocalModelsBenchmarkTest {
             val result=mapOf("model" to id,"tag" to LocalLlm.tag(id),"thinking" to LocalModels.thinking(id,true),"seconds" to elapsed,"exactFileBytes" to exact,"readWriteReread" to chain,"completed" to completed,"success" to (exact&&chain&&completed&&failure==null),"tools" to order,"writeApprovals" to approvals,"calls" to calls,"inputTokens" to input,"outputTokens" to output,"peakOllamaVramBytes" to peak.get(),"swapBefore" to before,"swapAfter" to after,"error" to failure,"actualFile" to file.readText(),"trace" to trace,"stars" to stars)
             results.add(result);report.parent.createDirectories();report.writeText(mapper.writerWithDefaultPrettyPrinter().writeValueAsString(mapOf("task" to "Exact middle insertion plus executed 5-row Python star pyramid, one run/task/model","numCtx" to 8192,"numPredict" to 4096,"results" to results)))
             println("BENCH-RESULT "+mapper.writeValueAsString(result.filterKeys {it!="trace"}))
-            llm.unload(LocalLlm.tag(id));assertTrue(file.startsWith(temp))
+            llm.unload(LocalLlm.tag(id));assertTrue(file.startsWith(temp.toRealPath()))
         }
         assertTrue(results.size==ids.size)
     }
