@@ -8,5 +8,6 @@
 | [agent-context.md](agent-context.md) | Beta 11 AI 문맥 구성·예산·보존·전달 예시 |
 | [agent-context-prompts.md](agent-context-prompts.md) | 소스에서 추출한 실제 AI 지시문 원문 |
 | [source-layout.md](source-layout.md) | 소스 폴더 구조와 파일 찾는 법 |
+| [implementation-status.md](implementation-status.md) | Beta 11 이후 모듈 보완 완료와 사용자 선택으로 제외한 후속 분리 범위 |
 
 기능별 사용법은 `docs/discord-music.md`, `docs/qwen-project-agent.md`, `docs/luonnotar-agent.md`를 본다. 테스트 절차는 `docs/testing/`.

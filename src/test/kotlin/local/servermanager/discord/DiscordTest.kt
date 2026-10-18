@@ -92,6 +92,13 @@ class DiscordTest {
             assertContains(bot.execute(guild,setOf(role),"u","one","a","start"),"이미 처리")
             verify(manager,times(1)).startAs(eq("a") ?: "a",any(StartActor::class.java) ?: StartActor("SYSTEM","fixture"))
             assertContains(bot.execute(guild,setOf(role),"u","two","a","start"),"10초")
+            bot.saveModules(DiscordModuleSave(0,setOf("minecraft")))
+            assertContains(bot.execute(guild,setOf(role),"u","disabled","a","start"),"모듈이 꺼져")
+            verify(manager,times(1)).startAs(eq("a") ?: "a",any(StartActor::class.java) ?: StartActor("SYSTEM","fixture"))
+            bot.saveModules(DiscordModuleSave(1,emptySet()))
+            bot.permissions.grant(guild,"local-test",true,role,"minecraft.control","DENY")
+            assertContains(bot.execute(guild,setOf(role),"u","fresh-role-denial","a","start"),"권한이 없습니다")
+            bot.permissions.revoke(guild,"local-test",true,role,"minecraft.control")
             desktop.stopping=true
             assertContains(bot.execute(guild,setOf(role),"another","maintenance","a","start"),"업데이트 중")
             verify(manager,times(1)).startAs(eq("a") ?: "a",any(StartActor::class.java) ?: StartActor("SYSTEM","fixture"))

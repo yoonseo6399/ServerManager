@@ -11,34 +11,6 @@ import net.dv8tion.jda.api.events.message.MessageReceivedEvent
  * its own legacy permission checks; the permission service is an additional gate (deny / ceiling / default-deny).
  */
 
-class DiscordMinecraftModule(private val bot:DiscordBot) : DiscordModule {
-    override val id="minecraft"
-    override val label="Minecraft 서버 제어"
-    override val commands=setOf("mc")
-    override val componentPrefixes=setOf("sm:")
-    /** Who may start/stop which server stays with DiscordAccess (per-server role rules); the service only adds deny/ceiling. */
-    override val permissions=listOf(
-        PermissionDecl("minecraft.status","서버 상태 조회",PermissionRisk.LOW,"minecraft"),
-        PermissionDecl("minecraft.control","서버 시작·중지·재시작",PermissionRisk.MEDIUM,"minecraft"))
-    override fun commandPermission(command:String)="minecraft.status"
-    /** Registered by DiscordBot.registerCommands together with its guild rules. */
-    override fun register(jda:JDA,guildId:String) {}
-    override fun onCommand(event:SlashCommandInteractionEvent) {
-        val action=event.subcommandName
-        if(action in setOf("start","stop","restart")) {
-            val roles=event.member?.roles?.map {it.id}?.toSet().orEmpty()
-            bot.modulesDenial(event.guild?.id,roles,"minecraft.control")?.let {event.reply(it).setEphemeral(true).queue({}, {});return}
-        }
-        bot.mcCommand(event)
-    }
-    override fun onButton(event:ButtonInteractionEvent) {
-        val roles=event.member?.roles?.map {it.id}?.toSet().orEmpty()
-        bot.modulesDenial(event.guild?.id,roles,"minecraft.control")?.let {event.reply(it).setEphemeral(true).queue({}, {});return}
-        bot.mcButton(event)
-    }
-    override fun onAutoComplete(event:net.dv8tion.jda.api.events.interaction.command.CommandAutoCompleteInteractionEvent) {bot.mcAutoComplete(event)}
-}
-
 class DiscordMusicModule(private val music:()->DiscordMusic?,private val audioReady:()->Boolean,private val currentClient:()->JDA?) : DiscordModule {
     override val id="music"
     override val label="음악"
@@ -59,6 +31,7 @@ class DiscordMusicModule(private val music:()->DiscordMusic?,private val audioRe
         if(audioReady())music()?.handleSelect(event) else event.reply("음악 오디오 기능을 시작하지 못했습니다. 봇 오디오 설정을 확인하세요.").setEphemeral(true).queue({}, {})
     }
     override fun onMessage(event:MessageReceivedEvent) {if(event.jda===currentClient() && audioReady())music()?.handleMessage(event)}
+    override fun onVoiceState(event:net.dv8tion.jda.api.events.guild.voice.GuildVoiceUpdateEvent) {if(event.jda===currentClient())music()?.voiceStateChanged(event.guild.id)}
     override fun disconnect() {music()?.disconnectAll()}
     override fun close() {music()?.close()}
 }
@@ -75,6 +48,7 @@ class DiscordProjectAgentModule(private val agent:DiscordProjectAgent) : Discord
     override fun onCommand(event:SlashCommandInteractionEvent) {agent.handle(event)}
     override fun onButton(event:ButtonInteractionEvent) {agent.button(event)}
     override fun onMessage(event:MessageReceivedEvent) {agent.message(event)}
+    override fun disconnect() {agent.disconnect()}
     override fun close() {agent.close()}
 }
 

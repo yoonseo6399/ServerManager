@@ -6,6 +6,7 @@ import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEve
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent
 import net.dv8tion.jda.api.events.interaction.component.StringSelectInteractionEvent
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent
+import net.dv8tion.jda.api.events.guild.voice.GuildVoiceUpdateEvent
 import org.slf4j.LoggerFactory
 
 /**
@@ -32,6 +33,8 @@ interface DiscordModule : AutoCloseable {
     fun onAutoComplete(event:CommandAutoCompleteInteractionEvent) {}
     /** Every guild message; return quickly, a module must ignore messages it does not care about. */
     fun onMessage(event:MessageReceivedEvent) {}
+    /** Voice lifecycle housekeeping is not a user command and must also run when command permission is denied. */
+    fun onVoiceState(event:GuildVoiceUpdateEvent) {}
 
     /** Permission id required to run [command]; null means the module does its own checks only. */
     fun commandPermission(command:String):String? = null
@@ -52,6 +55,7 @@ class DiscordModuleRegistry(private val permissions:PermissionService?,private v
     private val modules=LinkedHashMap<String,DiscordModule>()
     private val byCommand=HashMap<String,DiscordModule>()
     val all:List<DiscordModule> get()=modules.values.toList()
+    @Volatile var enabled:(String)->Boolean = {true}
     companion object {
         /** Handled by the bot itself (Minecraft control panel); a module may not shadow them. */
         /** Only the built-in Minecraft control module may use these. */
@@ -81,16 +85,18 @@ class DiscordModuleRegistry(private val permissions:PermissionService?,private v
 
     /** null = proceed; otherwise the denial text to show the user. [roles] are the caller's current role ids. */
     fun denial(guildId:String?,roles:Set<String>,permission:String?):String? {
+        if(permission!=null && !enabled(permission.substringBefore('.')))return "관리 웹에서 이 모듈이 꺼져 있습니다."
         if(permission==null || permissions==null)return null
         if(guildId==null)return "서버(길드) 안에서만 사용할 수 있습니다."
         val decision=permissions.check(guildId,roles,permission,superAdmin(guildId,roles))
         return if(decision.allowed==false)"이 기능을 사용할 권한이 없습니다 (`$permission`): ${decision.reason}" else null
     }
 
-    fun register(jda:JDA,guildId:String) = modules.values.forEach {runCatching {it.register(jda,guildId)}.onFailure {e->log.warn("module {} register failed: {}",it.id,e.message)}}
+    fun register(jda:JDA,guildId:String) = modules.values.filter {enabled(it.id)}.forEach {runCatching {it.register(jda,guildId)}.onFailure {e->log.warn("module {} register failed: {}",it.id,e.message)}}
 
     fun command(event:SlashCommandInteractionEvent):Boolean {
         val module=forCommand(event.name) ?: return false
+        if(!enabled(module.id)){event.reply("관리 웹에서 이 모듈이 꺼져 있습니다.").setEphemeral(true).queue({}, {});return true}
         val roles=event.member?.roles?.map {it.id}?.toSet().orEmpty()
         denial(event.guild?.id,roles,module.commandPermission(event.name))?.let {text->event.reply(text).setEphemeral(true).queue({}, {});return true}
         guarded(module,"command ${event.name}",{text->if(!event.isAcknowledged)event.reply(text).setEphemeral(true).queue({}, {})}) {module.onCommand(event)}
@@ -98,24 +104,29 @@ class DiscordModuleRegistry(private val permissions:PermissionService?,private v
     }
     fun button(event:ButtonInteractionEvent):Boolean {
         val module=forComponent(event.componentId) ?: return false
+        if(!enabled(module.id)){event.reply("관리 웹에서 이 모듈이 꺼져 있습니다.").setEphemeral(true).queue({}, {});return true}
         guarded(module,"button",{text->if(!event.isAcknowledged)event.reply(text).setEphemeral(true).queue({}, {})}) {module.onButton(event)};return true
     }
     fun select(event:StringSelectInteractionEvent):Boolean {
         val module=forComponent(event.componentId) ?: return false
+        if(!enabled(module.id)){event.reply("관리 웹에서 이 모듈이 꺼져 있습니다.").setEphemeral(true).queue({}, {});return true}
         guarded(module,"select",{text->if(!event.isAcknowledged)event.reply(text).setEphemeral(true).queue({}, {})}) {module.onSelect(event)};return true
     }
     fun autoComplete(event:CommandAutoCompleteInteractionEvent):Boolean {
         val module=forCommand(event.name) ?: return false
+        if(!enabled(module.id)){event.replyChoices(emptyList<net.dv8tion.jda.api.interactions.commands.Command.Choice>()).queue({}, {});return true}
         guarded(module,"autocomplete",{}) {module.onAutoComplete(event)};return true
     }
     fun message(event:MessageReceivedEvent) {
         val roles=event.member?.roles?.map {it.id}?.toSet().orEmpty()
         val guildId=if(event.isFromGuild)event.guild.id else null
         modules.values.forEach {module->
+            if(!enabled(module.id))return@forEach
             if(denial(guildId,roles,module.messagePermission)!=null)return@forEach
             guarded(module,"message",{}) {module.onMessage(event)}
         }
     }
+    fun voiceState(event:GuildVoiceUpdateEvent) {modules.values.forEach {module->guarded(module,"voice state",{}) {module.onVoiceState(event)}}}
     fun disconnect() = modules.values.forEach {runCatching {it.disconnect()}.onFailure {e->log.warn("module {} disconnect failed: {}",it.id,e.message)}}
 
     private fun guarded(module:DiscordModule,what:String,report:(String)->Unit,body:()->Unit) {

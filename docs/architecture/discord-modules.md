@@ -1,15 +1,15 @@
 # Discord 봇 모듈 만들기 (0.7.0-beta.10)
 
-Discord 봇의 기능(음악, AI 에이전트, 권한 관리 …)은 **모듈**이다. 봇(`DiscordBot`)은 Discord 연결과 `/mc` 서버 제어 패널만 직접 갖고, 나머지는 모두 `DiscordModule`로 등록된다. 이 문서는 모듈의 계약, 이벤트 라우팅, 권한 연동, 새 모듈을 추가하는 순서를 설명한다.
+Discord 봇의 기능(음악, AI 에이전트, Minecraft 제어, 권한 관리 …)은 **모듈**이다. 봇(`DiscordBot`)은 Discord 연결·이벤트 전달·주기 호출을 맡는다. Minecraft 명령·제어 패널·알림·요청 중복 방지의 실제 구현은 `DiscordMinecraftModule.kt`에 있다. 기존 테스트·호출자를 위한 `choices`/`execute`와 주기 호출 위임만 봇에 남는다.
 
 ## 1. 구조
 
 ```text
-JDA 이벤트 ─▶ DiscordBot ─▶ DiscordModuleRegistry ─▶ 모듈 (music / agent / ai / assistant / permission)
+JDA 이벤트 ─▶ DiscordBot ─▶ DiscordModuleRegistry ─▶ 모듈 (minecraft / music / agent / ai / assistant / permission)
                  │               │  1. 이름·접두사로 모듈 찾기
                  │               │  2. PermissionService로 권한 게이트
                  │               │  3. 모듈 호출 (예외는 이 층에서 격리)
-                 └─ /mc, sm: 버튼 (아직 모듈이 아님, DiscordAccess 사용)
+                 └─ 음성 상태 이벤트 → 모듈의 수명 관리 (음악 빈 채널 타이머)
 ```
 
 - 코드 위치: `src/main/kotlin/local/servermanager/discord/` (패키지는 `local.servermanager`, 폴더 구조는 `docs/architecture/source-layout.md`). 핵심 파일은 `DiscordModule.kt`(인터페이스와 레지스트리), `DiscordModules.kt`(기존 기능 어댑터), `DiscordPermissionModule.kt`(`/permission`).
@@ -30,6 +30,7 @@ JDA 이벤트 ─▶ DiscordBot ─▶ DiscordModuleRegistry ─▶ 모듈 (musi
 | `onButton`, `onSelect` | 아니오 | `componentPrefixes`에 속한 컴포넌트. |
 | `onAutoComplete` | 아니오 | `commands`에 속한 명령의 자동완성. |
 | `onMessage(event)` | 아니오 | **모든** 길드 메시지가 모든 모듈에 전달된다. 관심 없는 메시지는 즉시 반환해야 한다. |
+| `onVoiceState(event)` | 아니오 | 음성 상태 수명 관리. 비활성 모듈에도 전달하며 명령 권한 거부가 정리를 막지 않는다. |
 | `commandPermission(command)` | 아니오 | 이 명령을 실행하기 전에 확인할 권한 ID. `null`이면 모듈이 자체 검사만 한다. |
 | `messagePermission` | 아니오 | `onMessage` 처리 전에 확인할 권한 ID. 거부되면 조용히 건너뛴다. |
 | `disconnect()` | 아니오 | Discord 연결이 끊기거나 교체될 때(음성 연결, 진행 중 작업 정리). |
@@ -42,7 +43,7 @@ JDA 이벤트 ─▶ DiscordBot ─▶ DiscordModuleRegistry ─▶ 모듈 (musi
 3. **장애 격리**: 모듈 안의 예외는 로그에 남기고 사용자에게 "○○ 기능에서 오류가 발생했습니다"를 임시 메시지로 보낸다(이미 응답했다면 보내지 않는다). 다른 모듈이나 JDA 스레드로 전파되지 않는다.
 4. **등록 검증**: 중복 모듈 ID, 이미 쓰는 명령 이름, 겹치는 컴포넌트 접두사, 다른 모듈의 권한 선언, 잘못된 ID는 `add` 단계에서 `IllegalArgumentException`으로 거부되며 부분 등록이 남지 않는다.
 
-레지스트리가 하지 **않는** 것: 버튼 클릭에 대한 권한 게이트(버튼은 명령에서 만들어진 패널이므로 모듈이 직접 확인한다), `/mc` 처리, Discord 역할의 해석(역할은 이벤트의 멤버 정보에서 읽는다).
+레지스트리는 비활성 모듈의 명령·버튼·선택·자동완성·메시지 진입을 차단한다. 기능별 버튼 권한과 Discord 역할의 최종 해석은 모듈이 직접 확인한다. Minecraft 제어는 REST로 다시 읽은 역할에 대해 모듈 활성 상태·서비스 거부/상한·서버별 `DiscordAccess`를 실행 직전에 다시 확인한다.
 
 ## 4. 새 모듈 추가 순서
 
@@ -120,12 +121,16 @@ registry.add(DiscordHelloModule())
 | `ai` | `/cloud-agent`, `/sub-agent`, `/agent-keys`, `/local-llm` | 없음 | `ai.cloud`(MEDIUM), `ai.local`(LOW) | |
 | `assistant` | `/assistant`, `/assistant-link`, `/assistant-google` | `as:` | `assistant.use`(MEDIUM) | 비서 기능이 설정된 경우에만 등록. |
 | `permission` | `/permission` | 없음 | 없음 | 최고 관리자 전용. 자기 자신은 게이트하지 않는다. |
-| `minecraft` | `/mc` | `sm:` | `minecraft.status`(LOW), `minecraft.control`(MEDIUM) | 어댑터. 로직은 `DiscordBot`(`mcCommand`, `mcButton`)에 남고, 서버별 허가는 `DiscordAccess`가 판단. `/mc start·stop·restart`와 패널 버튼은 `minecraft.control` 거부 규칙에 막힌다. 이름 `/mc`, `sm:`은 이 모듈만 쓸 수 있다. |
+| `minecraft` | `/mc` | `sm:` | `minecraft.status`(LOW), `minecraft.control`(MEDIUM) | `DiscordMinecraftModule.kt`가 명령·패널·알림·중복 방지를 소유한다. 서버 제어는 `ServerControlPort`, 서버별 허가는 `DiscordAccess`를 유지한다. |
 
 기존 기능은 모두 `LEGACY` 기본값이라 **업데이트 직후 동작이 바뀌지 않는다.** `/permission`으로 명시적 거부 규칙을 만들 때만 새 동작이 생긴다.
 
-## 6. 앞으로의 방향 (미구현)
+## 6. 모듈별 활성 설정 (구현됨)
 
-1. `/mc` 제어 패널을 `minecraft` 모듈로 옮기기. 서버별 권한 판단은 서버 관리자 쪽(`ServerControlPort`)에 남긴다.
-2. 봇을 별도 프로세스로 분리. `ServerControlPort` 구현을 HTTP 클라이언트로 바꾸면 모듈 코드는 그대로다.
-3. 모듈별 활성/비활성 설정과 설정 화면. 외부 플러그인 설치는 신뢰 모델(서명, 위험도 상한)이 정해진 뒤에 다룬다.
+관리 웹 → Discord 봇 → **봇 기능 모듈**에서 저장한다. `/api/admin/discord/modules` GET/PUT이며 PUT에는 기존 관리자 인증·CSRF·5분 이내 패스키 재인증을 적용한다. 별도 비공개 `security/discord/module-settings.json`에 revision과 disabled 목록을 원자 저장하고 기존 토큰 설정 형식을 바꾸지 않는다. 손상 시 모듈을 끄고 웹에서 복구할 수 있도록 표시한다. 동시 저장의 오래된 revision은 거부한다.
+
+음악 비활성화는 대기열·재생·연결을 정리하고 에이전트는 진행 중 작업을 취소한다. 모듈을 꺼도 봇 연결과 다른 모듈은 유지한다. 이미 전송한 외부 요청·메시지는 회수하지 않으며, 구형 앱으로 롤백하면 새 모듈별 설정을 알지 못한다. 권한 규칙은 여전히 `PermissionService`와 각 기능의 기존 검사가 담당한다.
+
+## 7. 다음 단계 (이번 범위에서 제외)
+
+사용자 선택에 따라 현재 프로세스의 모듈 보완까지만 진행했다. 별도 봇 프로세스·인증 HTTP API·설치기·개별 업데이트는 `server-control-api.md` B의 후속 설계로 남는다. 외부 플러그인 설치와 역할 규칙 전체 마이그레이션도 별도 작업이다.

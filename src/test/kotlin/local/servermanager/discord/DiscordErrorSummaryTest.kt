@@ -81,9 +81,10 @@ java.lang.RuntimeException: unrelated mod diagnostics
             manager.remoteLog(i.id,"runner","error","java.lang.RuntimeException: fatal test")
             manager.remoteLog(i.id,"runner","output","Caused by: java.lang.LinkageError: missing library")
             assertEquals("RUNNING",manager.view(i.id)["state"])
-            val q=DiscordBot::class.java.getDeclaredField("alerts").also {it.isAccessible=true}.get(bot) as DiscordAlerts
+            val module=DiscordBot::class.java.getDeclaredField("minecraft").also {it.isAccessible=true}.get(bot)
+            val q=DiscordMinecraftModule::class.java.getDeclaredField("alerts").also {it.isAccessible=true}.get(module) as DiscordAlerts
             assertEquals(listOf("start"),q.drain().map {it.first.kind})
-            val times=DiscordBot::class.java.getDeclaredField("errorTimes").also {it.isAccessible=true}.get(bot) as Map<*,*>
+            val times=DiscordMinecraftModule::class.java.getDeclaredField("errorTimes").also {it.isAccessible=true}.get(module) as Map<*,*>
             assertEquals(3,(times[i.id] as ArrayDeque<*>).size)
             manager.remoteState(i.id,"runner","SYNCING","종료 코드 1 · 변경 파일 인계 중")
             manager.remoteCommitted(i.id,"runner")

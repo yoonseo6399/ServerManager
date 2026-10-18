@@ -58,6 +58,26 @@ class DiscordModuleRegistryTest {
         assertEquals(listOf("music.use"),service.declarations().map {it.id})
     }
 
+    @Test fun `disabled feature denies even legacy or superadmin permission and reenable restores legacy policy`() {
+        val r=registry(superAdmin=true).add(Fake("music",permissions=listOf(PermissionDecl("music.use","음악",PermissionRisk.LOW,"music"))))
+        var enabled=false;r.enabled={enabled}
+        assertNotNull(r.denial(guild,setOf(role),"music.use"))
+        enabled=true;assertNull(r.denial(guild,setOf(role),"music.use"))
+    }
+
+    @Test fun `voice housekeeping is delivered to disabled modules and one listener failure is isolated`() {
+        val r=registry();val calls=mutableListOf<String>()
+        for(name in listOf("first","second"))r.add(object:DiscordModule {
+            override val id=name;override val label=name;override val commands=setOf(name)
+            override fun register(jda:JDA,guildId:String){}
+            override fun onCommand(event:SlashCommandInteractionEvent){}
+            override fun onVoiceState(event:net.dv8tion.jda.api.events.guild.voice.GuildVoiceUpdateEvent){calls.add(name);if(name=="first")error("fixture")}
+        })
+        r.enabled={false}
+        r.voiceState(org.mockito.Mockito.mock(net.dv8tion.jda.api.events.guild.voice.GuildVoiceUpdateEvent::class.java))
+        assertEquals(listOf("first","second"),calls)
+    }
+
     @Test fun `denial blocks only explicit deny ceiling and default deny and otherwise lets the module run its own checks`() {
         val service=PermissionService(temp)
         val r=DiscordModuleRegistry(service) {_,_->false}.add(Fake("music",permissions=listOf(

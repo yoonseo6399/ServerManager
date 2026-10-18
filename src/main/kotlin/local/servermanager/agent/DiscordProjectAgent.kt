@@ -289,7 +289,8 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
         }
     }
     private fun safe(e:Exception)=if(e is IllegalArgumentException || e is IllegalStateException)e.message.orEmpty().take(1200) else "연결·실행 오류입니다. 봇 권한과 실행 로그를 확인하세요."
-    override fun close(){jobs.close();engine.close();worker.shutdownNow()}
+    fun disconnect(){jobs.close()}
+    override fun close(){disconnect();engine.close();worker.shutdownNow()}
 }
 
 internal object ProjectAgentChannels {

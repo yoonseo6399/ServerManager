@@ -4,7 +4,7 @@ Discord 쪽은 Minecraft 서버를 **`ServerControlPort`** 하나로만 제어�
 
 ## A. 구현됨: `ServerControlPort`
 
-파일: `ServerControlPort.kt`. 구현체 `ServerManagerControl`이 `ServerManager`에 위임한다. `DiscordBot`은 `ServerManager`의 이 메서드들만 쓴다.
+파일: `ServerControlPort.kt`. 구현체 `ServerManagerControl`이 `ServerManager`에 위임한다. `DiscordMinecraftModule`이 이 포트를 통해 서버를 제어하며 `DiscordBot`은 조립·연결·주기 호출만 맡는다.
 
 | 메서드 | 의미 | 원격 API 대응 (B) |
 |---|---|---|

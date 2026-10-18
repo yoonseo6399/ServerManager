@@ -262,6 +262,7 @@ class DiscordMusic(
         },{})
     }
 
+    fun voiceStateChanged(guildId:String)=playback.voiceStateChanged(guildId)
     fun disconnectAll()=playback.disconnectAll()
     override fun close() {panels.close();workers.shutdownNow();playback.close()}
 }

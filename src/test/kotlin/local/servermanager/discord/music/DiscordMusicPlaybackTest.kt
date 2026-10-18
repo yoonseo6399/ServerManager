@@ -26,6 +26,31 @@ import kotlin.test.*
 import kotlin.random.Random
 
 class DiscordMusicPlaybackTest {
+    @Test fun `last human departure stops music leaves and invalidates pending autoplay after sixty seconds`() {
+        val rig=Rig();var seconds=0L
+        val playback=DiscordMusicPlayback(rig.manager,idleClock={TimeUnit.SECONDS.toNanos(seconds)},monitorEmptyChannels=false)
+        val (guild,channel)=rig.guild("12345678901234567")
+        val human=mock(net.dv8tion.jda.api.entities.Member::class.java);val humanUser=mock(net.dv8tion.jda.api.entities.User::class.java)
+        val bot=mock(net.dv8tion.jda.api.entities.Member::class.java);val botUser=mock(net.dv8tion.jda.api.entities.User::class.java)
+        `when`(human.user).thenReturn(humanUser);`when`(humanUser.isBot).thenReturn(false)
+        `when`(bot.user).thenReturn(botUser);`when`(botUser.isBot).thenReturn(true)
+        try {
+            rig.load(playback,guild,channel,"one"){it.trackLoaded(rig.track("One"))}
+            `when`(guild.audioManager.connectedChannel).thenReturn(channel as net.dv8tion.jda.api.entities.channel.unions.AudioChannelUnion)
+            `when`(channel.members).thenReturn(listOf(bot,human));playback.voiceStateChanged(guild.id)
+            seconds=10;`when`(channel.members).thenReturn(listOf(bot));playback.voiceStateChanged(guild.id)
+            seconds=69;playback.checkEmptyChannels();verify(guild.audioManager,never()).closeAudioConnection()
+            `when`(channel.members).thenReturn(listOf(bot,human));playback.voiceStateChanged(guild.id)
+            seconds=70;`when`(channel.members).thenReturn(listOf(bot));playback.voiceStateChanged(guild.id)
+            seconds=129;playback.checkEmptyChannels();verify(guild.audioManager,never()).closeAudioConnection()
+            seconds=130;playback.checkEmptyChannels()
+            verify(guild.audioManager).closeAudioConnection();verify(rig.players.single()).destroy()
+            assertNull(playback.snapshot(guild.id).current);assertTrue(playback.snapshot(guild.id).queue.isEmpty())
+            rig.requests.first().second.trackLoaded(rig.track("Late"))
+            assertNull(playback.snapshot(guild.id).current,"late loads must not restart abandoned playback")
+        } finally {playback.close()}
+    }
+
     @Test fun `pending voice connection cannot be taken over by another channel`() {
         val rig=Rig();val playback=DiscordMusicPlayback(rig.manager)
         val (guild,channel)=rig.guild("12345678901234567")
@@ -82,7 +107,7 @@ class DiscordMusicPlaybackTest {
         fun guild(id: String): Pair<Guild, AudioChannel> {
             val guild = mock(Guild::class.java)
             val audio = mock(AudioManager::class.java)
-            val channel = mock(AudioChannel::class.java)
+            val channel = mock(net.dv8tion.jda.api.entities.channel.unions.AudioChannelUnion::class.java)
             `when`(guild.id).thenReturn(id)
             `when`(guild.audioManager).thenReturn(audio)
             `when`(channel.id).thenReturn("voice-$id")
