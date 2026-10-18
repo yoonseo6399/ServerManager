@@ -41,4 +41,4 @@ python3 scripts/test-agent-command-live.py 8192 14b native
 - 관리 웹: 모듈별 켜기/끄기, 별도 원자 저장·revision·손상 복구·소유자 재인증. 비활성 모듈 진입 차단과 에이전트 작업 취소. 저장 충돌·미저장 이동 보호를 브라우저 mock API로 시험.
 - 기능별 회귀와 React 빌드를 수행했다. 마지막 관리자 API·모듈·서버 제어 묶음은 18개 통과. 모듈 UI Playwright 1개 통과. 앞선 관련 기능 묶음은 108개 중 실제 네트워크 opt-in 2개를 건너뛰고 통과했다. 서로 중복되는 묶음이므로 단순 합산하지 않는다.
 
-전체 스위트·다른 OS·실제 Discord 음성/버튼은 미실행이다. 음악의 외부 YouTube 제한 영상 오류를 모델 문제와 섞지 않는다. 설계의 구현 범위는 [현재 구조 점검](../architecture/implementation-status.md)을 따른다.
+전체 스위트·다른 OS·실제 Discord 음성/버튼은 미실행이다. 음악 로그의 YouTube 'video unavailable' 오류는 LLM 실패와 별개이며, 영상 제한인지 소스 플러그인 문제인지는 확인하지 않았다. 설계의 구현 범위는 [현재 구조 점검](../architecture/implementation-status.md)을 따른다.
