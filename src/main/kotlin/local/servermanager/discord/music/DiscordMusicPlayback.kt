@@ -53,12 +53,13 @@ internal fun chooseAutoplay(stats:List<MusicPlayStat>,lastUrl:String?,failed:Set
 }
 
 /** Local Lavaplayer engine. All queue mutations for a guild are serialized on its Session lock. */
-class DiscordMusicPlayback internal constructor(private val manager: AudioPlayerManager,private val library:DiscordMusicLibraryStore=DiscordMusicLibraryStore()) : AutoCloseable {
+class DiscordMusicPlayback internal constructor(private val manager: AudioPlayerManager,private val library:DiscordMusicLibraryStore=DiscordMusicLibraryStore(),private val idleClock:()->Long=System::nanoTime,monitorEmptyChannels:Boolean=true) : AutoCloseable {
     constructor(library:DiscordMusicLibraryStore=DiscordMusicLibraryStore()) : this(DefaultAudioPlayerManager().apply {
         registerSourceManager(YoutubeAudioSourceManager(Web(ClientOptions().apply {playback=false}),CurrentYoutubeIos(),TvHtml5Simply(),AndroidVr(),WebEmbedded()))
     },library)
 
     private inner class Session(val guild: Guild) : AudioEventAdapter() {
+        val idle=DiscordMusicIdleTimeout(idleClock)
         val player: AudioPlayer = manager.createPlayer()
         val pending = ArrayDeque<AudioTrack>()
         val history = ArrayDeque<AudioTrack>()
@@ -141,6 +142,21 @@ class DiscordMusicPlayback internal constructor(private val manager: AudioPlayer
     }
 
     private val sessions = ConcurrentHashMap<String, Session>()
+    private val idleMonitor=if(monitorEmptyChannels)java.util.concurrent.Executors.newSingleThreadScheduledExecutor {task->Thread(task,"discord-music-empty-channel").apply {isDaemon=true}}.also {executor->
+        executor.scheduleWithFixedDelay({runCatching {checkEmptyChannels()}.onFailure {org.slf4j.LoggerFactory.getLogger(DiscordMusicPlayback::class.java).warn("Music empty-channel check failed: {}",it.toString())}},1,1,TimeUnit.SECONDS)
+    }else null
+
+    /** Gateway updates reset the absence immediately; the timer also handles a channel that stays empty. */
+    @Synchronized fun voiceStateChanged(guildId:String) {sessions[guildId]?.let {checkEmptyChannel(it)}}
+    @Synchronized internal fun checkEmptyChannels() {sessions.values.toList().forEach {checkEmptyChannel(it)}}
+    private fun checkEmptyChannel(session:Session) {
+        if(sessions[session.guild.id]!==session)return
+        synchronized(session) {
+            val channel=session.guild.audioManager.connectedChannel
+            val hasHuman=channel?.members?.any {!it.user.isBot}==true
+            if(session.idle.expired(channel?.id,hasHuman))leave(session.guild)
+        }
+    }
     private data class TrackMeta(val id:String,val manual:Boolean,val requester:MusicRequester?,val generation:Long)
     private val trackMeta=Collections.synchronizedMap(WeakHashMap<AudioTrack,TrackMeta>())
     private fun mark(track:AudioTrack,manual:Boolean,generation:Long,requester:MusicRequester?=null) { trackMeta[track]=TrackMeta(UUID.randomUUID().toString(),manual,requester,generation) }
@@ -187,7 +203,7 @@ class DiscordMusicPlayback internal constructor(private val manager: AudioPlayer
 
     fun channelId(guildId:String):String?=sessions[guildId]?.let { synchronized(it) {it.channelId} }
 
-    fun join(guild: Guild, channel: AudioChannel): String {
+    @Synchronized fun join(guild: Guild, channel: AudioChannel): String {
         val audio = guild.audioManager
         val session=session(guild)
         synchronized(session) {
@@ -390,7 +406,7 @@ class DiscordMusicPlayback internal constructor(private val manager: AudioPlayer
             (session.lastError?.let { "\n$it" } ?: "")
     } } ?: "재생 중인 곡이 없습니다."
 
-    fun leave(guild: Guild): String {
+    @Synchronized fun leave(guild: Guild): String {
         sessions.remove(guild.id)?.let { synchronized(it) { it.clear(); it.player.destroy() } }
         guild.audioManager.closeAudioConnection()
         guild.audioManager.sendingHandler = null
@@ -403,6 +419,7 @@ class DiscordMusicPlayback internal constructor(private val manager: AudioPlayer
     }
 
     override fun close() {
+        idleMonitor?.shutdownNow()
         try {disconnectAll()} finally {manager.shutdown()}
     }
 }

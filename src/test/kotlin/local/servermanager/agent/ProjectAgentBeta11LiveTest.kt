@@ -95,7 +95,7 @@ class ProjectAgentBeta11LiveTest {
             assertEquals(file,temp.resolve(path).normalize(),"no arbitrary paths in this smoke harness")
             messages.add(assistant);messages.add(mapOf("role" to "tool","tool_name" to "read_file","content" to file.readText()))
             val final=call();assertContains(final.path("message").path("content").asText(),secret)
-            println("BETA11 NATIVE SMOKE model=$model requested_read=true used_real_tool_result=true; production still uses validated JSON protocol")
+            println("BETA11 NATIVE SMOKE model=$model requested_read=true used_real_tool_result=true; full harness completion is tested separately")
         }finally{llm.unload(LocalLlm.tag(model))}
     }
 }

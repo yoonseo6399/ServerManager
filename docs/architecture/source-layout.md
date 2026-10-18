@@ -10,7 +10,7 @@
 | `network/` | 게임 네트워크 | 로컬 게임 호스팅, 중계(`DirectRelay*`, `TcpRelayPeer`, `Sable*`), 게임 네트워크 |
 | `runner/` | 서버 실행기 | 다른 컴퓨터에서 서버를 돌리는 실행기(`RunnerMain`)와 관리 앱 쪽 연결(`RunnerGateway`, `RunnerRegistry`), 원격 파일, 실행기 업데이트 |
 | `transfer/` | 파일 전송과 동기화 | 폴더 가져오기, 변경분 전송(`DeltaTransfer`), 파일 목록·검증, 전송 작업, WebDAV 동기화 |
-| `discord/` | Discord 봇 본체와 모듈 계층 | Discord 연결·`/mc` 패널(`DiscordBot`), 설정(`DiscordSettings`), 모듈 인터페이스와 레지스트리(`DiscordModule`), 기존 기능 어댑터(`DiscordModules`), `/permission`, 권한 서비스(`PermissionService`) |
+| `discord/` | Discord 봇 본체와 모듈 계층 | Discord 연결(`DiscordBot`), `/mc` 명령·패널·알림(`DiscordMinecraftModule`), 설정(`DiscordSettings`, `DiscordModuleSettings`), 레지스트리(`DiscordModule`), 기능 어댑터(`DiscordModules`), `/permission`, `PermissionService` |
 | `discord/music/` | 음악 모듈 | 재생(`DiscordMusicPlayback`), 패널, 채널·라이브러리 저장소, 명령(`DiscordMusic`) |
 | `agent/` | 프로젝트 에이전트 | Qwen 프로젝트 에이전트 엔진·도구·셸·장부·결과 보관(`ProjectAgent*`), 역할별 접근(`AgentAccess`), Discord 명령(`DiscordProjectAgent`, `DiscordCodeAgent`), 서브 에이전트 |
 | `ai/` | AI 모델 연동 | 로컬 모델(`LocalLlm`, `LocalModels`, `Qwen*`), 클라우드 모델(`Gemini*`, `OpenAI*`), API 키 저장·설정 |
@@ -42,13 +42,13 @@
 
 `DeltaTransfer.kt`, `FileInventory.kt`, `FolderImport.kt`, `TransferBatch.kt`, `TransferTasks.kt`, `TransferWait.kt`, `VerifiedInventory.kt`, `WebDavSettings.kt`, `WebDavSync.kt`
 
-### `discord/` (8)
+### `discord/` (10)
 
-`DiscordBot.kt`, `DiscordErrorSummary.kt`, `DiscordModule.kt`, `DiscordModules.kt`, `DiscordPanelStore.kt`, `DiscordPermissionModule.kt`, `DiscordSettings.kt`, `PermissionService.kt`
+`DiscordBot.kt`, `DiscordErrorSummary.kt`, `DiscordMinecraftModule.kt`, `DiscordModule.kt`, `DiscordModules.kt`, `DiscordModuleSettings.kt`, `DiscordPanelStore.kt`, `DiscordPermissionModule.kt`, `DiscordSettings.kt`, `PermissionService.kt`
 
-### `discord/music/` (6)
+### `discord/music/` (7)
 
-`DiscordMusic.kt`, `DiscordMusicChannelStore.kt`, `DiscordMusicGateway.kt`, `DiscordMusicLibraryStore.kt`, `DiscordMusicPanel.kt`, `DiscordMusicPlayback.kt`
+`DiscordMusic.kt`, `DiscordMusicChannelStore.kt`, `DiscordMusicGateway.kt`, `DiscordMusicIdleTimeout.kt`, `DiscordMusicLibraryStore.kt`, `DiscordMusicPanel.kt`, `DiscordMusicPlayback.kt`
 
 ### `agent/` (21)
 

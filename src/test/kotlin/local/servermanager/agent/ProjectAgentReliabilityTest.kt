@@ -106,6 +106,8 @@ class ProjectAgentReliabilityTest {
     @Test fun `single file request keeps its exact constraints without extraction inference`() {
         val request="example.txt에서 old를 new로 대치하고 나머지 원문과 마지막 개행을 보존해. 검색, 읽기, 수정, 재조회를 진행하고 결과를 보고해."
         assertEquals(listOf(request),ProjectAgentLedger.extract(request,ProjectAgentInference {_,_,_->error("must not inflate a single outcome")}))
+        val command="run_command 도구 사용해서 파이선 코드 그냥 실행해. 조회하자마"
+        assertEquals(listOf(command),ProjectAgentLedger.extract(command,ProjectAgentInference {_,_,_->error("must not invent six command requirements")}))
         var calls=0
         assertEquals(listOf("첫 작업 수행","둘째 작업 수행"),ProjectAgentLedger.extract("- example.txt 수정\n- 테스트 실행",ProjectAgentInference {_,_,_->calls++;"""{"items":["첫 작업 수행","둘째 작업 수행"]}"""}))
         assertEquals(1,calls)

@@ -1,4 +1,5 @@
 import {SaveBar} from './SaveBar';
+import {DiscordModulesSettings} from './DiscordModulesSettings';
 import {memo,useEffect,useState} from 'react';
 import {api,ApiError} from './http';
 import {useAuth} from './Auth';
@@ -23,6 +24,7 @@ export const DiscordSettings=memo(function DiscordSettings({instances}:Props){
  return <section className="discord-settings" aria-labelledby="discord-heading"><h2 id="discord-heading">Discord 봇</h2><p>친구들은 채널 제어 패널이나 <code>/mc</code> 명령으로 허용된 서버를 조회하고 제어할 수 있습니다.</p>
  {error&&<div role="alert" className="alert error-banner">{error}</div>}{notice&&<div role="status" className="notice alert">{notice}</div>}
  <div className="discord-status"><strong>{status?.state||'확인 중'}</strong><span>{status?.message}</span></div>
+ <DiscordModulesSettings/>
  {status?.guilds.length!==0&&<p className="muted">연결된 Discord 서버: {status?.guilds.map(g=>`${g.name} (${g.id})`).join(', ')}</p>}
  <form id="discord-settings-form" onSubmit={e=>{e.preventDefault();if(!view)return;run(async()=>{const saved=await api<View>('/admin/discord','PUT',{config,revision:view.revision,token:token.trim()||null,clearToken});setView(saved);setConfig(normalize(saved.config));setToken('');setClearToken(false);setDirty(false);setNotice('Discord 설정을 저장했습니다. 연결 상태는 잠시 후 갱신됩니다.');setStatus(await api('/admin/discord/status'));});}}>
  <fieldset disabled={busy||!view} className="discord-fieldset">
