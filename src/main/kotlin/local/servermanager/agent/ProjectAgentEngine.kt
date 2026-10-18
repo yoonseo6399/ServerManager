@@ -128,8 +128,10 @@ class ProjectAgentEngine(private val store:ProjectAgentStore,private val toolFac
         }
         val tools=toolFactory(session).also {it.tier=limits.tier}
         fun finish(text:String) {
-            lastMessage=text;history.add(ProjectAgentMessage("assistant",text));store.history(channelId,history,session.contextEpoch)
-            emit(ProjectAgentEvent("done",turn,text,seconds=elapsed()))
+            val applied=progressState.currentChanges().takeLast(4)
+            val backend=if(applied.isEmpty())""else "\n\n백엔드가 확인한 실제 변경(요구사항 전체 충족과 별개):\n"+applied.joinToString("\n") {proof->"${proof.id} ${proof.tool}: "+proof.targets.joinToString {Path.of(it).fileName.toString().replace('\n',' ').take(80)}}
+            lastMessage=text+backend;history.add(ProjectAgentMessage("assistant",lastMessage));store.history(channelId,history,session.contextEpoch)
+            emit(ProjectAgentEvent("done",turn,lastMessage,seconds=elapsed()))
         }
         fun feedback(message:String,instruction:String) {
             history.add(ProjectAgentMessage("assistant",message,native=actorNative))
@@ -235,11 +237,7 @@ Read/search results are bounded original text by default; summarize:true explici
                     }
                     val incomplete=ledger.active && ledger.open().isNotEmpty() && response.path("status").asText() !in setOf("blocked","clarify")
                     val finalMessage=if(incomplete)"작업 중단: 요구사항별 완료 근거가 부족합니다. 완료로 처리하지 않았습니다."+ledger.report() else message+ledger.report()
-                    val applied=progressState.currentChanges().takeLast(4)
-                    val backend=if(applied.isEmpty())""else "\n\n백엔드가 확인한 실제 변경(요구사항 전체 충족과 별개):\n"+applied.joinToString("\n") {proof->"${proof.id} ${proof.tool}: "+proof.targets.joinToString {Path.of(it).fileName.toString().replace('\n',' ').take(80)}}
-                    lastMessage=finalMessage+backend
-                    history.add(ProjectAgentMessage("assistant",lastMessage));store.history(channelId,history,session.contextEpoch)
-                    emit(ProjectAgentEvent("done",turn,lastMessage,seconds=elapsed()));return
+                    finish(finalMessage);return
                 }
                 val node=response.path("tool");val call=ProjectAgentTool(node.path("name").asText(),node.path("arguments"))
 

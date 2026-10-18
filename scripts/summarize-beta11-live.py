@@ -34,7 +34,7 @@ for mode in ('native', 'json'):
         def swap(sample):
             return float(re.search(r'used = ([0-9.]+)M', sample['swap']).group(1))
         row = dict(mode=mode, model='qwen3:14b', think=True, output_reserved=4096, window=window,
-                   junit_seconds=float(result.get('time')), full_workflow_pass=int(result.get('failures', '0')) == 0,
+                   junit_seconds=float(result.get('time')), full_workflow_pass=int(result.get('tests', '0')) > 0 and all(int(result.get(key, '0')) == 0 for key in ('failures', 'errors', 'skipped')),
                    requested_edit_and_original_preserved=file_ok, file_evidence=source, executed_tools=sequence,
                    completed_main_calls=len(main), completed_helper_calls=len(calls)-len(main),
                    # Partial/cancelled calls have no final provider usage counter; never call these totals complete.

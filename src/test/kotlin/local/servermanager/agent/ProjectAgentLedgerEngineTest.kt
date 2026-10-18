@@ -45,6 +45,23 @@ class ProjectAgentLedgerEngineTest {
         assertTrue(done.contains("✅ R1") && done.contains("✅ R2"),done)
     }
 
+    @Test fun `repetition stop reports files actually saved without claiming full completion`() {
+        setup();var actor=0;val events=mutableListOf<ProjectAgentEvent>()
+        ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->
+            engine.run("c","u","u","a.txt 파일을 생성해",prefs,ProjectAgentInference {messages,_,_->when {
+                messages.first().content.startsWith("Context compressor")->"아직 보고하지 못함"
+                messages.first().content.startsWith("Independent")->allow
+                actor++==0->"""{"message":"저장","tool":{"name":"write_file","arguments":{"path":"a.txt","content":"preserved"}}}"""
+                else->"""{"message":"조회","tool":{"name":"list_files","arguments":{}}}"""
+            }},ProjectAgentLimits(10,AgentAccess.OWNER),{}) {e->events.add(e);if(e.kind=="approval")engine.approve("c","u",e.token!!,true){}}
+        }
+        val done=events.last {it.kind=="done"}.text
+        assertContains(done,"반복");assertContains(done,"완료로 처리하지 않았습니다")
+        assertContains(done,"백엔드가 확인한 실제 변경");assertContains(done,"a.txt")
+        assertEquals("preserved",home().resolve("a.txt").readText())
+        assertContains(store.notes("c")!!.lastResult,"백엔드가 확인한 실제 변경")
+    }
+
     @Test fun `unproven final success is never displayed and exhausting repair ends honestly`() {
         setup();val events=mutableListOf<ProjectAgentEvent>()
         ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->
