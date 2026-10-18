@@ -1,0 +1,256 @@
+{
+  "note": "Development baseline plus separate final-code 8K comparison. One fixture per configuration, not a general ranking. Completed-call token counts exclude cancelled calls.",
+  "results": [
+    {
+      "mode": "native",
+      "model": "qwen3:14b",
+      "think": true,
+      "output_reserved": 4096,
+      "window": 8192,
+      "junit_seconds": 126.275,
+      "full_workflow_pass": true,
+      "requested_edit_and_original_preserved": true,
+      "file_evidence": "JUnit exact-byte assertion and verbatim final read (before snapshot capture was added)",
+      "executed_tools": [
+        "search",
+        "read_file",
+        "edit_file",
+        "read_file"
+      ],
+      "completed_main_calls": 5,
+      "completed_helper_calls": 4,
+      "completed_calls_input_tokens": 12800,
+      "completed_calls_output_tokens": 2115,
+      "max_completed_main_input_tokens": 2221,
+      "recorded_requests": 9,
+      "provider_done_frames": 9,
+      "failure": null,
+      "memory_samples": 71,
+      "max_pressure": 1,
+      "swap_start_mib": 5128.38,
+      "swap_end_mib": 5128.38,
+      "swap_peak_increase_mib": 0.0,
+      "model_peak_vram_gib": 10.03,
+      "observed_context_lengths": [
+        8192
+      ],
+      "final_pressure": 1,
+      "final_models": []
+    },
+    {
+      "mode": "native",
+      "model": "qwen3:14b",
+      "think": true,
+      "output_reserved": 4096,
+      "window": 16384,
+      "junit_seconds": 309.891,
+      "full_workflow_pass": false,
+      "requested_edit_and_original_preserved": true,
+      "file_evidence": "saved file bytes",
+      "executed_tools": [
+        "search",
+        "read_file",
+        "read_file",
+        "edit_file",
+        "read_file"
+      ],
+      "completed_main_calls": 6,
+      "completed_helper_calls": 2,
+      "completed_calls_input_tokens": 22078,
+      "completed_calls_output_tokens": 4791,
+      "max_completed_main_input_tokens": 4515,
+      "recorded_requests": 9,
+      "provider_done_frames": 8,
+      "failure": "java.lang.IllegalStateException: Ollama 대화 실패 또는 3분 제한 초과입니다.",
+      "memory_samples": 161,
+      "max_pressure": 2,
+      "swap_start_mib": 5128.38,
+      "swap_end_mib": 5489.0,
+      "swap_peak_increase_mib": 360.62,
+      "model_peak_vram_gib": 11.288,
+      "observed_context_lengths": [
+        16384
+      ],
+      "final_pressure": 1,
+      "final_models": []
+    },
+    {
+      "mode": "json",
+      "model": "qwen3:14b",
+      "think": true,
+      "output_reserved": 4096,
+      "window": 8192,
+      "junit_seconds": 300.527,
+      "full_workflow_pass": false,
+      "requested_edit_and_original_preserved": true,
+      "file_evidence": "saved file bytes",
+      "executed_tools": [
+        "search",
+        "read_file",
+        "edit_file",
+        "read_file",
+        "read_file",
+        "read_file",
+        "search"
+      ],
+      "completed_main_calls": 12,
+      "completed_helper_calls": 9,
+      "completed_calls_input_tokens": 25332,
+      "completed_calls_output_tokens": 5561,
+      "max_completed_main_input_tokens": 1877,
+      "recorded_requests": 22,
+      "provider_done_frames": 21,
+      "failure": "java.lang.IllegalStateException: Ollama 대화 실패 또는 3분 제한 초과입니다.",
+      "memory_samples": 155,
+      "max_pressure": 1,
+      "swap_start_mib": 5128.38,
+      "swap_end_mib": 5128.38,
+      "swap_peak_increase_mib": 0.0,
+      "model_peak_vram_gib": 10.177,
+      "observed_context_lengths": [
+        8192
+      ],
+      "final_pressure": 1,
+      "final_models": []
+    },
+    {
+      "mode": "json",
+      "model": "qwen3:14b",
+      "think": true,
+      "output_reserved": 4096,
+      "window": 16384,
+      "junit_seconds": 273.698,
+      "full_workflow_pass": false,
+      "requested_edit_and_original_preserved": true,
+      "file_evidence": "saved file bytes",
+      "executed_tools": [
+        "search",
+        "read_file",
+        "edit_file",
+        "read_file",
+        "read_file",
+        "read_file"
+      ],
+      "completed_main_calls": 11,
+      "completed_helper_calls": 1,
+      "completed_calls_input_tokens": 30212,
+      "completed_calls_output_tokens": 4633,
+      "max_completed_main_input_tokens": 3436,
+      "recorded_requests": 12,
+      "provider_done_frames": 12,
+      "failure": "org.opentest4j.AssertionFailedError: 작업 중단: 요구사항별 완료 근거가 부족합니다. 완료로 처리하지 않았습니다.\n\n요구사항 점검:\n⬜ R1 notes/example.txt에서 PATCH_TARGET_9431=old를 PATCH_TARGET_9431=new로 한 군데만 대치해. 먼저 search로 위치를 찾고 read_file → edit_file → read_file 순서로 사용해. 나머지 원문과 마지막 개행을 보존하고 저장 후 다시 읽어 검증해. 실제 확인한 결과만 짧게 보고해. — 미완료",
+      "memory_samples": 140,
+      "max_pressure": 1,
+      "swap_start_mib": 5481.0,
+      "swap_end_mib": 5481.0,
+      "swap_peak_increase_mib": 0.0,
+      "model_peak_vram_gib": 11.442,
+      "observed_context_lengths": [
+        16384
+      ],
+      "final_pressure": 1,
+      "final_models": []
+    }
+  ],
+  "dataset": "A/B comparison before final repeated-observation guard; same fixture and per-window settings; one run each",
+  "environment": {
+    "machine": "Mac M4 Pro, 24 GiB",
+    "ollama": "0.40.4",
+    "platform": "macOS",
+    "thinking": true,
+    "main_output_reserved": 4096,
+    "helper_output_reserved": 1024
+  },
+  "final_comparison": {
+    "source_commit": "7c0c4f07d8151a91d85f7e569c6b2813478e35fb",
+    "same_kotlin_source_hashes": true,
+    "results": [
+      {
+        "mode": "native",
+        "model": "qwen3:14b",
+        "think": true,
+        "output_reserved": 4096,
+        "window": 8192,
+        "junit_seconds": 187.059,
+        "full_workflow_pass": true,
+        "requested_edit_and_original_preserved": true,
+        "file_evidence": "saved file bytes",
+        "executed_tools": [
+          "search",
+          "read_file",
+          "edit_file",
+          "read_file"
+        ],
+        "completed_main_calls": 6,
+        "completed_helper_calls": 5,
+        "completed_calls_input_tokens": 15370,
+        "completed_calls_output_tokens": 3500,
+        "max_completed_main_input_tokens": 2230,
+        "recorded_requests": 11,
+        "provider_done_frames": 11,
+        "failure": null,
+        "memory_samples": 97,
+        "max_pressure": 1,
+        "swap_start_mib": 4592.44,
+        "swap_end_mib": 4592.44,
+        "swap_peak_increase_mib": 0.0,
+        "model_peak_vram_gib": 10.03,
+        "observed_context_lengths": [
+          8192
+        ],
+        "final_pressure": 1,
+        "final_models": []
+      },
+      {
+        "mode": "json",
+        "model": "qwen3:14b",
+        "think": true,
+        "output_reserved": 4096,
+        "window": 8192,
+        "junit_seconds": 254.323,
+        "full_workflow_pass": false,
+        "requested_edit_and_original_preserved": true,
+        "file_evidence": "saved file bytes",
+        "executed_tools": [
+          "search",
+          "read_file",
+          "edit_file",
+          "read_file",
+          "read_file",
+          "read_file"
+        ],
+        "completed_main_calls": 10,
+        "completed_helper_calls": 7,
+        "completed_calls_input_tokens": 21787,
+        "completed_calls_output_tokens": 4737,
+        "max_completed_main_input_tokens": 1892,
+        "recorded_requests": 17,
+        "provider_done_frames": 17,
+        "failure": "org.opentest4j.AssertionFailedError: 진전 없는 도구 반복으로 중단했습니다. 완료로 처리하지 않았습니다.\n\n요구사항 점검:\n⬜ R1 notes/example.txt에서 PATCH_TARGET_9431=old를 PATCH_TARGET_9431=new로 한 군데만 대치해. 먼저 search로 위치를 찾고 read_file → edit_file → read_file 순서로 사용해. 나머지 원문과 마지막 개행을 보존하고 저장 후 다시 읽어 검증해. 실제 확인한 결과만 짧게 보고해. — 미완료",
+        "memory_samples": 130,
+        "max_pressure": 1,
+        "swap_start_mib": 4584.44,
+        "swap_end_mib": 4584.44,
+        "swap_peak_increase_mib": 0.0,
+        "model_peak_vram_gib": 10.177,
+        "observed_context_lengths": [
+          8192
+        ],
+        "final_pressure": 1,
+        "final_models": []
+      }
+    ]
+  },
+  "targeted_regression": {
+    "tests": 168,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 8
+  },
+  "final_report_display_regression": {
+    "tests": 21,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  }
+}

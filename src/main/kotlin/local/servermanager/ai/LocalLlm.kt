@@ -15,19 +15,20 @@ object RemoteLlm {
     @Volatile var provider:((String,String,Boolean,String?)->Result?)?=null
     @Volatile var modelLimitProvider:((String,String?)->Int?)?=null
     @Volatile var conversationProvider:((String,List<ProjectAgentMessage>,Boolean,String?,(QwenProgress)->Unit)->Result?)?=null
+    @Volatile var budgetConversationProvider:((String,List<ProjectAgentMessage>,Boolean,String?,LocalContextBudget,(QwenProgress)->Unit)->Result?)?=null
     /** [runnerId] pins one runner; the provider throws when it is offline or has not opted in. */
     fun chat(size:String,prompt:String,think:Boolean,runnerId:String?=null):Result?=provider?.invoke(size,prompt,LocalModels.thinking(size,think),runnerId)
 }
 
 /** Plain chat only: no project files, tool execution, or provider fallback. */
-class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http://127.0.0.1:11434")) {
+class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http://127.0.0.1:11434"),private val trace:((String,String)->Unit)?=null) {
     private val mapper=jacksonObjectMapper()
     init {
         require(endpoint.scheme=="http" && endpoint.host in setOf("localhost","127.0.0.1","[::1]","::1") && endpoint.rawUserInfo==null && endpoint.rawQuery==null && endpoint.rawFragment==null && endpoint.path in setOf("","/")) {"OLLAMA_URL은 로컬 Ollama의 HTTP 주소여야 합니다."}
     }
     data class OllamaModel(val name:String,val sizeBytes:Long)
     data class Status(val reachable:Boolean,val version:String?,val models:List<OllamaModel>,val loaded:List<String>,val tags:Map<String,String>,val installed:Map<String,Boolean>,val message:String,val modelLimits:Map<String,Int> = emptyMap())
-    data class Answer(val text:String,val limited:Boolean,val seconds:Double,val tokens:Long,val thinking:String="",val inputTokens:Long?=null,val modelContext:Int?=null)
+    data class Answer(val text:String,val limited:Boolean,val seconds:Double,val tokens:Long,val thinking:String="",val inputTokens:Long?=null,val modelContext:Int?=null,@get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) val nativeMessage:String?=null)
     private val client=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
     private fun get(path:String):com.fasterxml.jackson.databind.JsonNode {
         val request=HttpRequest.newBuilder(endpoint.resolve(path)).timeout(Duration.ofSeconds(8)).GET().build()
@@ -112,14 +113,19 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
     }
 
     /** A bounded conversation; reviewers pass a fresh two-message list with no acting-agent context. */
-    fun conversation(size:String,messages:List<ProjectAgentMessage>,think:Boolean=true,progress:(QwenProgress)->Unit={}):Answer {
-        require(size in SIZES && messages.size in 1..32 && messages.all {it.role in setOf("system","user","assistant")} && messages.sumOf {it.content.length}<=40000)
-        require(messages.sumOf {ProjectAgentContext.estimatedTokens(it.content)}<=3800) {"한 번의 검토 문맥이 너무 큽니다. 파일·변경을 작은 구간으로 나눠 요청하세요."}
+    fun conversation(size:String,messages:List<ProjectAgentMessage>,think:Boolean=true,progress:(QwenProgress)->Unit={}):Answer = conversationWithBudget(size,messages,think,LocalContextBudget.DEFAULT,progress)
+    fun conversationWithBudget(size:String,messages:List<ProjectAgentMessage>,think:Boolean,budget:LocalContextBudget,progress:(QwenProgress)->Unit={}):Answer {
+        require(size in SIZES && messages.size in 1..32 && messages.all {it.role in setOf("system","user","assistant")} && messages.sumOf {it.content.length}<=140000)
+        val native=ProjectAgentNativeTools.active(messages)
+        val overhead=if(native)ProjectAgentNativeTools.overhead(messages.first().content)else 0
+        require(messages.sumOf {ProjectAgentContext.messageTokens(it)}+overhead<=budget.input) {"설정된 입력 예산(${budget.input})보다 문맥이 큽니다. 파일·변경을 작은 구간으로 나눠 요청하세요."}
         check(inference.tryAcquire()) {"다른 로컬 모델 요청이 진행 중입니다."}
         try {
             unloadQwen(tag(size))
-            val body=mapper.writeValueAsString(mapOf("model" to tag(size),"messages" to messages,"format" to ProjectAgentFormats.forMessages(messages),"think" to LocalModels.thinking(size,think),"stream" to true,
-                "keep_alive" to "1m","options" to (mapOf("num_ctx" to 8192,"num_predict" to 4096)+if(messages.firstOrNull()?.content?.startsWith("Independent command-risk reviewer")==true)mapOf("temperature" to 0)else emptyMap())))
+            val body=mapper.writeValueAsString(mapOf("model" to tag(size),"messages" to (if(native)ProjectAgentNativeTools.wire(messages)else messages),"think" to LocalModels.thinking(size,think),"stream" to true,
+                "keep_alive" to "1m","options" to (mapOf("num_ctx" to budget.window,"num_predict" to budget.output)+if(messages.firstOrNull()?.content?.startsWith("Independent command-risk reviewer")==true)mapOf("temperature" to 0)else emptyMap()))+
+                if(native)mapOf("tools" to ProjectAgentNativeTools.definitions(messages.first().content))else mapOf("format" to ProjectAgentFormats.forMessages(messages)))
+            trace?.invoke("request",body)
             val request=HttpRequest.newBuilder(endpoint.resolve("/api/chat")).timeout(Duration.ofMinutes(3)).header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build()
             val start=System.nanoTime();val opened=java.util.concurrent.atomic.AtomicReference<java.io.InputStream?>()
             val cancelled=java.util.concurrent.atomic.AtomicBoolean(false)
@@ -134,17 +140,19 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
                         override fun read():Int=super.read().also {if(it>=0){count++;check(count<=524288)}}
                         override fun read(b:ByteArray,off:Int,len:Int):Int=super.read(b,off,len).also {if(it>0){count+=it;check(count<=524288)}}
                     }
-                    val content=StringBuilder();val thinking=StringBuilder();var last=0L;var done=false;var limited=false;var tokens=0L;var inputTokens:Long?=null
+                    val content=StringBuilder();val thinking=StringBuilder();var last=0L;var done=false;var limited=false;var tokens=0L;var inputTokens:Long?=null;val calls=mutableListOf<com.fasterxml.jackson.databind.JsonNode>()
                     bounded.bufferedReader().use {reader->while(true){
-                        val line=reader.readLine() ?: break;val chunk=mapper.readTree(line);check(!chunk.has("error")) {"Ollama가 요청을 완료하지 못했습니다."}
+                        val line=reader.readLine() ?: break;trace?.invoke("chunk",line);val chunk=mapper.readTree(line);check(!chunk.has("error")) {"Ollama가 요청을 완료하지 못했습니다."}
                         content.append(chunk.path("message").path("content").asText());thinking.append(chunk.path("message").path("thinking").asText())
+                        chunk.path("message").path("tool_calls").takeIf {it.isArray}?.forEach {call->calls.add(call);check(calls.size<=16)}
                         check(!cancelled.get()) {"Ollama 생성을 중단했습니다."}
-                        if(System.nanoTime()-last>TimeUnit.MILLISECONDS.toNanos(250)){progress(QwenProgress(thinking.toString(),QwenVisibleText.message(content.toString())).bounded());last=System.nanoTime()}
+                        if(System.nanoTime()-last>TimeUnit.MILLISECONDS.toNanos(250)){progress(QwenProgress(thinking.toString(),(if(native)content.toString()else QwenVisibleText.message(content.toString()))).bounded());last=System.nanoTime()}
                         if(chunk.path("done").asBoolean()){done=true;limited=chunk.path("done_reason").asText()=="length";tokens=chunk.path("eval_count").asLong();inputTokens=chunk.get("prompt_eval_count")?.asLong();break}
                     }}
-                    progress(QwenProgress(thinking.toString(),QwenVisibleText.message(content.toString())).bounded())
-                    check(done && content.isNotBlank()) {"Ollama 답변이 완료되지 않았습니다. 문맥·출력 한도를 확인하세요."}
-                    Answer(content.toString(),limited,(System.nanoTime()-start)/1e9,tokens,thinking.takeLast(4000).toString(),inputTokens,modelContext(size))
+                    progress(QwenProgress(thinking.toString(),(if(native)content.toString()else QwenVisibleText.message(content.toString()))).bounded())
+                    check(done && (native || content.isNotBlank())) {"Ollama 답변이 완료되지 않았습니다. 문맥·출력 한도를 확인하세요."}
+                    val text=if(native)ProjectAgentNativeTools.reply(content.toString(),calls)else content.toString()
+                    Answer(text,limited,(System.nanoTime()-start)/1e9,tokens,thinking.takeLast(4000).toString(),inputTokens,modelContext(size),if(native && calls.size==1)ProjectAgentNativeTools.assistant(content.toString(),calls,thinking.toString())else null)
                 }
             }
             return try {pending.get(185,TimeUnit.SECONDS)} catch(e:Exception){cancelled.set(true);headers.cancel(true);pending.cancel(true);runCatching {opened.get()?.close()};runCatching {headers.getNow(null)?.body()?.close()};if(e is InterruptedException)Thread.currentThread().interrupt();val failure=generateSequence<Throwable>(e){it.cause}.firstOrNull {it is IllegalStateException && it.message.orEmpty().startsWith("Ollama HTTP ")};throw IllegalStateException(when {e is InterruptedException->"Ollama 생성을 중단했습니다.";failure!=null->failure.message;else->"Ollama 대화 실패 또는 3분 제한 초과입니다."},e)}
@@ -164,12 +172,14 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
 object QwenRequests {
     data class Reply(val answer:LocalLlm.Answer,val runnerName:String?)
     private val slot=java.util.concurrent.Semaphore(1)
-    fun conversation(size:String,messages:List<ProjectAgentMessage>,think:Boolean=true,runnerId:String?=null,progress:(QwenProgress)->Unit={}):Reply {
+    fun conversation(size:String,messages:List<ProjectAgentMessage>,think:Boolean=true,runnerId:String?=null,progress:(QwenProgress)->Unit={}):Reply = conversationWithBudget(size,messages,think,runnerId,LocalContextBudget.DEFAULT,progress)
+    fun conversationWithBudget(size:String,messages:List<ProjectAgentMessage>,think:Boolean,runnerId:String?,budget:LocalContextBudget,progress:(QwenProgress)->Unit={}):Reply {
         check(slot.tryAcquire()) {"다른 Qwen 요청이 진행 중입니다."}
         try {
-            val remote=RemoteLlm.conversationProvider?.invoke(size,messages,LocalModels.thinking(size,think),runnerId,progress)
+            val remote=RemoteLlm.budgetConversationProvider?.invoke(size,messages,LocalModels.thinking(size,think),runnerId,budget,progress)
+                ?: if(RemoteLlm.budgetConversationProvider==null && budget.window==8192)RemoteLlm.conversationProvider?.invoke(size,messages,LocalModels.thinking(size,think),runnerId,progress)else null
             check(remote!=null || runnerId==null) {"선택한 실행기가 프로젝트 에이전트 대화를 지원하지 않습니다. 실행기를 업데이트하세요."}
-            return Reply(remote?.answer ?: LocalLlm().conversation(size,messages,think,progress),remote?.runnerName)
+            return Reply(remote?.answer ?: LocalLlm().conversationWithBudget(size,messages,think,budget,progress),remote?.runnerName)
         }finally {slot.release()}
     }
     fun chat(size:String,prompt:String,think:Boolean=false,runnerId:String?=null):Reply {

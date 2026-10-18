@@ -531,7 +531,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                         "sable-registered" -> message.token?.let {sableRegistrations[it]?.complete(message.state=="OK")}
 
                         "session" -> { sessionToken=message.token;tcpRelay?.close();tcpRelay=if(tcpRelayAllowed)TcpRelayPeer(::send,::sendBinary) else null
-                            send(RunnerMessage("restart-capability",state="RESTART_V1"));send(RunnerMessage("update-capability",state=if(updater!=null)"RELEASE_SELECTION_V1" else "OFF",detail=if(updater?.rollbackSupported==true)"ROLLBACK_V1" else null));confirmActivation();hosted?.relaySession() ?: directRelay.onSession();reportUpdateDetail();send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));send(RunnerMessage("llm-capability",state=if(llmAllowed)"OLLAMA_AGENT_V3" else "OFF"));reportUpdate();recoverStates() }
+                            send(RunnerMessage("restart-capability",state="RESTART_V1"));send(RunnerMessage("update-capability",state=if(updater!=null)"RELEASE_SELECTION_V1" else "OFF",detail=if(updater?.rollbackSupported==true)"ROLLBACK_V1" else null));confirmActivation();hosted?.relaySession() ?: directRelay.onSession();reportUpdateDetail();send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));send(RunnerMessage("llm-capability",state=if(llmAllowed)"OLLAMA_AGENT_V3" else "OFF",detail="CONTEXT_TOOLS_V1"));reportUpdate();recoverStates() }
                         "relay-config" -> {
                             val port=message.detail?.toIntOrNull()
                             val ok=tcpRelayAllowed && (message.state=="OFF" || port in 1024..65535) && runCatching {tcpRelay?.listen(if(message.state=="ON")port else null);true}.getOrDefault(false)
@@ -663,7 +663,13 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                 val result:Any=when(size) {
                     "probe" -> llm.probe()
                     "unload" -> {llm.unloadQwen();llm.probe()}
-                    else -> if(size.startsWith("agent:")) {
+                    else -> if(size.startsWith("agent-profile:")) {
+                        require(prompt.length<=200000)
+                        val body=mapper.readTree(prompt)
+                        val budget=mapper.treeToValue(body.path("budget"),LocalContextBudget::class.java)
+                        val messages=body.path("messages").map {ProjectAgentMessage(it.path("role").asText(),it.path("content").asText(),it.path("native").takeIf {n->n.isTextual}?.asText())}
+                        llm.conversationWithBudget(size.substringAfter(':'),messages,think,budget) {frame->send(RunnerMessage("llm-progress",token=requestId,detail=mapper.writeValueAsString(frame.bounded())))}
+                    } else if(size.startsWith("agent:")) {
                         require(prompt.length<=60000)
                         llm.conversation(size.substringAfter(':'),mapper.readValue<List<ProjectAgentMessage>>(prompt),think) {frame->send(RunnerMessage("llm-progress",token=requestId,detail=mapper.writeValueAsString(frame.bounded())))}
                     } else llm.chat(size,prompt,think)

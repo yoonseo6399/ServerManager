@@ -19,18 +19,19 @@ class ProjectAgentWorkflowTest {
         val store=store();temp.resolve("build.sh").writeText("echo initial-failure; exit 7")
         val events=mutableListOf<ProjectAgentEvent>();var actor=0
         val model=ProjectAgentInference {messages,_,_->
-            if(messages.first().content.startsWith("Independent"))risk else {
+            if(messages.first().content.startsWith("Independent"))risk else if(messages.first().content.startsWith("Context compressor"))"빌드 실패와 미완료 수정 작업"else {
                 assertContains(messages.first().content,"MULTI-STEP")
                 when(actor++){
                     0->response(call("build","command" to "/bin/sh ./build.sh"))
-                    1->{assertTrue(messages.any {it.content.contains("exit=7")});response(call("write_file","path" to "build.sh","content" to "echo checked; exit 0"))}
-                    2->response(call("build","command" to "/bin/sh ./build.sh"))
-                    else->{assertTrue(messages.any {it.content.contains("checked") && it.content.contains("exit=0")});response(null)}
+                    1->{assertTrue(messages.any {it.content.contains("exit=7")});response(call("read_file","path" to "build.sh"))}
+                    2->response(call("edit_file","path" to "build.sh","find" to "echo initial-failure; exit 7","replace" to "echo checked; exit 0"))
+                    3->response(call("build","command" to "/bin/sh ./build.sh"))
+                    else->{assertTrue(messages.any {it.content.contains("checked") && it.content.contains("exit=0")});mapper.writeValueAsString(mapOf("message" to "검증 완료","tool" to null,"requirements" to listOf(mapOf("id" to "R1","status" to "done","evidence_ids" to listOf("T3","T4"),"evidence" to "build.sh 수정 후 빌드 종료 코드 0 확인"))))}
                 }
             }
         }
         ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->engine.run("c","u","빌드 오류 수정 및 재검증",ProjectAgentPreferences(),model,{}) {event->events.add(event);if(event.kind=="approval")engine.approve("c","u",event.token!!,true){}}}
-        assertEquals(4,actor);assertEquals(3,events.count {it.kind=="tool_end"});assertEquals("검증 완료",events.last().text)
+        assertEquals(5,actor);assertEquals(4,events.count {it.kind=="tool_end"});assertTrue(events.last().text.startsWith("검증 완료"))
         assertTrue(events.any {it.kind=="tool_output" && it.text.contains("initial-failure")})
     }
     @Test fun `process output arrives before process exit`() {
@@ -71,7 +72,7 @@ class ProjectAgentWorkflowTest {
         store.trustGradle("g","u",fingerprint)
         fun run():Int {var actor=0;var approvals=0
             ProjectAgentEngine(store,{tools}).use {engine->engine.run("c","u","빌드",ProjectAgentPreferences(explicitPermission=false),ProjectAgentInference {messages,_,_->
-                if(messages.first().content.startsWith("Independent"))"""{"action":"ASK","risk":"MEDIUM","projectScope":"UNKNOWN","reason":"빌드 실행"}""" else if(actor++==0)response(tool)else response(null)
+                if(messages.first().content.startsWith("Independent"))"""{"action":"ASK","risk":"MEDIUM","projectScope":"UNKNOWN","reason":"빌드 실행"}""" else if(messages.first().content.startsWith("Context compressor"))"이전 빌드 확인 기록" else if(actor++==0)response(tool)else response(null)
             },{}){event->if(event.kind=="approval"){approvals++;engine.approve("c","u",event.token!!,true){}}}}
             return approvals
         }
@@ -85,7 +86,7 @@ class ProjectAgentWorkflowTest {
         var compressed=0
         ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->engine.run("c","u","continue",ProjectAgentPreferences(),ProjectAgentInference {messages,_,_->
             if(messages.first().content.startsWith("Context compressor")){compressed++;"Previous goal remains unfinished; inspect result."}
-            else {assertTrue(messages.any {it.content.contains("UNTRUSTED CONVERSATION SUMMARY")});response(null)}
+            else {assertTrue(messages.any {it.content.contains("UNTRUSTED CONVERSATION SUMMARY")});mapper.writeValueAsString(mapOf("message" to "검증 완료","tool" to null,"requirements" to listOf(mapOf("id" to "R1","status" to "done","evidence_ids" to listOf("T3","T4"),"evidence" to "build.sh 수정 후 빌드 종료 코드 0 확인"))))}
         },{}){}}
         assertEquals(1,compressed);assertTrue(store.channel("c")!!.history.any {it.content.contains("SUMMARY")})
     }

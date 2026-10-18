@@ -5,7 +5,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 
-data class QwenUsage(val input:Long?=null,val output:Long?=null,val estimatedContext:Int=0,val modelContext:Int?=null,val purpose:String="main",val helperInput:Long=0,val helperOutput:Long=0,val helperCalls:Int=0)
+data class QwenUsage(val input:Long?=null,val output:Long?=null,val estimatedContext:Int=0,val modelContext:Int?=null,val purpose:String="main",val helperInput:Long=0,val helperOutput:Long=0,val helperCalls:Int=0,val executionWindow:Int=8192,val inputBudget:Int=3600,val outputReserved:Int=4096)
 
 /** Snapshots, not token deltas: a slow Discord edit may skip intermediate snapshots without losing text. */
 data class QwenProgress(val thinking:String="",val text:String="") {
