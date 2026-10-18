@@ -22,15 +22,16 @@ class ProjectAgentTools(private val logs:Path,private val files:ProjectAgentFile
         val readTools=setOf("list_files","read_file","find_files","search_text","sh","list_attachments","read_attachment","read_result","search")
         fun allowed(tier:String):Set<String> = when(tier) {AgentAccess.OWNER->names;AgentAccess.EDIT->readTools+setOf("edit_file","write_file");else->readTools}
         val harness="""Code work routine (follow it, do not skip steps):
-1 locate: sh {"command":"grep -rn 'symbol' src --include=*.kt | head -n 20"} (never read a whole large file)
-2 read a slice: sh {"command":"sed -n '120,170p' path/File.kt"} or read_file {path,start_line,lines}
+1 locate unknown positions: search {"pattern":"symbol","path":"src","glob":"*.kt","fixed":true,"context":2}; find_files locates names only. search_text is a legacy literal-search alias. Never reread a whole large file.
+2 read the exact current slice: read_file {path,start_line,lines}. Existing-file edits require this snapshot; a sh read alone is not an editable snapshot.
 3 edit small: edit_file {path,find,replace} with find = exact unique text copied from step 2; or {path,start_line,end_line,replace}; or {path,insert_after_line,replace}. Do not rewrite whole files with write_file.
-4 verify: sh {"command":"git diff -- path/File.kt"} then report the real result.
+4 verify: read_file the changed slice, then sh {"command":"git diff -- path/File.kt"}. Check the requested change AND that unrelated original content remains. A replacement miss needs a fresh focused read; never repeat the same arguments.
 sh is a restricted READ-ONLY command line, not a real shell. Commands: pwd ls cat head tail wc grep(-rniclvFwhH -A -B -C -m -e --include=) find(-name -type -maxdepth) sed(-n 'A,Bp' only) sort uniq echo git(status diff log show branch ls-files rev-parse shortlog). Operators: && || ; |. Not supported: > < `$` backticks ( ) &. Quote patterns with single quotes. Example: "git status --short && grep -rn TODO src | head -n 10".
 """
         val description="""Tools (one per turn):
 list_files {path?,limit?,summarize?}; read_file {path,start_line?,lines?,summarize?}; find_files {path?,pattern}; search_text {path?,text};
-write_file {path,content}; delete_path {path}; run_command {command,cwd?,timeout_seconds?} (literal OS shell command);
+edit_file {path,find,replace,replace_all?} OR {path,start_line,end_line,replace} OR {path,insert_after_line,replace}: preferred for existing files; copy exact text from read_file, never its line labels.
+write_file {path,content} (new files or explicitly requested complete replacement); delete_path {path}; run_command {command,cwd?,timeout_seconds?} (literal OS shell command);
 build/test {command,cwd?,timeout_seconds?}; git {args:[literal argv],cwd?}; make_new_project {name,path?,repo?}.
 list_attachments {}; read_attachment {message_id,attachment_id,start_line?,lines?}; save_attachment {message_id,attachment_id,path}; upload_file {path}.
 read_result {id,start_line?,lines?}: reads a stored long command output by the id the earlier result named.
@@ -51,12 +52,12 @@ No automatic administrator escalation. Never ask tools to change approval settin
     @Volatile var tier=AgentAccess.OWNER
     /** Builds the in-process rg call for the search tool. Values are passed as separate arguments, never through a shell line. */
     private fun searchArgv(args:JsonNode):List<String> {
-        val pattern=args.path("pattern").asText();require(pattern.isNotEmpty() && pattern.length<=500 && !pattern.contains('\u0000')) {"검색 패턴은 1~500자여야 합니다."}
         val argv=mutableListOf("rg")
         if(args.path("files").asBoolean(false)) {
             argv.add("--files");args.path("glob").asText("").takeIf {it.isNotBlank()}?.let {argv.addAll(listOf("-g",it))}
             argv.add(args.path("path").asText("."));return argv
         }
+        val pattern=args.path("pattern").asText();require(pattern.isNotEmpty() && pattern.length<=500 && !pattern.contains('\u0000')) {"검색 패턴은 1~500자여야 합니다."}
         if(args.path("ignore_case").asBoolean(false))argv.add("-i")
         if(args.path("fixed").asBoolean(false))argv.add("-F")
         args.path("context").asInt(0).takeIf {it in 1..10}?.let {argv.addAll(listOf("-C",it.toString()))}
@@ -136,7 +137,7 @@ No automatic administrator escalation. Never ask tools to change approval settin
         val crossedMount=runCatching {targets.any {target->var existing=Path.of(target);while(!Files.exists(existing))existing=existing.parent;Files.getFileStore(existing)!=Files.getFileStore(boundary)}}.getOrDefault(true)
         val scope=when {call.name=="sh" || call.name=="read_result"->"INSIDE";outside->"OUTSIDE";call.name in setOf("run_command","build","test","git") || hardLinked || crossedMount || (call.name=="make_new_project" && args.path("repo").asText().isNotBlank())->"UNKNOWN";else->"INSIDE"}
         if(tier!=AgentAccess.OWNER)require(scope=="INSIDE") {"이 채널은 프로젝트 폴더 안에서만 작업할 수 있습니다. (${if(outside)"프로젝트 밖 경로" else "경로·링크 확인 불가"})"}
-        val plan=ProjectAgentPlan(normalized,cwd.toString(),description,readOnly,hash,scope,targets,sandboxed=readOnly && scope=="INSIDE" && (call.name=="sh" || call.name=="read_result" || call.name=="search" || tier!=AgentAccess.OWNER))
+        val plan=ProjectAgentPlan(normalized,cwd.toString(),description,readOnly,hash,scope,targets,sandboxed=readOnly && scope=="INSIDE" && (call.name in setOf("sh","read_result","search","list_files") || (call.name=="read_file" && targets.none {t->Path.of(t).any {ProjectAgentShell.isSecret(it.toString())}}) || tier!=AgentAccess.OWNER))
         return plan.copy(gradleFingerprint=ProjectAgentGradle.fingerprint(plan))
     }
     fun verify(home:Path,approved:ProjectAgentPlan) {
@@ -146,10 +147,16 @@ No automatic administrator escalation. Never ask tools to change approval settin
     fun gradleTrust(plan:ProjectAgentPlan)=plan.gradleFingerprint
     fun execute(home:Path,plan:ProjectAgentPlan,progress:(String)->Unit={},active:()->Unit):ProjectAgentToolResult {
         active();verify(home,plan);val args=plan.tool.arguments;val path=target(home,args.path("path").asText("."))
-        fun result(value:String)=ProjectAgentToolResult(ProjectAgentContext.summary(value),value)
+        fun result(value:String):ProjectAgentToolResult {
+            if(plan.readOnly && !args.path("summarize").asBoolean(false) && value.length>ProjectAgentResults.THRESHOLD) {
+                val id=results.save(resultScope,value)
+                return ProjectAgentToolResult("VERBATIM OUTPUT $id (not a summary). Continue with read_result {id:\"$id\",start_line:1,lines:80}.\n"+ProjectAgentRawResult.fit(value,1200),value,stored=id)
+            }
+            return ProjectAgentToolResult(ProjectAgentContext.summary(value),value)
+        }
         require(plan.tool.name in allowed(tier)) {"이 채널 권한에서는 ${plan.tool.name} 도구를 쓸 수 없습니다."}
         return when(plan.tool.name) {
-            "search"->{val r=ProjectAgentShell(home).runArgv(searchArgv(args),active);val text=r.output.ifBlank {"(일치 없음)"};ProjectAgentToolResult(ProjectAgentContext.summary(text),text,r.status)}
+            "search"->{val r=ProjectAgentShell(home).runArgv(searchArgv(args),active);val text=(if(args.path("files").asBoolean(false))"FILE NAME LIST (not content matches; pattern is ignored in files mode):\n"else "")+r.output.ifBlank {"(일치 없음)"};ProjectAgentToolResult(ProjectAgentContext.summary(text),text,r.status)}
             "read_result"->{val text=results.read(resultScope,args.path("id").asText(),args.path("start_line").asInt(1),args.path("lines").asInt(80));ProjectAgentToolResult(text,text,0)}
             "sh"->{val r=ProjectAgentShell(home).run(args.path("command").asText(),active);val text=r.output.ifBlank {"(출력 없음)"};ProjectAgentToolResult(ProjectAgentContext.summary(text),text,r.status)}
             "edit_file"->{
@@ -160,7 +167,9 @@ No automatic administrator escalation. Never ask tools to change approval settin
             "list_attachments","read_attachment","save_attachment","upload_file"->result((files ?: error("Discord 파일 도구는 프로젝트 채널에서만 사용할 수 있습니다.")).execute(plan.tool.name,args,path){active();verify(home,plan)})
             "list_files"->{Files.list(path).use {paths->result(paths.limit(args.path("limit").asLong(100).coerceIn(1,300)).map {it.fileName.toString()+(if(it.isDirectory())"/" else "")}.toList().sorted().joinToString("\n"))}}
             "read_file"->{
-                require(path.isRegularFile() && path.fileSize()<=1_048_576) {"1MB 이하 일반 파일만 읽습니다. 큰 파일은 검색 도구나 범위 명령을 사용하세요."}
+                require(path.exists()) {"파일이 없습니다: $path"}
+                require(path.isRegularFile()) {"일반 파일이 아닙니다: $path"}
+                require(path.fileSize()<=1_048_576) {"파일이 1MB 읽기 한도를 초과했습니다: $path"}
                 val start=args.path("start_line").asInt(1);require(start>=1);val count=args.path("lines").asInt(120).coerceIn(1,400)
                 val bytes=Files.newInputStream(path).use {it.readNBytes(1_048_577)};require(bytes.size<=1_048_576)
                 val text=bytes.toString(Charsets.UTF_8)

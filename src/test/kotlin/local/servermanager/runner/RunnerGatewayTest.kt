@@ -280,6 +280,19 @@ class RunnerGatewayTest {
             deliver(RunnerMessage("llm-progress",token=agentRequest.token,detail=mapper.writeValueAsString(QwenProgress("streamed thought","partial answer"))));assertEquals("streamed thought",thinking)
             deliver(RunnerMessage("llm-result",state="OK",token=agentRequest.token,detail="""{"text":"done","limited":false,"seconds":1.0,"tokens":5,"thinking":"checking"}"""))
             assertEquals("done",conversation.get(2,java.util.concurrent.TimeUnit.SECONDS)!!.answer.text)
+            assertFailsWith<IllegalStateException> {gateway.llmBudgetConversation("14b",messages,true,"runner",LocalContextBudget(16384,2048)) {}}
+            deliver(RunnerMessage("llm-capability",state="OLLAMA_AGENT_V3",detail="CONTEXT_TOOLS_V1"));sent.clear()
+            val profiled=java.util.concurrent.CompletableFuture.supplyAsync {gateway.llmBudgetConversation("14b",messages,true,"runner",LocalContextBudget(16384,2048)) {}}
+            val profileDeadline=System.nanoTime()+2_000_000_000L;while(sent.isEmpty() && System.nanoTime()<profileDeadline)Thread.sleep(2)
+            val profileWire=mapper.readValue<RunnerMessage>((sent.single() as TextMessage).payload)
+            assertEquals("agent-profile:14b",profileWire.state)
+            val profileBody=mapper.readTree(profileWire.command)
+            assertEquals(16384,profileBody.path("budget").path("window").asInt());assertEquals(2048,profileBody.path("budget").path("output").asInt())
+            assertFalse(profileBody.path("budget").has("input"));assertEquals(2,profileBody.path("messages").size())
+            deliver(RunnerMessage("llm-result",state="OK",token=profileWire.token,detail="""{"text":"profile ok","limited":false,"seconds":1.0,"tokens":2}"""))
+            assertEquals("profile ok",profiled.get(2,java.util.concurrent.TimeUnit.SECONDS)!!.answer.text)
+            deliver(RunnerMessage("llm-capability",state="OLLAMA_AGENT_V3"))
+            assertFailsWith<IllegalStateException> {gateway.llmBudgetConversation("14b",messages,true,"runner",LocalContextBudget(16384,2048)) {}}
             for(size in listOf("qwen3-coder-30b","gemma4-12b","gemma4-31b")) {
                 sent.clear()
                 val added=java.util.concurrent.CompletableFuture.supplyAsync {gateway.llmConversation(size,messages,false,"runner") {}}

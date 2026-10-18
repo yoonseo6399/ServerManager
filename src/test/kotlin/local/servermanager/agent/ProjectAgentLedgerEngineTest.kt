@@ -19,19 +19,20 @@ class ProjectAgentLedgerEngineTest {
         prefs=store.settings("g","u","14b",true,true)
     }
     private fun home()=Path.of(store.channel("c")!!.home)
-    private val request="a.txt 파일을 만들고 hello를 넣은 다음 결과를 알려줘. 다른 파일은 건드리지 마."
+    private val request="- a.txt 파일을 만들고 hello를 넣어줘. 다른 파일은 건드리지 마.\n- 결과를 알려줘."
 
     @Test fun `the run cannot finish while tracked requirements are open and an unproven claim is rejected`() {
         setup();var actor=0;val events=mutableListOf<ProjectAgentEvent>();var sawRejection=false;var lastSeen=""
         ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->
             engine.run("c","u","u",request,prefs,ProjectAgentInference {messages,_,_->when {
                 messages.first().content.startsWith("Requirement extractor")->"""{"items":["a.txt 파일을 만들고 hello를 넣는다","결과를 알려준다"]}"""
-                messages.first().content.startsWith("Independent")->allow
+                messages.first().content.startsWith("Context compressor")->"이전 목표와 실제 결과를 보존한 테스트 요약"
+            messages.first().content.startsWith("Independent")->allow
                 else->when(actor++) {
                     0->"""{"message":"목록 확인","tool":{"name":"list_files","arguments":{}}}"""
                     1->"""{"message":"이미 끝났습니다. 파일을 만들었고 결과를 확인했습니다.","status":"completed","tool":null,"requirements":[{"id":"R1","status":"done","evidence":"I created the file already"}]}"""
                     2->{lastSeen=messages.takeLast(3).joinToString(" // ") {it.role+":"+it.content.take(400)};sawRejection=messages.any {it.content.contains("Rejected claims") && it.content.contains("R1")};"""{"message":"파일 생성","tool":{"name":"write_file","arguments":{"path":"a.txt","content":"hello\n"}}}"""}
-                    else->"""{"message":"a.txt 생성 완료","status":"completed","tool":null,"requirements":[{"id":"R1","status":"done","evidence":"write_file applied a.txt successfully"},{"id":"R2","status":"done","evidence":"reported in this final message"}]}"""
+                    else->"""{"message":"a.txt 생성 완료","status":"completed","tool":null,"requirements":[{"id":"R1","status":"done","evidence_ids":["T3"],"evidence":"write_file applied a.txt successfully"},{"id":"R2","status":"done","evidence":"reported in this final message"}]}"""
                 }
             }},ProjectAgentLimits(8,AgentAccess.OWNER),{}) {e->events.add(e);if(e.kind=="approval")engine.approve("c","u",e.token!!,true){}}
         }
@@ -42,6 +43,20 @@ class ProjectAgentLedgerEngineTest {
         assertTrue(events.any {it.kind=="ledger" && it.text.contains("2개를 추적")})
         val done=events.last {it.kind=="done"}.text
         assertTrue(done.contains("✅ R1") && done.contains("✅ R2"),done)
+    }
+
+    @Test fun `unproven final success is never displayed and exhausting repair ends honestly`() {
+        setup();val events=mutableListOf<ProjectAgentEvent>()
+        ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->
+            engine.run("c","u","u","a.txt 파일을 생성해",prefs,ProjectAgentInference {messages,_,_->
+                if(messages.first().content.startsWith("Context compressor"))"아직 파일 생성 근거 없음"
+                else """{"message":"모든 파일 생성 완료","status":"completed","tool":null,"requirements":[{"id":"R1","status":"done","evidence_ids":["T999"],"evidence":"파일 생성을 완료했습니다"}]}"""
+            },ProjectAgentLimits(8,AgentAccess.OWNER),{}) {events.add(it)}
+        }
+        assertFalse(home().resolve("a.txt").exists())
+        assertFalse(events.any {it.kind=="message" && it.text.contains("모든 파일 생성 완료")})
+        assertTrue(events.last {it.kind=="done"}.text.startsWith("작업 중단:"))
+        assertContains(events.last().text,"미완료")
     }
 
     @Test fun `a blocked item or a clarifying question may end the run and is reported`() {
@@ -62,13 +77,14 @@ class ProjectAgentLedgerEngineTest {
         ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->
             engine.run("c","u","u",request,prefs,ProjectAgentInference {messages,_,_->when {
                 messages.first().content.startsWith("Requirement extractor")->"""{"items":["a.txt 파일을 만든다","결과를 알려준다"]}"""
-                messages.first().content.startsWith("Independent")->allow
+                messages.first().content.startsWith("Context compressor")->"이전 목표와 실제 결과를 보존한 테스트 요약"
+            messages.first().content.startsWith("Independent")->allow
                 else->"""{"message":"목록 확인","tool":{"name":"list_files","arguments":{}}}"""
             }},ProjectAgentLimits(2,AgentAccess.OWNER),{}) {}
             val notes=store.notes("c")!!
             assertEquals(request.take(300),notes.lastRequest);assertEquals(2,notes.open.size)
             engine.run("c","u","u","이어서 계속해줘",prefs,ProjectAgentInference {messages,_,_->
-                if(messages.first().content.startsWith("Independent"))allow else {seen.add(messages);"""{"message":"계속합니다","status":"clarify","tool":null}"""}
+                if(messages.first().content.startsWith("Independent"))allow else if(messages.first().content.startsWith("Context compressor"))"테스트 요약" else {seen.add(messages);"""{"message":"계속합니다","status":"clarify","tool":null}"""}
             },ProjectAgentLimits(2,AgentAccess.OWNER),{}) {}
         }
         val pinned=seen.first().first {it.content.contains("current_requester")}.content
@@ -81,7 +97,8 @@ class ProjectAgentLedgerEngineTest {
         ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->
             val runner=Thread {engine.run("c","u","u",request,prefs,ProjectAgentInference {messages,_,_->when {
                 messages.first().content.startsWith("Requirement extractor")->"""{"items":["a.txt 파일을 만든다","결과를 알려준다"]}"""
-                messages.first().content.startsWith("Independent")->allow
+                messages.first().content.startsWith("Context compressor")->"이전 목표와 실제 결과를 보존한 테스트 요약"
+            messages.first().content.startsWith("Independent")->allow
                 else->{
                     if(actor++==0){started.countDown();release.await(10,java.util.concurrent.TimeUnit.SECONDS)}
                     seen.add(messages.first {it.content.contains("current_requester")}.content)

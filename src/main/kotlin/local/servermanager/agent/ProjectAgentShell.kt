@@ -287,7 +287,7 @@ class ProjectAgentShell(home:Path) {
      */
     private fun rg(args:List<String>,stdin:String?,active:()->Unit):Out {
         val types=mapOf("kotlin" to "*.kt","kt" to "*.kt","kts" to "*.kts","java" to "*.java","ts" to "*.ts","tsx" to "*.tsx","js" to "*.js","py" to "*.py","md" to "*.md",
-            "json" to "*.json","css" to "*.css","rust" to "*.rs","go" to "*.go","yaml" to "*.yml","html" to "*.html","sh" to "*.sh")
+            "txt" to "*.txt","text" to "*.txt","json" to "*.json","css" to "*.css","rust" to "*.rs","go" to "*.go","yaml" to "*.yml","html" to "*.html","sh" to "*.sh")
         val flags=mutableListOf<String>();val globs=mutableListOf<String>();val explicit=mutableListOf<String>();val positional=mutableListOf<String>()
         var files=false;var i=0
         fun value(name:String)=args.getOrNull(++i) ?: throw IllegalArgumentException("$name 값이 필요합니다.")
@@ -430,7 +430,7 @@ class ProjectAgentShell(home:Path) {
             Files.walkFileTree(start,emptySet(),minOf(depth,40),object:SimpleFileVisitor<Path>() {
                 private fun accept(path:Path,directory:Boolean):FileVisitResult {
                     active()
-                    if(path!=start && (type==null || (type=="d")==directory)) {
+                    if((path!=start || !directory) && (type==null || (type=="d")==directory)) {
                         val file=path.fileName.toString()
                         if((name==null || name!!.matches(Path.of(if(insensitive)file.lowercase() else file))) && hits<500){out.append(display(path)).append(if(directory)"/" else "").append('\n');hits++}
                     }
@@ -458,12 +458,28 @@ class ProjectAgentShell(home:Path) {
                 if(a=="--list" || a=="-l")list=true
             } else {
                 require(!a.startsWith("/") && !a.startsWith("~") && !a.startsWith(":") && !escapes.containsMatchIn(a.replace('\\','/'))) {"git: 프로젝트 밖을 가리키는 인자는 쓸 수 없습니다."}
+                val objectPath=a.substringAfter(':',a)
+                require(objectPath.split('/','\\').none {isSecret(it)}) {"git: 비밀 파일의 작업 트리·이력·객체 내용은 읽을 수 없습니다."}
                 positional.add(a)
             }
         }
         require(sub!="branch" || positional.isEmpty() || list) {"git branch 는 목록 조회만 가능합니다. 브랜치를 만들거나 바꿀 수 없습니다."}
+        val objectRead=sub=="show" && positional.any {':' in it}
+        if(objectRead)require(positional.size==1) {"git show 객체 조회는 검증 가능한 경로 하나만 지정하세요."}
+        if(sub=="show" && !objectRead) {
+            // A raw blob hash has no auditable filename. Only commit objects may produce filtered diffs.
+            positional.takeWhile {it !in rest.dropWhile {v->v!="--"}.drop(1)}.forEach {revision->
+                val check=ProcessBuilder("git","rev-parse","--verify","$revision^{commit}").directory(root.toFile()).redirectErrorStream(true).start()
+                try {require(check.waitFor(2,TimeUnit.SECONDS) && check.exitValue()==0) {"git show: 파일 경로 없는 blob/tree 객체는 읽지 않습니다. REF:일반파일 경로를 쓰세요."}}
+                finally {check.destroyForcibly()}
+            }
+        }
+        val excluded=if(sub in setOf("show","diff","log") && !objectRead) {
+            val patterns=listOf(".env*","*.pem","*.key","*.p12","*.pfx","*.jks","*.keystore","*.kdbx","id_rsa*","id_ed25519*","id_ecdsa*","id_dsa*","*credential*","*secret*",".netrc",".npmrc")
+            (if("--" in rest)emptyList()else listOf("--","."))+patterns.map {":(glob,exclude,icase)**/$it"}
+        }else emptyList()
         val guard=if(sub in setOf("diff","show","log"))listOf("--no-ext-diff","--no-textconv") else emptyList()
-        return listOf("git","--no-pager","--no-optional-locks","-c","core.fsmonitor=false","-c","core.pager=cat","-c","diff.external=",sub)+guard+rest
+        return listOf("git","--no-pager","--no-optional-locks","-c","core.fsmonitor=false","-c","core.pager=cat","-c","diff.external=",sub)+guard+rest+excluded
     }
     private fun git(args:List<String>,active:()->Unit):Out {
         val command=gitArgv(args)

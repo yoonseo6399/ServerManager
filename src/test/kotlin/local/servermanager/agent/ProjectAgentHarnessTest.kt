@@ -103,7 +103,7 @@ class ProjectAgentHarnessTest {
             e.run("channel","friend","friend","함수 찾기",prefs,model,ProjectAgentLimits(3,AgentAccess.READ),{},{events.add(it)})
         }
         assertEquals(3,actor.get());assertEquals(0,reviewer.get(),"deterministic read-only tools skip the model review");assertEquals(0,helper.get())
-        assertEquals(3,events.count {it.kind=="tool_end"});assertTrue(events.last().text.contains("3턴 한도"),events.last().text)
+        assertEquals(1,events.count {it.kind=="tool_end"},"identical unchanged reads must not execute repeatedly");assertTrue(events.last().text.contains("3턴 한도"),events.last().text)
         assertTrue(events.first {it.kind=="tool_end"}.text.contains("A.kt:1:fun one() = 1"),"the model sees exact lines, not a prose summary")
     }
     @Test fun `a read tier channel cannot make the model edit even if it asks`() {

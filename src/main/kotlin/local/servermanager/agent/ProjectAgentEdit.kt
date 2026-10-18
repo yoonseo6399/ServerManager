@@ -41,8 +41,10 @@ internal object ProjectAgentEdit {
                 edited=Edited(text,"${if(all)count else 1}곳 교체",preview("줄 $line 근처에서 ${if(all)count else 1}곳 교체",find.split("\n"),replacement.split("\n")))
             }
             args.has("start_line") || args.has("insert_after_line") -> {
-                val rows=original.split("\n");val total=rows.size-(if(original.endsWith("\n"))1 else 0)
-                val added=if(replacement.isEmpty())emptyList() else replacement.removeSuffix("\n").split("\n")
+                val ending=if(crlf)"\r\n" else "\n"
+                val rows=original.replace("\r\n","\n").split("\n");val total=rows.size-(if(original.endsWith("\n"))1 else 0)
+                val normalizedReplacement=replacement.replace("\r\n","\n")
+                val added=if(normalizedReplacement.isEmpty())emptyList() else normalizedReplacement.removeSuffix("\n").split("\n")
                 val from:Int;val to:Int
                 if(args.has("start_line")) {
                     from=args.path("start_line").asInt(0);to=args.path("end_line").asInt(from)
@@ -53,7 +55,7 @@ internal object ProjectAgentEdit {
                     from=after+1;to=after
                 }
                 val removed=rows.subList(from-1,to)
-                val text=(rows.subList(0,from-1)+added+rows.subList(to,rows.size)).joinToString("\n")
+                val text=(rows.subList(0,from-1)+added+rows.subList(to,rows.size)).joinToString(ending)
                 edited=Edited(text,if(to<from)"${from-1}줄 뒤에 ${added.size}줄 삽입" else "${from}~${to}줄을 ${added.size}줄로 교체",
                     preview(if(to<from)"${from-1}줄 뒤에 삽입" else "줄 $from~$to 교체",removed,added))
             }
