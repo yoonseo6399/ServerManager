@@ -156,7 +156,13 @@ object ClientModFilter {
             }
         }
         val kept=jars.filter {it !in candidates}.map(::installed)
-        ModGraph(ModInventorySnapshot("pack",kept,emptyList())).validateEnabled()
+        try {ModGraph(ModInventorySnapshot("pack",kept,emptyList())).validateEnabled()}
+        catch(e:IllegalArgumentException) {
+            // Metadata may be incomplete (private uploads/deleted upstream versions). Never reject the entire
+            // import or remove a possible provider on that evidence; retain all JARs and report the uncertainty.
+            candidates.removeAll(jars.toSet())
+            log("의존성을 완전히 확인하지 못해 JAR 자동 제외를 보류하고 그대로 가져옵니다: ${e.message?.take(500)}")
+        }
         candidates.sortedBy {it.toString()}.forEach {it.deleteIfExists();log("클라이언트 전용 제외: ${label(it)}")}
 
     }

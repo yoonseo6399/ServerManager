@@ -1,7 +1,7 @@
 import {useBackClose} from './nav';
 import {useEffect,useRef,useState} from 'react';
 import {Check,ChevronLeft,ChevronRight,FlaskConical,Pause,Play,Power,PowerOff,Search,ShieldCheck,Square,X} from 'lucide-react';
-import {api} from './http';
+import {api,ApiError} from './http';
 import './mods.css';
 
 type Source={origin?:string;projectId:string;slug:string;title:string;description:string;iconUrl:string|null;versionNumber:string;environment:string;clientOnly:boolean;dependencies:{projectId:string|null;type:string;versionId?:string|null}[]};
@@ -10,7 +10,7 @@ type Snapshot={revision:string;mods:Mod[];warnings:string[];dependencyFiles:stri
 type Trial={number:number;round:number;groups:string[];disabled:string[];started:boolean;verdict:string|null;note:string;createdAt:string};
 type Session={id:string;phase:string;round:number;error:string|null;plan:{groups:{id:string;files:string[]}[];fixed:string[];protectedSuspects:string[]};trials:Trial[];findings:string[][]};
 type Page={inventoryRevision:string|null;inventory:Snapshot|null;job:{phase:string;message:string;files:number;bytes:number}|null;diagnostic:Session|null;next:{status:string;groups:string[];message:string}|null;active:boolean};
-type Preview={revision:string;enabled:boolean;selected:string[];affected:string[];warnings?:string[]};
+type Preview={revision:string;enabled:boolean;selected:string[];affected:string[];warnings?:string[];ignoreDependencies?:boolean};
 type Filter='all'|'enabled'|'disabled'|'missing'|'unknown'|'client';
 const verdictLabel:Record<string,string>={PASS:'성공 · 문제 없음',FAIL:'실패 · 원래 문제 재현',INVALID:'판정 불가'};
 const busyStates=['RUNNING','STARTING','STOPPING','INSTALLING','IMPORTING','TRANSFERRING','SYNCING','SYNC_FAILED','UNKNOWN'];
@@ -19,6 +19,7 @@ export function ModsPanel({id,loader,state,canManage,onChanged,onConsole}:{id:st
  const [query,setQuery]=useState(''),[filter,setFilter]=useState<Filter>('all'),[page,setPage]=useState(0),[suspects,setSuspects]=useState<Set<string>>(new Set()),[keep,setKeep]=useState<Set<string>>(new Set()),[selected,setSelected]=useState<Set<string>>(new Set());
  const [historyOpen,setHistoryOpen]=useState(false),[historyPage,setHistoryPage]=useState(0);
  const inventoryRevision=useRef<string|null>(null);
+ const [blockedEnable,setBlockedEnable]=useState<{revision:string;files:string[];reason:string}|null>(null);
  const [preview,setPreview]=useState<Preview|null>(null),[note,setNote]=useState(''),[logTrial,setLogTrial]=useState<number|null>(null);
  const alive=useRef(true),autoListed=useRef(false),canManageRef=useRef(canManage);canManageRef.current=canManage;const endpoint=`/instances/${id}/mods`;
  useBackClose(!!preview,()=>setPreview(null),'mod-preview');useBackClose(logTrial!==null,()=>setLogTrial(null),'mod-trial-logs');
@@ -42,13 +43,15 @@ export function ModsPanel({id,loader,state,canManage,onChanged,onConsole}:{id:st
  const lastPage=Math.max(0,Math.ceil(filtered.length/75)-1),shownPage=Math.min(page,lastPage),visible=filtered.slice(shownPage*75,(shownPage+1)*75);
  const change=(setter:typeof setSelected,value:string,checked:boolean)=>setter(old=>{const next=new Set(old);if(checked)next.add(value);else next.delete(value);return next;});
  const groups=(ids:string[])=>session?.plan.groups.filter(g=>ids.includes(g.id)).flatMap(g=>g.files)||[];
- const requestPreview=async(files:string[],enabled:boolean)=>{if(sending)return;setSending(true);setError('');try{setPreview(await api<Preview>(endpoint+'/toggle-preview','POST',{revision:inv?.revision,files,enabled}));}catch(e){setError((e as Error).message);}finally{setSending(false);}};
+ const requestPreview=async(files:string[],enabled:boolean,ignoreDependencies=false)=>{if(sending)return;setSending(true);setError('');setBlockedEnable(null);try{setPreview(await api<Preview>(endpoint+'/toggle-preview','POST',{revision:inv?.revision,files,enabled,...(ignoreDependencies?{ignoreDependencies:true}:{})}));}catch(e){if(enabled&&e instanceof ApiError&&e.code==='MOD_DEPENDENCY_BLOCKED'&&inv)setBlockedEnable({revision:inv.revision,files,reason:e.message});else setError((e as Error).message);}finally{setSending(false);}};
  const verdict=(value:string,trial=current)=>{if(trial)action('/diagnostic/verdict',{trial:trial.number,verdict:value,note});};
  if(!['Fabric','Forge','NeoForge'].includes(loader))return <section className="settings-panel"><h2>모드 관리</h2><p>Fabric·Forge·NeoForge 서버에서 사용할 수 있습니다.</p></section>;
  return <section className="mods-panel">
   <div className="mods-heading"><div><h2>모드 관리와 문제 모드 찾기</h2><p>Modrinth에서 확인한 의존성으로 모드를 켜고 끄고, 의심 모드를 골라 문제 원인을 좁혀보세요.</p></div></div>
   {running&&<p className="notice" role="status">서버가 실행 중이라 모드를 볼 수만 있습니다. 변경하려면 서버를 정지하세요.</p>}
   {error&&<div className="alert error-banner" role="alert">{error}<button onClick={()=>setError('')}>닫기</button></div>}
+  {blockedEnable&&<div className="mod-force-notice" role="alert"><span>활성화 불가 · {blockedEnable.reason}</span><button className="mod-force" disabled={locked||blockedEnable.revision!==inv?.revision} onClick={()=>requestPreview(blockedEnable.files,true,true)}>의존성 무시하고 그냥 켜기</button><button onClick={()=>setBlockedEnable(null)}>닫기</button></div>}
+  <div className="actions"><button disabled={working||!canManage} onClick={()=>action('/refresh')}>모드 목록 다시 불러오기</button></div>
   {data?.job&&<div className={'mod-job '+data.job.phase.toLowerCase()} role="status"><span className={working?'mod-spinner':''}/><span>{data.job.message}{data.job.files>0&&` · ${data.job.files.toLocaleString()}개 · ${(data.job.bytes/1048576).toFixed(1)} MiB`}</span></div>}
   {inv?.warnings.length? <details className="mod-warnings"><summary>검사 주의사항 {inv.warnings.length}개</summary>{inv.warnings.map((w,i)=><p key={i}>{w}</p>)}</details>:null}
   {session&&session.phase!=='FINISHED'&&<div className="mod-diagnostic">
@@ -73,7 +76,7 @@ export function ModsPanel({id,loader,state,canManage,onChanged,onConsole}:{id:st
    {running&&!['RUNNING','STARTING'].includes(state)&&<p role="status" className="muted">정상 종료와 파일 인계가 끝나면 다음 조합을 준비할 수 있습니다.</p>}
    <details className="mod-history" open={historyOpen} onToggle={e=>setHistoryOpen(e.currentTarget.open)}><summary>시도 이력 ({session.trials.length}) · 판정 수정 및 로그</summary>{historyOpen&&session.trials.slice(historyPage*25,(historyPage+1)*25).map(t=><div key={t.number}><span>#{t.number} · {t.round}차 · {verdictLabel[t.verdict||'']||'미판정'} · {t.note}</span><div className="actions"><button onClick={()=>setLogTrial(t.number)}>보관 로그</button>{t.started&&<button disabled={working||running||!canManage||!data?.active||t.round!==session.round} title="현재 탐색 차수의 판정만 수정할 수 있습니다" onClick={()=>{const answer=prompt('수정 판정: PASS / FAIL / INVALID',t.verdict||'INVALID');if(answer&&['PASS','FAIL','INVALID'].includes(answer))verdict(answer,t);}}>판정 수정</button>}</div></div>)}{historyOpen&&session.trials.length>25&&<div className="actions"><button disabled={!historyPage} onClick={()=>setHistoryPage(historyPage-1)}>이전 이력</button><span>{historyPage+1} / {Math.ceil(session.trials.length/25)}</span><button disabled={(historyPage+1)*25>=session.trials.length} onClick={()=>setHistoryPage(historyPage+1)}>다음 이력</button></div>}</details>
   </div>}
-  {!inv?<div className="mods-empty">{working||autoListed.current||!data?<span className="mod-spinner"/>:<Search size={30}/>}<p>{working||autoListed.current||!data?'모드 목록을 불러오는 중입니다…':canManage?'모드 목록을 불러오지 못했습니다. 다시 열어 보세요.':'아직 불러온 모드 목록이 없습니다. 관리자가 한 번 열면 표시됩니다.'}</p><small>파일 해시로 Modrinth에서 모드 정보와 의존성을 찾아 서버별로 저장합니다.</small></div>:<div className="mods-browser">
+  {!inv?<div className="mods-empty">{working||!data?<span className="mod-spinner"/>:<Search size={30}/>}<p>{working||!data?'모드 목록을 불러오는 중입니다…':canManage?'모드 목록을 불러오지 못했습니다. 다시 열어 보세요.':'아직 불러온 모드 목록이 없습니다. 관리자가 한 번 열면 표시됩니다.'}</p><small>파일 해시로 Modrinth에서 모드 정보와 의존성을 찾아 서버별로 저장합니다. 미등록·조회 실패 모드도 파일 목록에 표시합니다.</small></div>:<div className="mods-browser">
    <div className="mods-sidebar" role="group" aria-label="모드 필터">
     <h3>보기</h3>
     {filters.map(f=><button key={f.id} className={'mods-filter-item'+(filter===f.id?' active':'')} aria-pressed={filter===f.id} onClick={()=>{setFilter(f.id);setPage(0);}}><span>{f.label}</span><span className="count">{f.count}</span></button>)}
@@ -116,7 +119,7 @@ export function ModsPanel({id,loader,state,canManage,onChanged,onConsole}:{id:st
     {filtered.length>75&&<div className="log-history"><button disabled={!shownPage} onClick={()=>setPage(shownPage-1)}><ChevronLeft size={16}/> 이전</button><span>{shownPage+1} / {lastPage+1}</span><button disabled={shownPage===lastPage} onClick={()=>setPage(shownPage+1)}>다음 <ChevronRight size={16}/></button></div>}
    </div>
   </div>}
-  {preview&&<div className="modal-backdrop"><div className="dialog mod-confirm" role="dialog" aria-modal="true" aria-label="모드 변경 확인"><h2>{preview.enabled?'모드 활성화':'모드 비활성화'} 확인</h2><p>선택 {preview.selected.length}개{preview.affected.length>preview.selected.length?`와 의존 관계로 함께 바뀌는 ${preview.affected.length-preview.selected.length}개`:''}를 변경합니다. 원본 JAR는 삭제하지 않고 이름만 바꿉니다.</p><ul>{preview.affected.map(f=><li key={f}>{name(f)}{!preview.selected.includes(f)&&<span className="muted"> · {preview.enabled?'필수 의존성이라 함께 활성화':'선택한 모드'}</span>}</li>)}</ul>{!!preview.warnings?.length&&<div className="mod-warnings">{preview.warnings.map((w,i)=><p key={i}>{w}</p>)}</div>}<div className="actions"><button onClick={()=>setPreview(null)}>취소</button><button className="primary" disabled={working||running} onClick={async()=>{await action('/toggle',{revision:preview.revision,files:preview.selected,enabled:preview.enabled});setPreview(null);setSelected(new Set());}}>확인하고 변경</button></div></div></div>}
+  {preview&&<div className="modal-backdrop"><div className="dialog mod-confirm" role="dialog" aria-modal="true" aria-label="모드 변경 확인"><h2>{preview.ignoreDependencies?'의존성을 무시하고 강제 활성화':preview.enabled?'모드 활성화':'모드 비활성화'} 확인</h2><p>선택 {preview.selected.length}개{preview.affected.length>preview.selected.length?`와 의존 관계로 함께 바뀌는 ${preview.affected.length-preview.selected.length}개`:''}를 변경합니다. 원본 JAR는 삭제하지 않고 이름만 바꿉니다.</p><ul>{preview.affected.map(f=><li key={f}>{name(f)}{!preview.selected.includes(f)&&<span className="muted"> · {preview.enabled?'필수 의존성이라 함께 활성화':'선택한 모드'}</span>}</li>)}</ul>{!!preview.warnings?.length&&<div className="mod-warnings">{preview.warnings.map((w,i)=><p key={i}>{w}</p>)}</div>}<div className="actions"><button onClick={()=>setPreview(null)}>취소</button><button className={preview.ignoreDependencies?"mod-force":"primary"} disabled={locked} onClick={async()=>{await action('/toggle',{revision:preview.revision,files:preview.selected,enabled:preview.enabled,...(preview.ignoreDependencies?{ignoreDependencies:true}:{})});setPreview(null);setSelected(new Set());}}>{preview.ignoreDependencies?'위험을 확인하고 그냥 켜기':'확인하고 변경'}</button></div></div></div>}
   {logTrial!==null&&<TrialLogs endpoint={endpoint} trial={logTrial} onClose={()=>setLogTrial(null)}/>}
  </section>;
 }

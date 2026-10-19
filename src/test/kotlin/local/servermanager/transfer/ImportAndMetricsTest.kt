@@ -87,6 +87,15 @@ class ImportAndMetricsTest {
         ClientModFilter.exclude(temp.resolve("stage"),plan,emptySet(),{ModSourceLookup(ModSourceCache(sources),emptyList())}) {}
         assertTrue(client.exists());assertTrue(lib.exists())
     }
+    @Test fun `private upload and unresolved known dependency keep pack import usable without deleting jars`() {
+        val server=mod("server");val privateMod=mod("private");val client=mod("client")
+        val sources=mapOf(hash(server) to source("server",false,"missing"),hash(client) to source("client",true))
+        val log=mutableListOf<String>()
+        val plan=PackPlan("test","1","1.21.1","21.1.252",emptyList(),emptyList(),emptyList())
+        ClientModFilter.exclude(temp.resolve("stage"),plan,emptySet(),{ModSourceLookup(ModSourceCache(sources),listOf("partial query failed"))}) {log.add(it)}
+        assertTrue(server.exists());assertTrue(privateMod.exists());assertTrue(client.exists())
+        assertTrue(log.any {it.contains("그대로 가져옵니다")});assertTrue(log.any {it.contains("partial query failed")})
+    }
     @Test fun `process resource sampling reports real RSS and successive CPU samples`() {
         val metrics=ProcessMetrics();val handle=ProcessHandle.current()
         val first=metrics.sample(handle);val second=metrics.sample(handle)

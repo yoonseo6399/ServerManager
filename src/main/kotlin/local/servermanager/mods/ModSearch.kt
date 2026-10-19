@@ -1,5 +1,7 @@
 package local.servermanager
 
+class ModDependencyBlocked(message:String):IllegalArgumentException(message)
+
 /** Exact Modrinth versions are authoritative. An unknown file is never proof of no dependencies. */
 class ModGraph(snapshot:ModInventorySnapshot) {
     val active=snapshot.mods.filter {it.enabled}.associateBy {it.filename}
@@ -45,34 +47,39 @@ class ModGraph(snapshot:ModInventorySnapshot) {
             if(s.projectId==d.projectId && (d.versionId==null || d.versionId==s.versionId))return true
             return s.dependencies.any {it.type=="embedded" && it.projectId==d.projectId && (d.versionId==null || it.versionId==d.versionId)}
         }
-        fun validateCombination(mods:Collection<InstalledMod>) {
-            val duplicate=mods.mapNotNull {m->m.source?.let {it.projectId to m.filename}}.groupBy({it.first},{it.second}).filterValues {it.size>1}
+        fun validateCombination(mods:Collection<InstalledMod>,changed:Set<String> = mods.map {it.filename}.toSet()) {
+            val duplicate=mods.mapNotNull {m->m.source?.let {it.projectId to m.filename}}.groupBy({it.first},{it.second}).filterValues {it.size>1 && it.any {file->file in changed}}
             require(duplicate.isEmpty()) {"같은 모드가 여러 파일로 켜져 있습니다: "+duplicate.keys.joinToString()}
-            val clash=mods.flatMap {m->m.source?.dependencies.orEmpty().filter {it.type=="incompatible" && mods.any {p->p.filename!=m.filename && matches(p,it)}}.map {"${m.filename} / ${label(it)}"}}
+            val clash=mods.flatMap {m->m.source?.dependencies.orEmpty().filter {it.type=="incompatible" && mods.any {p->p.filename!=m.filename && (m.filename in changed || p.filename in changed) && matches(p,it)}}.map {"${m.filename} / ${label(it)}"}}
             require(clash.isEmpty()) {"Modrinth 비호환 조합입니다: "+clash.joinToString()}
         }
         /** Restore exact required providers, never a different version of the same project. */
-        fun enable(snapshot:ModInventorySnapshot,files:Set<String>):Pair<Set<String>,List<String>> {
+        fun enable(snapshot:ModInventorySnapshot,files:Set<String>,ignoreDependencies:Boolean=false):Pair<Set<String>,List<String>> {
             val disabled=snapshot.mods.filter {!it.enabled}.associateBy {it.filename}
             require(files.isNotEmpty() && files.all {it in disabled}) {"다시 켤 비활성 모드를 선택하세요"}
+            if(ignoreDependencies)return files to listOf("의존성·비호환 검사를 무시하고 선택한 모드만 강제로 켭니다. 서버가 시작되지 않거나 충돌할 수 있습니다.")
             val enabled=snapshot.mods.filter {it.enabled}
-            val result=files.toMutableSet();var changed=true
-            while(changed) {
-                changed=false
-                for(file in result.toList()) {
-                    val source=disabled.getValue(file).source
-                    for(dep in source?.dependencies.orEmpty().filter {it.type=="required"}) {
-                        val proposed=enabled+result.map(disabled::getValue)
-                        if(proposed.any {matches(it,dep)})continue
-                        val candidates=disabled.values.filter {it.filename !in result && matches(it,dep)}
-                        require(candidates.size==1) {"$file: 필수 모드/버전 ${label(dep)}을 하나로 확인할 수 없습니다. Modrinth에서 먼저 설치하세요."}
-                        result.add(candidates.single().filename);changed=true
+            try {
+                val result=files.toMutableSet();var changed=true
+                while(changed) {
+                    changed=false
+                    for(file in result.toList()) {
+                        val source=disabled.getValue(file).source
+                        for(dep in source?.dependencies.orEmpty().filter {it.type=="required"}) {
+                            val proposed=enabled+result.map(disabled::getValue)
+                            if(proposed.any {matches(it,dep)})continue
+                            val candidates=disabled.values.filter {it.filename !in result && matches(it,dep)}
+                            require(candidates.size==1) {"$file: 필수 모드/버전 ${label(dep)}을 하나로 확인할 수 없습니다. Modrinth에서 먼저 설치하세요."}
+                            result.add(candidates.single().filename);changed=true
+                        }
                     }
                 }
-            }
-            validateCombination(enabled+result.map(disabled::getValue))
-            val unverified=result.filter {disabled.getValue(it).source==null}.sorted()
-            return result to if(unverified.isEmpty())emptyList() else listOf("Modrinth에서 찾지 못한 모드는 필수 의존성을 확인하지 못했습니다: "+unverified.joinToString())
+                // Existing unrelated conflicts must not prevent restoring an independent mod.
+                val added=result.map(disabled::getValue)
+                validateCombination(enabled+added,result)
+                val unverified=result.filter {disabled.getValue(it).source==null}.sorted()
+                return result to if(unverified.isEmpty())emptyList() else listOf("Modrinth에서 찾지 못한 모드는 필수 의존성을 확인하지 못했습니다: "+unverified.joinToString())
+            } catch(e:IllegalArgumentException) {throw ModDependencyBlocked(e.message ?: "의존성 검사를 통과하지 못했습니다")}
         }
     }
     fun plan(suspects:Set<String>,keep:Set<String>):ModSearchPlan {

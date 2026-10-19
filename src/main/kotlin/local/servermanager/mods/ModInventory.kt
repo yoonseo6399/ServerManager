@@ -57,7 +57,11 @@ object ModInventory {
         val mods=snapshot.mods.map {m->
             val source=lookup.cache.sources[m.sha512] ?: if(bridge!=null&&sable!=null&&m.sha512==bridge.first&&m.size==bridge.second)
                 ModSource("servermanager-sable-bridge","servermanager-sable-bridge","Server Manager Sable 연결",versionId="1.0.0",versionNumber="1.0.0",environment="server_only",dependencies=listOf(ModDependency(sable.projectId,"required",sable.versionId)),origin="BUNDLED") else null
-            m.copy(source=source,warning=if(source!=null)null else "Modrinth에서 찾지 못해 의존성을 확인할 수 없습니다")
+            m.copy(source=source,warning=when {
+                m.sha512 in lookup.cache.incomplete->"Modrinth 정보 일부를 확인하지 못했습니다. 목록 다시 불러오기로 재시도할 수 있습니다"
+                source==null->"Modrinth에서 찾지 못해 의존성을 확인할 수 없습니다"
+                else->null
+            })
         }
         val active=mods.filter {it.enabled}
         val warnings=buildList {
@@ -65,6 +69,8 @@ object ModInventory {
             if(mods.groupBy {if(it.filename.endsWith(".disabled",true))it.filename.dropLast(9).lowercase() else it.filename.lowercase()}.any {it.value.size>1})add("같은 파일 이름의 활성/비활성 모드가 중복됩니다")
             if(active.groupBy {it.sha512}.any {it.value.size>1})add("내용이 같은 모드 JAR가 중복됩니다")
             active.mapNotNull {it.source}.groupBy {it.projectId}.filter {it.value.size>1}.values.sortedBy {it.first().title}.forEach {add("같은 모드가 여러 파일로 켜져 있습니다: ${it.first().title}")}
+            val incomplete=mods.count {it.sha512 in lookup.cache.incomplete}
+            if(incomplete>0)add("정보 조회가 불완전한 모드 ${incomplete}개는 확인된 정보만 표시합니다. 목록을 다시 불러오면 재시도합니다")
             val unknown=mods.count {it.source==null}
             if(unknown>0)add("Modrinth에서 찾지 못한 모드 ${unknown}개는 의존성을 확인하지 못하지만 그대로 켜고 끌 수 있습니다. 직접 받은 파일이거나 다른 사이트의 모드일 수 있습니다")
         }

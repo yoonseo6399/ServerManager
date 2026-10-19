@@ -72,8 +72,11 @@ interface ModrinthRepository {
     fun projectVersion(project:String,idOrNumber:String):RinVersion
 }
 
+class ModrinthMetadataException(cause:Exception):IllegalStateException(cause.message,cause)
+
 class ModrinthApi(private val fetch:(String)->String=Transport()::get,private val post:(String,String)->String=Transport()::post):ModrinthRepository,ModrinthLookup {
     private val mapper=jacksonObjectMapper()
+    private fun <T> metadata(parse:()->T):T=try {parse()} catch(e:Exception) {throw ModrinthMetadataException(e)}
     private fun enc(s:String)=URLEncoder.encode(s,Charsets.UTF_8)
     private fun token(s:String)=ModrinthLink.identifier(s)
     private fun strings(n:JsonNode)=n.map {it.asText()}.toSet()
@@ -90,15 +93,21 @@ class ModrinthApi(private val fetch:(String)->String=Transport()::get,private va
     override fun projects(ids:Collection<String>):List<RinProject> {
         val wanted=ids.map(::token).distinct();require(wanted.size<=2000)
         return wanted.chunked(100).flatMap {batch->
-            val n=mapper.readTree(fetch("/projects?ids=${enc(mapper.writeValueAsString(batch))}"));require(n.isArray && n.size()<=batch.size)
-            n.map(::parseProject).also {rows->check(rows.all {it.id in batch}) {"요청하지 않은 Modrinth 프로젝트가 반환됐습니다"}}
+            val body=fetch("/projects?ids=${enc(mapper.writeValueAsString(batch))}")
+            metadata {
+                val n=mapper.readTree(body);require(n.isArray && n.size()<=batch.size)
+                n.map(::parseProject).also {rows->check(rows.all {it.id in batch}) {"요청하지 않은 Modrinth 프로젝트가 반환됐습니다"}}
+            }
         }
     }
     override fun versionsByIds(ids:Collection<String>):List<RinVersion> {
         val wanted=ids.map(::token).distinct();require(wanted.size<=4000)
         return wanted.chunked(100).flatMap {batch->
-            val n=mapper.readTree(fetch("/versions?ids=${enc(mapper.writeValueAsString(batch))}"));require(n.isArray && n.size()<=batch.size)
-            n.map(::parseVersion).also {rows->check(rows.map {it.id}.toSet()==batch.toSet()) {"의존성 버전을 모두 확인하지 못했습니다"}}
+            val body=fetch("/versions?ids=${enc(mapper.writeValueAsString(batch))}")
+            metadata {
+                val n=mapper.readTree(body);require(n.isArray && n.size()<=batch.size)
+                n.map(::parseVersion).also {rows->check(rows.map {it.id}.toSet()==batch.toSet()) {"의존성 버전을 모두 확인하지 못했습니다"}}
+            }
         }
     }
     override fun versions(project:String,target:ModrinthTarget):List<RinVersion> {
@@ -118,12 +127,14 @@ class ModrinthApi(private val fetch:(String)->String=Transport()::get,private va
     override fun versionsFromHashes(hashes:List<String>):Map<String,RinVersion> {
         require(hashes.size in 1..500 && hashes.all {it.matches(Regex("[a-f0-9]{128}"))}) {"SHA-512 파일 해시를 입력하세요"}
         val requested=hashes.toSet()
-        val n=mapper.readTree(post("/version_files",mapper.writeValueAsString(mapOf("hashes" to requested,"algorithm" to "sha512"))))
-        require(n.isObject && n.size()<=requested.size)
-        return n.fields().asSequence().associate {(hash,value)->
-            check(hash in requested) {"요청하지 않은 모드 해시가 반환됐습니다"}
-            val v=parseVersion(value);check(v.files.any {it.sha512==hash}) {"모드 파일 출처와 해시가 일치하지 않습니다"}
-            hash to v
+        val body=post("/version_files",mapper.writeValueAsString(mapOf("hashes" to requested,"algorithm" to "sha512")))
+        return metadata {
+            val n=mapper.readTree(body);require(n.isObject && n.size()<=requested.size)
+            n.fields().asSequence().associate {(hash,value)->
+                check(hash in requested) {"요청하지 않은 모드 해시가 반환됐습니다"}
+                val v=parseVersion(value);check(v.files.any {it.sha512==hash}) {"모드 파일 출처와 해시가 일치하지 않습니다"}
+                hash to v
+            }
         }
     }
     private class Transport {

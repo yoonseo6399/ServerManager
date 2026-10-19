@@ -68,6 +68,48 @@ class ModManagementTest {
         assertNull(fresh.mods.single {it.filename=="external.jar.disabled"}.source)
         assertTrue(manager.root.resolve(id).resolve("mod-sources.json").readText().contains("suspect"))
     }
+    @Test fun `forced activation preserves files and still rejects running stale and collision changes`()=fixture {manager,mods,id->
+        val dir=manager.originalServerDir(id).resolve("mods")
+        var snapshot=mods.page(id).inventory!!
+        mods.toggle(id,ModSelection(snapshot.revision,setOf("suspect.jar")));waitJob(mods,id)
+        Files.delete(dir.resolve("lib.jar"));mods.refresh(id);waitJob(mods,id)
+        snapshot=mods.page(id).inventory!!
+        val selected=setOf("suspect.jar.disabled")
+        assertFailsWith<ModDependencyBlocked>{mods.preview(id,ModSelection(snapshot.revision,selected,true))}
+        val request=ModSelection(snapshot.revision,selected,true,true)
+        val preview=mods.preview(id,request);assertEquals(selected.toList(),preview.affected);assertTrue(preview.ignoreDependencies)
+        val bytes=dir.resolve("suspect.jar.disabled").readBytes()
+        manager.runtime(id).state="RUNNING";assertFails {mods.toggle(id,request)};manager.runtime(id).state="STOPPED"
+        assertFails {mods.preview(id,request.copy(revision="stale"))}
+        assertFails {mods.preview(id,request.copy(enabled=false))}
+        assertFails {mods.preview(id,request.copy(files=setOf("../outside.jar.disabled")))}
+        mods.toggle(id,request);waitJob(mods,id)
+        assertContentEquals(bytes,dir.resolve("suspect.jar").readBytes());assertFalse(dir.resolve("suspect.jar.disabled").exists())
+        assertTrue(dir.resolve("other.jar").exists());assertFalse(dir.resolve("lib.jar").exists())
+        // A destination collision is a filesystem guard and cannot be overridden.
+        Files.copy(dir.resolve("suspect.jar"),dir.resolve("suspect.jar.disabled"));mods.refresh(id);waitJob(mods,id)
+        snapshot=mods.page(id).inventory!!
+        mods.toggle(id,ModSelection(snapshot.revision,selected,true,true))
+        val deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(10)
+        while(mods.page(id).job?.phase=="WORKING" && System.nanoTime()<deadline)Thread.sleep(20)
+        assertEquals("FAILED",mods.page(id).job?.phase)
+        assertContentEquals(bytes,dir.resolve("suspect.jar").readBytes());assertContentEquals(bytes,dir.resolve("suspect.jar.disabled").readBytes())
+    }
+    @Test fun `inventory is visible before slow metadata finishes and a private jar remains listed`()=fixture {manager,mods,id->
+        val entered=java.util.concurrent.CountDownLatch(1);val release=java.util.concurrent.CountDownLatch(1)
+        jar(manager.originalServerDir(id).resolve("mods/private.jar"),"private")
+        val api=object:ModrinthLookup {
+            override fun versionsFromHashes(hashes:List<String>):Map<String,RinVersion> {entered.countDown();check(release.await(10,java.util.concurrent.TimeUnit.SECONDS));throw java.io.IOException("offline")}
+            override fun projects(ids:Collection<String>)=emptyList<RinProject>()
+        }
+        val isolated=ModManagement(manager,ModrinthCatalog(api))
+        try {
+            isolated.refresh(id);assertTrue(entered.await(10,java.util.concurrent.TimeUnit.SECONDS))
+            assertEquals(4,isolated.page(id).inventory!!.mods.size);assertEquals("WORKING",isolated.page(id).job?.phase)
+            release.countDown();waitJob(isolated,id)
+            assertEquals(4,isolated.page(id).inventory!!.mods.size);assertTrue(isolated.page(id).inventory!!.warnings.any {it.contains("offline")})
+        } finally {release.countDown();isolated.close()}
+    }
     @Test fun `isolated manual search keeps original world requires verdict and supports pause resume correction and logs`()=fixture {manager,mods,id->
         val source=manager.originalServerDir(id);val original=FileInventory.collect(source)
         val revision=mods.page(id).inventory!!.revision
@@ -97,6 +139,21 @@ class ModManagementTest {
         assertEquals("NOT_REPRODUCED",mods.page(id).next!!.status)
         mods.pause(id,true);waitJob(mods,id)
         assertEquals(source,manager.serverDir(id));assertEquals(original,FileInventory.collect(source))
+    }
+    @Test fun `only dependency rejection exposes the force action error code`() {
+        val service=org.mockito.Mockito.mock(ModManagement::class.java)
+        val request=ModSelection("r",setOf("main.jar.disabled"),true)
+        org.mockito.Mockito.`when`(service.preview("test",request)).thenThrow(ModDependencyBlocked("missing dependency"))
+        val mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(ModApi(service)).setControllerAdvice(Errors()).build()
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/instances/test/mods/toggle-preview")
+            .contentType(org.springframework.http.MediaType.APPLICATION_JSON).content("""{"revision":"r","files":["main.jar.disabled"],"enabled":true}"""))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest)
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value("MOD_DEPENDENCY_BLOCKED"))
+        org.mockito.Mockito.doThrow(IllegalStateException("stale revision")).`when`(service).preview("test",request)
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/instances/test/mods/toggle-preview")
+            .contentType(org.springframework.http.MediaType.APPLICATION_JSON).content("""{"revision":"r","files":["main.jar.disabled"],"enabled":true}"""))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isConflict)
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").doesNotExist())
     }
     @Suppress("UNCHECKED_CAST") private fun modsSession(mods:ModManagement,id:String):ModDiagnostic {
         val field=mods.javaClass.getDeclaredField("sessions").apply {isAccessible=true}
