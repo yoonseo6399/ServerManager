@@ -29,4 +29,14 @@
 - 기존 전체 백엔드 스위트·다른 OS 실행은 사용자 요청에 따라 생략.
 - 새 MVC 테스트 작성 중 오류 처리기 이름 오타로 컴파일 1회 실패, mock 재설정 방식으로 1회 실패. 테스트 코드를 수정한 뒤 최종 6개 통과. 원문 로그와 XML, 스크린샷, 공개 API 응답은 ignored `build/mod-fix-evidence/`에 보존하며 운영 파일명·해시는 커밋하지 않습니다.
 
-릴리즈 통합·서명·공개 자산 검증은 게시 완료 후 별도로 기록합니다.
+## 게시 검증
+
+- [v0.7.0-beta.13](https://github.com/yoonseo6399/ServerManager/releases/tag/v0.7.0-beta.13), source/tag `e1bcd19a6c11e70dc5784fb05634591cd54f4ec5`.
+- [서명 CI39266397843](https://github.com/yoonseo6399/ServerManager/actions/runs/39266397843) 성공. 전체 백엔드 suite는 명시적으로 생략됐으며 macOS 설치/실행기 패키징과 기존 비밀키를 이용한 서명·게시 완료.
+- 공개 자산9개, prerelease=true/draft=false. SHA256SUMS의8개 항목을 GitHub 자산 digest와 전부 대조했습니다.
+- 실제 다운로드한 JAR·update.properties·update.sig·SHA256SUMS의 크기/해시, 서명 manifest의 JAR 버전/크기/해시, 저장소에 고정된 Ed25519 공개키 서명, 내장 버전과 수정 클래스4개의 포함을 검증했습니다.
+- 로컬 통합 React build·bootJar·격리된 bootstrap 서명 업그레이드/변조 차단/실패 롤백/프로필 선택 검사도 통과했습니다.
+- stable latest `v0.6.3` 유지. 게시된 태그/자산은 변경하지 않았고 운영 서버/실행기 교체·재시작 명령은 실행하지 않았습니다.
+
+
+공개 JAR SHA256: `8bff7ecc36830f8dfb52ddab4c9d1aae79f6a522dfec3850cea583fdc86c82f7`
