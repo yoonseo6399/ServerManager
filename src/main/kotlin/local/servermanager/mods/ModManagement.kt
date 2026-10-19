@@ -15,8 +15,8 @@ import java.util.concurrent.Executors
 import kotlin.io.path.*
 
 data class ModLinkRequest(val revision:String,val filename:String,val link:String)
-data class ModSelection(val revision:String,val files:Set<String>,val enabled:Boolean=false)
-data class ModTogglePreview(val revision:String,val enabled:Boolean,val selected:List<String>,val affected:List<String>,val warnings:List<String> = emptyList())
+data class ModSelection(val revision:String,val files:Set<String>,val enabled:Boolean=false,val ignoreDependencies:Boolean=false)
+data class ModTogglePreview(val revision:String,val enabled:Boolean,val selected:List<String>,val affected:List<String>,val warnings:List<String> = emptyList(),val ignoreDependencies:Boolean=false)
 data class ModSearchRequest(val revision:String,val suspects:Set<String>,val keep:Set<String> = emptySet())
 data class ModTrial(val number:Int,val round:Int,val groups:List<String>,val disabled:List<String>,var started:Boolean=false,
     var verdict:String?=null,var note:String="",val createdAt:String=java.time.Instant.now().toString())
@@ -53,8 +53,9 @@ class ModManagement(private val manager:ServerManager,private val catalog:Modrin
     private fun loader(id:String)=manager.instance(id).loader.lowercase().also {require(it in setOf("fabric","forge","neoforge")) {"Fabric·Forge·NeoForge 모드 서버에서 사용할 수 있습니다"}}
     private fun files(id:String)=ModInventory.scan(manager.originalServerDir(id).resolve("mods").also {loader(id)})
     /** Dependencies are fetched from Modrinth once per file hash and saved with the server. */
-    private fun scan(id:String,retryMissing:Boolean=false):ModInventorySnapshot {
+    private fun scan(id:String,retryMissing:Boolean=false,publishRaw:Boolean=false):ModInventorySnapshot {
         val snapshot=files(id)
+        if(publishRaw)publishInventory(id,ModInventory.attach(snapshot,ModSourceLookup(ModSources.load(base(id).resolve("mod-sources.json")),listOf("파일 목록을 불러왔습니다. Modrinth 정보를 확인 중입니다"))))
         return ModInventory.attach(snapshot,catalog.lookup(base(id).resolve("mod-sources.json"),snapshot.mods.map {it.sha512},retryMissing))
     }
     fun page(id:String,includeInventory:Boolean=true):ModPage {
@@ -83,14 +84,14 @@ class ModManagement(private val manager:ServerManager,private val catalog:Modrin
     }
     fun refresh(id:String)=locked(id) {
         loader(id)
-        if(manager.modsViewOnly(id))viewJob(id) else job(id,manager.runtime(id).diagnosticActive){publishInventory(id,scan(id,true))}
+        if(manager.modsViewOnly(id))viewJob(id) else job(id,manager.runtime(id).diagnosticActive){publishInventory(id,scan(id,true,true))}
     }
     /** Read-only listing while the server is busy: nothing is reserved, so every edit stays blocked by the normal reservation checks. */
     private fun viewJob(id:String) {
         check(jobs[id]?.phase!="WORKING") {"모드 목록을 불러오는 중입니다"}
         jobs[id]=ModJob("WORKING","모드 목록을 불러오고 있습니다")
         executor.submit {
-            try {publishInventory(id,scan(id));jobs[id]=ModJob("COMPLETE","모드 목록을 불러왔습니다")}
+            try {publishInventory(id,scan(id,true,true));jobs[id]=ModJob("COMPLETE","모드 목록을 불러왔습니다")}
             catch(e:Exception){jobs[id]=ModJob("FAILED",e.message?.take(500) ?: "모드 목록을 불러오지 못했습니다")}
         }
     }
@@ -106,10 +107,11 @@ class ModManagement(private val manager:ServerManager,private val catalog:Modrin
     fun preview(id:String,req:ModSelection):ModTogglePreview=locked(id) {
         check(!manager.runtime(id).diagnosticActive) {"진행 중인 검사를 먼저 중단하세요"}
         val snapshot=inventory(id,req.revision);require(req.files.isNotEmpty())
+        require(!req.ignoreDependencies || req.enabled) {"의존성 무시는 활성화할 때만 사용할 수 있습니다"}
         val graph=ModGraph(snapshot)
         val (files,warnings)=if(!req.enabled)graph.disable(req.files) to (graph.unknown-req.files).sorted().let {u->if(u.isEmpty())emptyList() else listOf("Modrinth에서 찾지 못한 모드 ${u.size}개는 의존성을 확인하지 못해, 이 변경이 그 모드에 영향을 줄 수 있습니다: "+u.take(8).joinToString())}
-            else ModGraph.enable(snapshot,req.files)
-        ModTogglePreview(req.revision,req.enabled,req.files.sorted(),files.sorted(),warnings)
+            else ModGraph.enable(snapshot,req.files,req.ignoreDependencies)
+        ModTogglePreview(req.revision,req.enabled,req.files.sorted(),files.sorted(),warnings,req.ignoreDependencies)
     }
     fun toggle(id:String,req:ModSelection)=locked(id) {
         val preview=preview(id,req)
@@ -265,6 +267,8 @@ class ModManagement(private val manager:ServerManager,private val catalog:Modrin
 @RestController
 @RequestMapping("/api/instances/{id}/mods")
 class ModApi(private val mods:ModManagement) {
+    @ExceptionHandler(ModDependencyBlocked::class)
+    fun dependencyBlocked(e:ModDependencyBlocked)=org.springframework.http.ResponseEntity.badRequest().body(mapOf("message" to e.message,"code" to "MOD_DEPENDENCY_BLOCKED"))
     @GetMapping fun page(@PathVariable id:String,@RequestParam(defaultValue="false") inventory:Boolean)=mods.page(id,inventory)
     @PostMapping("/refresh") fun refresh(@PathVariable id:String)=mods.refresh(id)
     @PostMapping("/link") fun link(@PathVariable id:String,@RequestBody req:ModLinkRequest)=mods.link(id,req)

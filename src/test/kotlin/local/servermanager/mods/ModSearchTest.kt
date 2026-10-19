@@ -117,6 +117,71 @@ class ModSearchTest {
         assertSame(result.cache,ModSources.lookup(api,listOf("hash"),result.cache,false).cache)
         assertEquals(1,versionCalls)
     }
+    @Test fun `force enable ignores only graph checks and changes exactly selected disabled files`() {
+        val missing=mod("main","ghost").copy(filename="main.jar.disabled",enabled=false)
+        val snapshot=ModInventorySnapshot("r",listOf(missing,mod("unrelated")),emptyList())
+        assertFailsWith<ModDependencyBlocked>{ModGraph.enable(snapshot,setOf(missing.filename))}
+        val forced=ModGraph.enable(snapshot,setOf(missing.filename),true)
+        assertEquals(setOf(missing.filename),forced.first);assertTrue(forced.second.single().contains("무시"))
+        assertFailsWith<IllegalArgumentException>{ModGraph.enable(snapshot,setOf("../escape.jar.disabled"),true)}
+        assertFailsWith<IllegalArgumentException>{ModGraph.enable(snapshot,setOf("unrelated.jar"),true)}
+        assertFailsWith<IllegalArgumentException>{ModGraph.enable(snapshot,emptySet(),true)}
+    }
+    @Test fun `unrelated existing duplicate and incompatibility do not block enabling an independent mod`() {
+        val clash=mod("bad").copy(source=source("bad",listOf(ModDependency("lib","incompatible"))))
+        val independent=mod("independent").copy(filename="independent.jar.disabled",enabled=false)
+        val snapshot=ModInventorySnapshot("r",listOf(mod("lib"),mod("lib").copy(filename="lib-copy.jar"),clash,independent),emptyList())
+        assertEquals(setOf(independent.filename),ModGraph.enable(snapshot,setOf(independent.filename)).first)
+        val disabledLib=mod("lib").copy(filename="lib-new.jar.disabled",enabled=false)
+        assertFailsWith<ModDependencyBlocked>{ModGraph.enable(snapshot.copy(mods=snapshot.mods+disabledLib),setOf(disabledLib.filename))}
+    }
+    @Test fun `one corrupt hash result and private upload do not discard known sources or poison retries`() {
+        var calls=0
+        val version=RinVersion("v","p","Known","1","release","",emptySet(),emptySet(),emptyList(),emptyList())
+        val api=object:ModrinthLookup {
+            override fun versionsFromHashes(hashes:List<String>):Map<String,RinVersion> {
+                calls++;require("bad" !in hashes) {"invalid row"}
+                return hashes.filter {it!="private"}.associateWith {version}
+            }
+            override fun projects(ids:Collection<String>)=ids.map {RinProject(it,it,it,"required")}
+        }
+        val hashes=(1..100).map {"hash$it"}+listOf("bad","private")
+        val result=ModSources.lookup(api,hashes,ModSourceCache(),true)
+        assertEquals(100,result.cache.sources.size);assertEquals(setOf("private"),result.cache.notFound.keys)
+        assertFalse("bad" in result.cache.notFound);assertTrue(result.warnings.isNotEmpty());assertTrue(calls<=34)
+        val seen=mutableListOf<String>()
+        val recovered=object:ModrinthLookup {
+            override fun versionsFromHashes(hashes:List<String>)=hashes.associateWith {seen.add(it);version}
+            override fun projects(ids:Collection<String>)=ids.map {RinProject(it,it,it,"required")}
+        }
+        assertEquals(101,ModSources.lookup(recovered,hashes,result.cache,false).cache.sources.size)
+        assertEquals(listOf("bad"),seen)
+    }
+    @Test fun `missing dependency metadata and project outage preserve exact source and unresolved edge`() {
+        val version=RinVersion("v","p","Known","1","release","",emptySet(),emptySet(),emptyList(),listOf(RinDependency(null,"deleted","required")))
+        val api=object:ModrinthLookup {
+            override fun versionsFromHashes(hashes:List<String>)=mapOf("hash" to version)
+            override fun versionsByIds(ids:Collection<String>)=emptyList<RinVersion>()
+            override fun projects(ids:Collection<String>):List<RinProject> =throw java.io.IOException("offline")
+        }
+        val result=ModSources.lookup(api,listOf("hash","private"),ModSourceCache(),true)
+        val source=result.cache.sources.getValue("hash")
+        assertEquals("v",source.versionId);assertEquals("deleted",source.dependencies.single().versionId)
+        assertNull(source.dependencies.single().projectId);assertEquals(setOf("hash"),result.cache.incomplete)
+        assertEquals(setOf("private"),result.cache.notFound.keys);assertTrue(result.warnings.size>=2)
+        val graph=graph(mod("known").copy(source=source))
+        assertTrue(graph.missing.isNotEmpty());assertFails {graph.validateEnabled()}
+        val attached=ModInventory.attach(ModInventorySnapshot("r",listOf(mod("known").copy(sha512="hash")),emptyList()),result)
+        assertTrue(attached.mods.single().warning!!.contains("다시 불러오기"))
+        assertTrue(attached.warnings.any {it.contains("불완전")})
+    }
+    @Test fun `HTTP outage does not split each file into repeated upstream retries`() {
+        var calls=0
+        val api=ModrinthApi(post={_,_->calls++;error("Modrinth 응답 HTTP 503")})
+        val hashes=(1..100).map {it.toString(16).padStart(128,'0')}
+        val result=ModSources.lookup(api,hashes,ModSourceCache(),true)
+        assertEquals(1,calls);assertTrue(result.cache.notFound.isEmpty());assertEquals(1,result.warnings.size)
+    }
     private fun solve(all:List<String>,fails:(List<String>)->Boolean):Pair<SearchStep,List<SearchObservation>> {
         val history=mutableListOf<SearchObservation>()
         repeat(200){val s=ManualModSearch.next(all,history);if(s.status!="TEST")return s to history;history.add(SearchObservation(s.groups,if(fails(s.groups))"FAIL" else "PASS"))}

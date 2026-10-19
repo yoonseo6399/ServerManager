@@ -1,0 +1,2 @@
+import {defineConfig} from '@playwright/test';
+export default defineConfig({testDir:'./mods-ui-tests',outputDir:'./test-results/mod-fix',workers:1,use:{baseURL:'http://127.0.0.1:5175',viewport:{width:1440,height:1000}},webServer:{command:`${process.env.NODE_BINARY||'node'} node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5175 --strictPort`,url:'http://127.0.0.1:5175',reuseExistingServer:false},reporter:'list'});
