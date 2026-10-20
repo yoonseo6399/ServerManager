@@ -58,13 +58,14 @@ interface LocalGameLauncher {
 class HostedGames(private val home:Path,private val controllerId:String,private val spawn:()->Boolean,
         private val retryMillis:Long=15000,private val minHost:Int=1):LocalGameLauncher,AutoCloseable {
     @Volatile private var client:GameHostClient?=null
+    @Volatile private var relayOutput:(String)->Unit={}
     @Volatile var lastError:String?=null;private set
     @Synchronized fun connection():GameHostClient? {
         client?.takeIf {!it.disconnected}?.let {return it}
         client=null
         return try {
             if(GameHostClient.readEndpoint(home)==null || !reachable())spawn()
-            GameHostClient.connect(home,controllerId,minHost=minHost,retryMillis=retryMillis).also {client=it;lastError=null}
+            GameHostClient.connect(home,controllerId,minHost=minHost,retryMillis=retryMillis).also {it.onRelay=relayOutput;client=it;lastError=null}
         } catch(e:Exception) {lastError=(e.message ?: e.javaClass.simpleName).take(200);null}
     }
     private fun reachable():Boolean {
@@ -86,7 +87,7 @@ class HostedGames(private val home:Path,private val controllerId:String,private 
     /** Relay control traffic goes to the role that lives in the host; manager-bound output comes back through [onRelay]. */
     fun relayForward(json:String):Boolean=connection()?.relayForward(json) ?: false
     fun relaySession():Boolean=connection()?.relaySession() ?: false
-    fun onRelay(handler:(String)->Unit){connection()?.onRelay=handler}
+    fun onRelay(handler:(String)->Unit){relayOutput=handler;connection()?.onRelay=handler}
     fun hostProtocol():Int?=client?.takeIf {!it.disconnected}?.hostProtocol
     fun hostVersion():String?=client?.takeIf {!it.disconnected}?.hostVersion
     /** Detaches the controller. Games keep running; this is what an update or a shutdown must call. */

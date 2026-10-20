@@ -89,6 +89,7 @@ class RunnerRegistry(private val manager:ServerManager,private val auth:AuthStor
     }
     @Synchronized fun device(id:String):RunnerDevice?=devices[id]?.copy(allowedInstanceIds=devices[id]!!.allowedInstanceIds.toSet())
     @Synchronized fun active(id:String):RunnerDevice?=device(id)?.takeIf { it.enabled && auth.account(it.registeredBy)?.enabled==true }
+    @Synchronized fun activeIds():Set<String> = devices.keys.filter {active(it)!=null}.toSet()
     fun verify(id:String,message:ByteArray,signature:String):Boolean {
         val device=active(id) ?: return false
         return runCatching {

@@ -171,6 +171,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
         restartRunners.remove(id);llmRunners.remove(id);agentLlmRunners.remove(id);streamingLlmRunners.remove(id);budgetLlmRunners.remove(id);llmAnswered.remove(id)
         registry.tcpRelayCapability(id,false)
         registry.connected(id)
+        directRelay?.core?.onDisconnect(id) // Consent/capability must come from this authenticated connection.
         sessions.put(id,session)?.takeIf { it!==session }?.let { previous ->
             sockets.values.filter {it.runnerId==id}.forEach {closeStream(it,false)}
             manager.remoteDisconnected(id)

@@ -229,6 +229,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     private fun signingKey()=KeyFactory.getInstance("Ed25519").generatePrivate(PKCS8EncodedKeySpec(Base64.getUrlDecoder().decode(identity.privateKey)))
     // ---- Resident game host -------------------------------------------------------------------------------------
     @Volatile private var hosted:HostedGames?=null
+    private var lastHostedRelayReport=System.nanoTime()-java.util.concurrent.TimeUnit.SECONDS.toNanos(10)
     private val hostMode=HostModeStore(home)
     @Volatile var hostModeState=HostModeState()
     private val hostInit=java.util.concurrent.atomic.AtomicBoolean()
@@ -296,7 +297,13 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             }
             if(restartForUpdate()) kotlin.system.exitProcess(75)
             tryReplaceHost()
-            send(RunnerMessage("heartbeat",version=version()));sable.heartbeat();if(hosted==null)directRelay.tick()
+            send(RunnerMessage("heartbeat",version=version()));sable.heartbeat()
+            val resident=hosted
+            if(resident==null)directRelay.tick()
+            else if(System.nanoTime()-lastHostedRelayReport>=java.util.concurrent.TimeUnit.SECONDS.toNanos(10)) {
+                // Restore callback + request a fresh consent/status after any resident-host reconnect.
+                if(resident.relaySession())lastHostedRelayReport=System.nanoTime()
+            }
             reportUpdate()
             reportFolders()
             home.resolve("instances").takeIf {it.exists()}?.listDirectoryEntries()?.forEach {dir->dir.resolve("install-result.json").takeIf {it.exists()}?.let {file->runCatching {send(mapper.readValue<RunnerMessage>(file.readText()))}}}

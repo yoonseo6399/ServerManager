@@ -28,6 +28,26 @@ class HostedRelayTest {
     private fun handshake(host:String):ByteArray {val b=ByteArrayOutputStream();varint(b,0);varint(b,767);val n=host.toByteArray();varint(b,n.size);b.write(n);b.write(0x63);b.write(0xdd);varint(b,2);val p=ByteArrayOutputStream();varint(p,b.size());b.writeTo(p);return p.toByteArray()}
     private fun roundTrip(s:Socket,text:String):Boolean {s.getOutputStream().write(text.toByteArray());s.getOutputStream().flush();val b=ByteArray(text.length);var n=0;while(n<b.size){val r=s.getInputStream().read(b,n,b.size-n);if(r<0)return false;n+=r};return String(b)==text}
 
+    @Test fun `HostedGames restores relay output callback and current consent after host reconnect`() {
+        val home=Files.createTempDirectory("hosted-relay-reconnect")
+        val service=GameHostService(home,"test",pingMillis=100,leaseMillis=3000).track();assertTrue(service.start())
+        RelayConsentStore(home){null}.set(true,"test")
+        val mapper=jacksonObjectMapper()
+        val events=java.util.concurrent.CopyOnWriteArrayList<RunnerMessage>()
+        val launcher=HostedGames(home,"controller",{false},retryMillis=2000).track()
+        launcher.onRelay {body->events.add(mapper.readValue<RunnerMessage>(body))}
+        assertTrue(launcher.relaySession())
+        await("first status"){events.any {it.type=="drp-status"}}
+        val first=launcher.connection()!!;first.close()
+        await("disconnect"){first.disconnected && !service.controllerAttached()}
+        val received=events.size
+        val second=launcher.connection()!!;assertNotSame(first,second)
+        assertTrue(launcher.relaySession())
+        await("restored callback"){events.drop(received).any {it.type=="drp-status"}}
+        RelayConsentStore(home){null}.set(false,"test-revoke")
+        await("fresh revocation"){events.lastOrNull {it.type=="relay-consent"}?.state=="DENIED"}
+        await("status revocation"){mapper.readValue<RunnerRelayReport>(events.last {it.type=="drp-status"}.detail!!).consent.allowed.not()}
+    }
     @Test fun `players stay connected while both control layers are replaced and new players connect afterwards`() {
         val host="play.example.com";val inst="inst-1"
         val relayId=UUID.randomUUID().toString();val agentId=UUID.randomUUID().toString()
