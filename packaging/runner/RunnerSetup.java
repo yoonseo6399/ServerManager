@@ -22,7 +22,7 @@ public final class RunnerSetup {
           install.command / install.cmd                  대화형 CLI 설치
           install.command --install-only                 등록 없이 설치
           install.command --no-autostart                 로그인 자동 대기 끄기
-          install.command --allow-tcp-relay              관리 웹 소유자의 TCP 중계 사용 허용 (기본 꺼짐)
+          install.command --allow-tcp-relay              관리 웹 소유자의 게임 중계 사용 허용 (TCP / Sable UDP) (기본 꺼짐)
           install.command --deny-tcp-relay               위 허용을 철회
           install.command --manager-url=https://주소     관리 주소 미리 지정
           install.command --code-stdin --manager-url=... 등록 코드를 표준 입력으로 전달
@@ -335,7 +335,7 @@ public final class RunnerSetup {
             install(packageHome(),target(),home(),options.autostart(),services,System.out::println);
             if(options.binding()!=null)bindFolder(home(),options.binding());
             if(options.relay()!=null && options.relay()!=relayAllowed(home())) writeRelayConsent(home(),options.relay(),"installer-cli");
-            System.out.println("관리 웹 소유자의 TCP 중계 사용 허용: "+(relayAllowed(home())?"허용":"허용 안 함 (기본값)"));
+            System.out.println("관리 웹 소유자의 게임 중계 사용 허용 (TCP / Sable UDP): "+(relayAllowed(home())?"허용":"허용 안 함 (기본값)"));
             if(code!=null) pair(target(),home(),manager,code);
             if(!options.installOnly()) services.start(target(),home());
             System.out.println("설치 완료 · 로그인 자동 대기 "+(options.autostart()?"ON":"OFF")+(options.installOnly()?"\n등록·실행은 생략했습니다.":"\n실행기를 시작했습니다. 관리 웹에서 온라인 상태와 서버 사용 허용을 확인하세요."));
@@ -351,7 +351,7 @@ public final class RunnerSetup {
         final JComboBox<String> required=new JComboBox<>(new String[]{"21","17","25"});
         final JButton choose=new JButton("서버 폴더 선택");
         final JCheckBox auto=new JCheckBox("컴퓨터에 로그인하면 실행기를 자동으로 대기",true);
-        final JCheckBox relay=new JCheckBox("관리 웹 소유자의 TCP 중계 사용 허용",relayAllowed(home()));
+        final JCheckBox relay=new JCheckBox("관리 웹 소유자의 게임 중계 사용 허용 (TCP / Sable UDP)",relayAllowed(home()));
         final JButton web=new JButton("웹에서 패스키로 등록 코드 발급"),install=new JButton("설치하고 연결"),close=new JButton("닫기");
         final JLabel status=new JLabel("웹 주소 확인 → 등록 코드 발급 → 설치하고 연결");
         final JProgressBar progress=new JProgressBar();
@@ -373,7 +373,7 @@ public final class RunnerSetup {
             useFolder.addActionListener(e->{folderPanel.setVisible(useFolder.isSelected());frame.pack();var screen=GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();frame.setSize(Math.max(720,Math.min(frame.getWidth(),screen.width-40)),Math.min(frame.getHeight(),screen.height-40));frame.setLocationRelativeTo(null);});
             choose.addActionListener(e->{JFileChooser picker=new JFileChooser();picker.setDialogTitle("기존 Minecraft 서버 폴더");picker.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);if(picker.showOpenDialog(frame)==JFileChooser.APPROVE_OPTION)folder.setText(picker.getSelectedFile().getAbsolutePath());});
             auto.setAlignmentX(Component.LEFT_ALIGNMENT);panel.add(auto);
-            relay.setAlignmentX(Component.LEFT_ALIGNMENT);relay.setToolTipText("켜면 관리 웹 소유자가 이 컴퓨터를 게임 TCP 중계로 지정하거나 해제할 수 있습니다. 기본은 꺼짐이며 실행기 설정에서 언제든 철회할 수 있습니다.");panel.add(relay);
+            relay.setAlignmentX(Component.LEFT_ALIGNMENT);relay.setToolTipText("켜면 관리 웹 소유자가 이 컴퓨터를 TCP 및 Sable UDP 중계로 지정하거나 해제할 수 있습니다. UDP는 관리 웹에서 별도로 켭니다. 기본은 꺼짐이며 실행기 설정에서 언제든 철회할 수 있습니다.");panel.add(relay);
             JLabel relayNote=new JLabel("기본 꺼짐 · 철회: install.command/install.cmd --deny-tcp-relay 또는 --runner-relay-consent=revoke");relayNote.setAlignmentX(Component.LEFT_ALIGNMENT);panel.add(relayNote);gap(panel);
             panel.add(new JLabel("설치 위치: "+target()));panel.add(new JLabel("기존 기기 등록과 서버 데이터는 보존됩니다."));gap(panel);
             JPanel buttons=new JPanel(new FlowLayout(FlowLayout.LEFT,0,0));buttons.setAlignmentX(Component.LEFT_ALIGNMENT);buttons.add(install);buttons.add(Box.createHorizontalStrut(12));buttons.add(close);panel.add(buttons);gap(panel);

@@ -36,10 +36,10 @@ class SableRelay(private val authorize:(String,Int)->SableRoute?,private val for
     private val dropped=AtomicLong()
     @Volatile private var socket:DatagramSocket?=null
     @Volatile private var error:String?=null
-    @Synchronized fun listen(port:Int) {
+    @Synchronized fun listen(port:Int,address:String="0.0.0.0") {
         if(socket?.isClosed==false)return
         try {
-            val udp=DatagramSocket(null);try {udp.bind(InetSocketAddress("0.0.0.0",port));udp.soTimeout=1000}catch(e:Exception){udp.close();throw e}
+            val udp=DatagramSocket(null);try {udp.bind(InetSocketAddress(address,port));udp.soTimeout=1000}catch(e:Exception){udp.close();throw e}
             socket=udp;error=null
             thread(isDaemon=true,name="sable-public-udp") {
                 val buffer=ByteArray(65508)
@@ -50,6 +50,7 @@ class SableRelay(private val authorize:(String,Int)->SableRoute?,private val for
             }
         } catch(_:Exception){error="UDP 포트를 열 수 없습니다. TCP 대체 통신을 사용합니다."}
     }
+    val localPort:Int? get()=socket?.takeIf {!it.isClosed}?.localPort
     fun register(runner:String,stream:Int,instance:String,token:UUID):Boolean {
         expire()
         if(socket?.isClosed!=false || bindings.size>=500)return false
@@ -92,8 +93,8 @@ class SableRelay(private val authorize:(String,Int)->SableRoute?,private val for
         if((payload[0].toInt() and 255) !in setOf(0,1,2,4))return false
         return runCatching {socket?.takeIf {!it.isClosed}?.send(DatagramPacket(payload,payload.size,peer)) ?: return false;binding.returned=true;true}.getOrDefault(false)
     }
-    fun status(instance:String)=SableRelayStatus(if(error!=null)"ERROR" else if(bindings.values.any {it.instance==instance && it.confirmed})"CONNECTED" else "WAITING",
-        bindings.values.count {it.instance==instance && it.confirmed},dropped.get(),error ?: if(bindings.values.any {it.instance==instance && it.confirmed}) "Sable UDP 왕복 통신을 확인했습니다." else "공유 게임 포트의 UDP 포워딩과 클라이언트 접속을 확인하세요. 미연결 시 TCP 대체 통신을 사용합니다.")
+    fun status(instance:String?=null)=SableRelayStatus(if(error!=null)"ERROR" else if(bindings.values.any {(instance==null || it.instance==instance) && it.confirmed})"CONNECTED" else "WAITING",
+        bindings.values.count {(instance==null || it.instance==instance) && it.confirmed},dropped.get(),error ?: if(bindings.values.any {(instance==null || it.instance==instance) && it.confirmed}) "Sable UDP 왕복 통신을 확인했습니다." else "공유 게임 포트의 UDP 포워딩과 클라이언트 접속을 확인하세요. 미연결 시 TCP 대체 통신을 사용합니다.")
     fun removeStream(runner:String,stream:Int){bindings.values.filter {it.runner==runner && it.stream==stream}.forEach(::remove)}
     fun removeRunner(runner:String){bindings.values.filter {it.runner==runner}.forEach(::remove)}
     private fun remove(binding:Binding){bindings.remove(binding.token,binding);binding.peer?.let {peers.remove(it,binding)}}

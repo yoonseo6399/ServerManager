@@ -291,6 +291,13 @@ class GameHostService(private val home:Path,private val version:String,private v
             }
             "relay-session" -> if(replacementPrepared)fail("HOST_REPLACEMENT_PENDING") else relay().onSession()
             "relay-busy" -> ok(mapOf("busy" to (relayRole?.busy()==true)))
+            "prepare-direct-sable" -> {
+                if(replacementPrepared)return fail("HOST_REPLACEMENT_PENDING")
+                val instance=runCatching {mapper.treeToValue(m.path("instance"),Instance::class.java)}.getOrNull() ?: return fail("BAD_REQUEST")
+                val directory=runCatching {Path.of(m.path("directory").asText())}.getOrNull() ?: return fail("BAD_REQUEST")
+                if(!instance.id.matches(Regex("[A-Za-z0-9-]{1,64}")) || !directory.isDirectory())return fail("BAD_REQUEST")
+                ok(mapOf("environment" to relay().prepareSable(instance,directory)))
+            }
             else -> fail("UNKNOWN_COMMAND")
         }
     }
@@ -329,7 +336,7 @@ class GameHostService(private val home:Path,private val version:String,private v
             }}
         } catch(_:Exception) {}
         val code=runCatching {process.waitFor()}.getOrDefault(-1)
-        game.exitCode=code;persist()
+        game.exitCode=code;relayRole?.stopped(game.id);persist()
         controller?.send(mapOf("t" to "exit","id" to game.id,"pid" to game.pid,"code" to code))
     }
     override fun close() {
@@ -498,6 +505,7 @@ class GameHostClient private constructor(private val socket:Socket,private val r
     /** Direct-relay control traffic (manager messages for the relay role that lives in the host). */
     fun relayForward(json:String)=send(mapOf("t" to "relay","body" to json))
     fun relaySession()=send(mapOf("t" to "relay-session"))
+    fun prepareDirectSable(instance:Instance,directory:Path):Map<String,String> = request(mapOf("t" to "prepare-direct-sable","instance" to instance,"directory" to directory.toString()),15000).path("environment").fields().asSequence().associate {it.key to it.value.asText()}
     fun relayBusy():Boolean=runCatching {request(mapOf("t" to "relay-busy")).path("busy").asBoolean(true)}.getOrDefault(true)
     fun prepareReplacement():Boolean=prepareReplacementState().ready
     /** One poll of the drain procedure. Hosts without the `state` field are the old all-or-nothing kind: `prepared` alone decides. */

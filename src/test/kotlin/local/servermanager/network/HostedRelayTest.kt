@@ -103,4 +103,66 @@ class HostedRelayTest {
         clients.values.forEach {it.close()};clients.clear()
         GameHostClient.connect(agentHome,"cleanup",retryMillis=10000).track().stop(inst,Files.readAllLines(gameDir/"launches.txt").first().trim().toLong())
     }
+    @Test fun `resident Sable bridge authenticates locally and UDP survives every controller disconnect`() {
+        val host="play.example.com";val inst="sable-inst"
+        val relayId=UUID.randomUUID().toString();val agentId=UUID.randomUUID().toString()
+        val relayHome=Files.createTempDirectory("udp-host-relay");val agentHome=Files.createTempDirectory("udp-host-game");val gameDir=Files.createTempDirectory("udp-host-files")
+        val mods=gameDir.resolve("mods").also {it.createDirectories()}
+        java.util.zip.ZipOutputStream(mods.resolve("sable-fixture.jar").outputStream()).use {z->z.putNextEntry(java.util.zip.ZipEntry("META-INF/neoforge.mods.toml"));z.write("modLoader=\"javafml\"\nloaderVersion=\"[4,)\"\nlicense=\"MIT\"\n[[mods]]\nmodId=\"sable\"\nversion=\"2.0.6\"\n".toByteArray());z.closeEntry()}
+        RelayConsentStore(relayHome){null}.set(true,"test")
+        listOf(relayHome,agentHome).forEach {assertTrue(GameHostService(it,"test").track().start())}
+        val echo=ServerSocket(0).track();val source=java.util.concurrent.atomic.AtomicInteger()
+        Thread.ofVirtual().start {while(!echo.isClosed){val s=runCatching {echo.accept()}.getOrNull() ?: break;source.set(s.port);Thread.ofVirtual().start {s.use {runCatching {val b=ByteArray(4096);while(true){val n=s.getInputStream().read(b);if(n<0)break;s.getOutputStream().write(b,0,n);s.getOutputStream().flush()}}}}}}
+        val gameUdp=java.net.DatagramSocket(java.net.InetSocketAddress("127.0.0.1",echo.localPort)).track()
+        Thread.ofVirtual().start {while(!gameUdp.isClosed)try {val p=java.net.DatagramPacket(ByteArray(256),256);gameUdp.receive(p);val b=if(p.data[0].toInt()==3)byteArrayOf(4) else byteArrayOf(0,42);gameUdp.send(java.net.DatagramPacket(b,b.size,p.socketAddress))}catch(_:Exception){break}}
+        val gamePort=freePort();var securePort=freePort();while(securePort==gamePort)securePort=freePort()
+        val homes=mapOf(relayId to relayHome,agentId to agentHome);val clients=ConcurrentHashMap<String,GameHostClient>()
+        val store=DirectRelayStore(Files.createTempDirectory("udp-host-store"));lateinit var manager:DirectRelayManager
+        val world=object:RelayWorld {
+            override fun runner(id:String)=homes[id]?.let {RunnerDevice(id,id,"MAC","o","k","n",allowedInstanceIds=setOf(inst))}
+            override fun connected(id:String)=clients[id]?.let {!it.disconnected}==true
+            override fun runnerName(id:String)=id
+            override fun routes()=listOf(Triple(inst,agentId,listOf(host)))
+            override fun send(runnerId:String,message:RunnerMessage)=clients[runnerId]?.relayForward(mapper.writeValueAsString(message)) ?: false
+            override fun resolveHost(host:String)=emptyList<String>()
+            override fun gamePort()=gamePort
+        }
+        manager=DirectRelayManager(store,world)
+        fun attach(){homes.forEach {(id,home)->val c=GameHostClient.connect(home,"udp-controller",retryMillis=10000).track();c.onRelay={body->manager.onRunnerMessage(id,mapper.readValue<RunnerMessage>(body))};clients[id]=c;c.relaySession()}}
+        attach();await("host capability"){manager.view().sableUdpBlockers.isEmpty() && manager.consent(relayId)?.allowed==true}
+        manager.save(DirectRelaySave(DirectRelayConfig(true,relayId,securePort=securePort,agentHost="127.0.0.1",sableUdpEnabled=true),store.revision()))
+        val instance=Instance(inst,"fixture",loaderVersion="21.1.249",port=echo.localPort,memoryMb=512,javaPath="java")
+        val env=clients.getValue(agentId).prepareDirectSable(instance,gameDir);assertEquals("READY",env["status"])
+        val bridge=env.getValue("SM_SABLE_BRIDGE_PORT");val key=env.getValue("SM_SABLE_BRIDGE_KEY")
+        val started=clients.getValue(agentId).start(inst,listOf(javaBin(),"-cp",System.getProperty("java.class.path"),"local.servermanager.FakeGameMain",gameDir.toString(),"chatter"),gameDir,System.getenv()+env.filterKeys {it.startsWith("SM_")},port=echo.localPort)
+        try {
+            await("UDP-ready host",tick={manager.reconcile()}){manager.isReady(relayId)}
+            Socket("127.0.0.1",gamePort).use {player->
+                player.soTimeout=4000;val hello=handshake(host);player.getOutputStream().write(hello);player.getOutputStream().flush();assertContentEquals(hello,player.getInputStream().readNBytes(hello.size))
+                val token=UUID.randomUUID().toString()
+                fun register(secret:String,port:Int):Int=java.net.http.HttpClient.newHttpClient().send(java.net.http.HttpRequest.newBuilder(java.net.URI("http://127.0.0.1:$bridge/register")).header("Authorization","Bearer $secret").POST(java.net.http.HttpRequest.BodyPublishers.ofString("$port $token")).build(),java.net.http.HttpResponse.BodyHandlers.discarding()).statusCode()
+                assertEquals(403,register("invalid",source.get()));assertEquals(403,register(key,1));assertEquals(204,register(key,source.get()))
+                java.net.DatagramSocket(java.net.InetSocketAddress("127.0.0.1",0)).use {udp->
+                    udp.soTimeout=4000
+                    fun exchange(b:ByteArray):ByteArray {udp.send(java.net.DatagramPacket(b,b.size,java.net.InetSocketAddress("127.0.0.1",gamePort)));val p=java.net.DatagramPacket(ByteArray(128),128);udp.receive(p);return p.data.copyOf(p.length)}
+                    assertContentEquals(byteArrayOf(4),exchange(byteArrayOf(3,36)+token.toByteArray()));assertContentEquals(byteArrayOf(0,42),exchange(byteArrayOf(5)))
+                    clients.values.forEach {it.close()};clients.clear()
+                    Thread.sleep(200)
+                    assertContentEquals(byteArrayOf(0,42),exchange(byteArrayOf(5)),"UDP bypasses manager and detached controllers")
+                    assertTrue(roundTrip(player,"TCP survives too"))
+                    attach();await("controller reattached",tick={manager.reconcile()}){manager.isReady(relayId)}
+                    assertContentEquals(byteArrayOf(0,42),exchange(byteArrayOf(5)))
+                    // The same resident helper endpoint and key remain valid after reattachment.
+                    val token2=UUID.randomUUID().toString()
+                    val req=java.net.http.HttpRequest.newBuilder(java.net.URI("http://127.0.0.1:$bridge/register")).header("Authorization","Bearer $key").POST(java.net.http.HttpRequest.BodyPublishers.ofString("${source.get()} $token2")).build()
+                    assertEquals(204,java.net.http.HttpClient.newHttpClient().send(req,java.net.http.HttpResponse.BodyHandlers.discarding()).statusCode())
+                    assertContentEquals(byteArrayOf(4),exchange(byteArrayOf(3,36)+token2.toByteArray()))
+                }
+            }
+        } finally {
+            clients.values.forEach {it.close()};clients.clear()
+            GameHostClient.connect(agentHome,"cleanup",retryMillis=10000).track().stop(inst,started.process.pid())
+        }
+    }
+
 }

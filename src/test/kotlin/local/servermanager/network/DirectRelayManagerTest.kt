@@ -108,6 +108,54 @@ class DirectRelayManagerTest {
         val stale=w.h.store.revision()-1
         assertFails {w.h.manager.save(DirectRelaySave(w.h.store.config(),stale))}
     }
+    @Test fun `UDP opt in requires both authenticated game and relay host capabilities`() {
+        val w=world()
+        // Simulate an old resident host behind an updated controller: version must come from the host report.
+        w.h.manager.onRunnerMessage(w.game.id,RunnerMessage("relay-consent",detail=com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().writeValueAsString(w.game.consent.read())))
+        val next=DirectRelayConfig(true,w.relay.id,securePort=w.secure,agentHost="127.0.0.1",sableUdpEnabled=true)
+        assertFailsWith<IllegalArgumentException>{w.h.manager.save(DirectRelaySave(next,w.h.store.revision()))}
+        assertTrue(w.h.manager.view().sableUdpBlockers.contains(w.game.id.take(4)))
+        w.game.role.onSession()
+        val saved=w.h.manager.save(DirectRelaySave(next,w.h.store.revision()))
+        assertTrue(saved.config.sableUdpEnabled)
+        await("UDP relay ready",tick=w.h::pump){w.h.manager.isReady(w.relay.id)}
+        val view=w.h.manager.view().relays.single {it.runnerId==w.relay.id}
+        assertTrue(view.sableUdpCapable)
+        assertEquals(listOf("TCP","UDP","TCP"),view.router.map {it.protocol})
+        assertEquals(listOf(w.h.gamePort,w.h.gamePort,w.secure),view.router.map {it.externalPort})
+        assertEquals("WAITING",w.h.manager.sableStatus(w.inst).state)
+        w.h.manager.onDisconnect(w.game.id)
+        assertFailsWith<IllegalArgumentException>{w.h.manager.save(DirectRelaySave(next,w.h.store.revision()))}
+        // TCP mode can still be selected while an old host is waiting for an idle update.
+        assertFalse(w.h.manager.save(DirectRelaySave(next.copy(sableUdpEnabled=false),w.h.store.revision())).config.sableUdpEnabled)
+    }
+    @Test fun `UDP listener recovers after port conflict without replacing live TCP streams`() {
+        val w=world()
+        val blocker=java.net.DatagramSocket(java.net.InetSocketAddress("127.0.0.1",w.h.gamePort)).track()
+        w.h.manager.save(DirectRelaySave(DirectRelayConfig(true,w.relay.id,securePort=w.secure,agentHost="127.0.0.1",sableUdpEnabled=true),w.h.store.revision()))
+        await("TCP tunnel up",tick=w.h::pump){w.h.manager.view().relays.single {it.runnerId==w.relay.id}.diagnostics.getValue("portConflict").status=="OK" && w.h.manager.view().agents.any {it.relays.any {a->a.state=="CONNECTED"}}}
+        player(w.h.gamePort).use {s->
+            assertTrue(roundTrip(s,"TCP during UDP conflict"));assertFalse(w.h.manager.isReady(w.relay.id))
+            assertEquals("ERROR",w.h.manager.sableStatus(w.inst).state)
+            blocker.close()
+            await("UDP retry recovers",tick=w.h::pump){w.h.manager.isReady(w.relay.id)}
+            assertTrue(roundTrip(s,"TCP after UDP retry"))
+        }
+    }
+    @Test fun `per instance UDP status never borrows another servers confirmed connection`() {
+        val w=world();enable(w)
+        val cfg=w.h.store.config().copy(sableUdpEnabled=true)
+        w.h.manager.save(DirectRelaySave(cfg,w.h.store.revision()))
+        await("ready",tick=w.h::pump){w.h.manager.isReady(w.relay.id)}
+        val mapper=com.fasterxml.jackson.module.kotlin.jacksonObjectMapper()
+        // The aggregate belongs to another server; this instance must continue to show WAITING.
+        val body=RunnerRelayReport(w.relay.consent.read(),RelayHubStatus(true,w.h.gamePort,true,w.secure,1,emptyList(),emptyList(),emptyMap(),emptyMap(),null,
+            SableRelayStatus("CONNECTED",1),mapOf("another" to SableRelayStatus("CONNECTED",1))),emptyList(),true,true)
+        w.h.manager.onRunnerMessage(w.relay.id,RunnerMessage("drp-status",version="DRP1_UDP1",detail=mapper.writeValueAsString(body)))
+        assertEquals("WAITING",w.h.manager.sableStatus(w.inst).state)
+        assertEquals("CONNECTED",w.h.manager.sableStatus("another").state)
+    }
+
     @Test fun `default install is not allowed and a remote owner cannot enable the relay`() {
         val w=world(consent=false)
         assertFalse(w.relay.consent.read().allowed)

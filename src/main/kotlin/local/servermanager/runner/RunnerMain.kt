@@ -106,7 +106,7 @@ object RunnerMain {
             "status" -> store.read()
             else -> error("allow, revoke, status 중 하나를 지정하세요")
         }
-        println("관리 웹 소유자의 TCP 중계 사용 허용: "+(if(state.allowed)"허용" else "허용 안 함")+" (출처: "+state.source+(state.migratedFrom?.let {", 이전된 기존 설정: $it"} ?: "")+(if(state.environmentLocked)", 환경변수로 고정" else "")+")")
+        println("관리 웹 소유자의 게임 중계 사용 허용 (TCP / Sable UDP): "+(if(state.allowed)"허용" else "허용 안 함")+" (출처: "+state.source+(state.migratedFrom?.let {", 이전된 기존 설정: $it"} ?: "")+(if(state.environmentLocked)", 환경변수로 고정" else "")+")")
     }
     private fun pair(args:Array<String>) {
         val url=args.firstOrNull { it.startsWith("--manager-url=") }?.substringAfter('=')?.trimEnd('/') ?: error("--manager-url=https://관리주소 를 지정하세요")
@@ -175,6 +175,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     @Volatile private var tcpRelay:TcpRelayPeer?=null
     @Volatile private var sessionToken:String?=null
     /** Direct relay (DRP1) survives manager disconnects; only local consent withdrawal or process exit tears it down. */
+    @Volatile private var directSable=false
     private val directRelay=DirectRelayRunnerRole(home,::send,{id->configs[id]?.takeIf {processes[id]?.isAlive==true && id in ready && id !in stopping}?.port},{id->processes[id]?.isAlive==true && id in ready && id !in stopping})
     private val processes=ConcurrentHashMap<String,Process>()
     private val gameStreams=ConcurrentHashMap<Int,Socket>()
@@ -546,7 +547,10 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                         }
                         "relay-opened" -> message.streamId?.takeIf {it<0}?.let {tcpRelay?.ready(it)}
                         "relay-closed" -> message.streamId?.takeIf {it<0}?.let {tcpRelay?.end(it)}
-                        "drp-relay-config","drp-agent-config","drp-ticket" -> hosted?.relayForward(mapper.writeValueAsString(message)) ?: directRelay.onMessage(message)
+                        "drp-relay-config","drp-agent-config","drp-ticket" -> {
+                            if(message.type=="drp-agent-config")directSable=runCatching {mapper.readTree(message.detail).path("sableUdpEnabled").asBoolean(false)}.getOrDefault(false)
+                            hosted?.relayForward(mapper.writeValueAsString(message)) ?: directRelay.onMessage(message)
+                        }
                         "update-request" -> if(message.detail in setOf("WHEN_IDLE","PAUSE_TRANSFER")) {
                             requestUpdate(message.detail=="PAUSE_TRANSFER",message.command,message.state=="BETA_OK",message.state=="STABLE_ROLLBACK")
                         }
@@ -885,7 +889,12 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         val crashesBefore=CrashReports.snapshot(serverDir(id))
         instanceRoot(id).resolve("exit.json").deleteIfExists()
         val builder=ProcessBuilder(args).directory(serverDir(id).toFile()).redirectErrorStream(true)
-        val udpStatus=runCatching {sable.prepare(instance,serverDir(id),builder)}.getOrElse {"UDP 초기화 실패 · TCP 대체 통신을 사용합니다"}
+        val udpStatus=runCatching {
+            val resident=hosted
+            if(directSable) {
+                val environment=resident?.prepareDirectSable(instance,serverDir(id)) ?: directRelay.prepareSable(instance,serverDir(id));builder.environment().putAll(environment.filterKeys {it.startsWith("SM_SABLE_BRIDGE_")});environment["status"] ?: "TCP_FALLBACK"
+            } else sable.prepare(instance,serverDir(id),builder)
+        }.getOrElse {"UDP 초기화 실패 · TCP 대체 통신을 사용합니다"}
         send(RunnerMessage("sable-status",id,detail=udpStatus))
         val process=hosted?.launch(id,args,serverDir(id),builder.environment().toMap(),instance.port) ?: builder.start()
         onSpawned()
@@ -915,7 +924,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                     ready.add(id);if(id !in stopping)send(RunnerMessage("state",id,"RUNNING",version(),pid=process.pid()))
                 }
             } } }
-            val code=process.waitFor();sable.stopped(id);queryPorts.remove(id)
+            val code=process.waitFor();sable.stopped(id);directRelay.stopped(id);queryPorts.remove(id)
             // Release the host record only after the exit report is durable below; until then the host refuses a second start.
             atomicText(instanceRoot(id).resolve("exit.json"),mapper.writeValueAsString(RunnerExitReport(code,CrashReports.changed(serverDir(id),crashesBefore),if(id in stopTimeouts)"STOP_TIMEOUT" else if(id in idleStops)"IDLE" else null)))
             ready.remove(id)
