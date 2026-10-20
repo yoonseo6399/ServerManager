@@ -29,6 +29,12 @@ object RunnerHostControllerFixture {
         System.`in`.bufferedReader().forEachLine {line ->
             when(line) {
                 "UPDATE" -> {val apply=agent.restartForUpdate();println("UPDATE $apply");if(apply){agent.shutdownGracefully();kotlin.system.exitProcess(0)}}
+                "HOST_FAILURE" -> {
+                    val coordinator=RunnerAgent::class.java.getDeclaredField("coordinator").also {it.isAccessible=true}.get(agent) as UpdateCoordinator
+                    coordinator.update(UpdateComponents.GAME_HOST,"previous",RunnerAgent.version(),"FAILED",error="fixture startup timeout")
+                    println("HOST_FAILURE_ADDED")
+                }
+                "HOST_CHECK" -> {agent.tryReplaceHost();println("HOST_CHECKED")}
                 "EXIT" -> {RunnerAgent::class.java.getDeclaredField("updatePauseRequested").also {it.isAccessible=true}.set(agent,true);agent.shutdownGracefully();kotlin.system.exitProcess(0)}
                 else -> agent.onText(socket,line,true)
             }

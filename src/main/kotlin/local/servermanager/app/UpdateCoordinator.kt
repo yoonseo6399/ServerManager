@@ -100,6 +100,15 @@ class UpdateCoordinator(private val home:Path,private val clock:()->Instant={Ins
     @Synchronized fun snapshot(hostMode:HostModeState?=null)=UpdateDetail(UpdateComponents.all.map {components[it] ?: ComponentUpdate(it,"unknown",null)},log.toList(),hostMode)
     @Synchronized fun logSince(after:Long)=log.filter {it.seq>after}
     @Synchronized fun current(component:String)=components[component]
+    /** Only call with a version from the currently authenticated host connection, never the endpoint file alone. */
+    @Synchronized fun reconcileHost(running:String,expected:String):Boolean {
+        if(running!=expected)return false
+        val row=components[UpdateComponents.GAME_HOST]
+        if(row?.target!=null && row.target!=expected)return false
+        if(row?.current==running && row.target==null && row.stage=="DONE" && row.error==null)return false
+        update(UpdateComponents.GAME_HOST,running,null,"DONE",message="상주 서비스 연결 확인: $running")
+        return true
+    }
     /** After a restart: a pending update whose target is now the running version is complete; anything else keeps its state. */
     @Synchronized fun reconcileStart(component:String,running:String,failedVersion:String?) {
         val c=components[component] ?: return

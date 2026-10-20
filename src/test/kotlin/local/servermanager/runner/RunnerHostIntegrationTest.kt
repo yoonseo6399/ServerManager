@@ -66,6 +66,16 @@ class RunnerHostIntegrationTest {
                 await("console replay"){messages.any {it.type=="log"}}
                 assertTrue(messages.any {it.type=="update-detail" && it.detail?.contains("FAILED")==true},"same-version fixture controller reports staged-version rollback, not successful binary update")
                 echo("replacement");assertEquals(1,(game/"launches.txt").readLines().size)
+                val since=messages.size
+                next.println("HOST_FAILURE");await("failure fixture recorded"){lines.contains("HOST_FAILURE_ADDED")}
+                next.println("HOST_CHECK")
+                await("authenticated host clears stale failure while game stays live"){
+                    messages.drop(since).filter {it.type=="update-detail"}.any {m->
+                        val rows=mapper.readTree(m.detail).path("components")
+                        rows.any {it.path("component").asText()=="GAME_HOST" && it.path("stage").asText()=="DONE" && it.path("current").asText()==Path.of("VERSION").readText().trim() && it.path("error").isNull}
+                    }
+                }
+                echo("after-status-recovery");assertTrue(ProcessHandle.of(pid).orElseThrow().isAlive)
                 next.println("EXIT");assertTrue(second.waitFor(10,TimeUnit.SECONDS));assertTrue(folder.resolve("dirty").exists());assertTrue(ConsolePosition.load(folder.resolve("console.seq"))>=consoleBefore)
                 println("RUNNER-HOST-PROOF fakeGamePid=$pid hostPid=${GameHostClient.readEndpoint(home)!!.pid} controllers=${children.map {it.pid()}} relayPreserved=true consoleReattached=true")
             }

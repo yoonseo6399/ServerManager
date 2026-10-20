@@ -401,8 +401,12 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     /** Called from the connection loop; cheap when there is nothing to do. One attempt at a time, retried every few seconds. */
     fun tryReplaceHost() {
         val h=hosted ?: return
-        val running=h.hostVersion() ?: return
-        if(running==version() || hostModeState.mode!="SERVICE" || updatePauseRequested || currentJarPath()==null)return
+        val running=h.hostVersion() ?: h.connection()?.hostVersion ?: return
+        if(running==version()) {
+            if(coordinator.reconcileHost(running,version())){hostReplaceFailures=0;lastHostWait="";reportUpdateDetail()}
+            return
+        }
+        if(hostModeState.mode!="SERVICE" || updatePauseRequested || currentJarPath()==null)return
         val now=System.currentTimeMillis()
         if(now<hostReplaceNotBefore)return
         if(!hostReplaceBusy.compareAndSet(false,true))return
