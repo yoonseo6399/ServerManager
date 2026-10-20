@@ -87,6 +87,7 @@ class HostedGames(private val home:Path,private val controllerId:String,private 
     /** Relay control traffic goes to the role that lives in the host; manager-bound output comes back through [onRelay]. */
     fun relayForward(json:String):Boolean=connection()?.relayForward(json) ?: false
     fun relaySession():Boolean=connection()?.relaySession() ?: false
+    fun prepareDirectSable(instance:Instance,directory:Path)=connection()?.prepareDirectSable(instance,directory) ?: error("상주 서비스에 연결하지 못했습니다")
     fun onRelay(handler:(String)->Unit){relayOutput=handler;connection()?.onRelay=handler}
     fun hostProtocol():Int?=client?.takeIf {!it.disconnected}?.hostProtocol
     fun hostVersion():String?=client?.takeIf {!it.disconnected}?.hostVersion

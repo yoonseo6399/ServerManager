@@ -2,9 +2,10 @@ import {useEffect,useRef,useState} from 'react';
 import {api,ApiError} from './http';
 import {useAuth} from './Auth';
 import {SaveBar} from './SaveBar';
-type Relay={runnerId:string;name:string;consentAllowed:boolean;active:boolean;ready:boolean;connected:boolean;capable:boolean;streams:number;impactIfCut:string;router:{label:string;externalPort:number;internalAddress:string;internalPort:number}[];diagnostics:Record<string,{status:string;detail:string}>};
-type Config={enabled:boolean;relayRunnerId:string|null;candidateRunnerId:string|null;securePort:number;agentHost:string;publicHost:string;graceSeconds:number;retiring:Record<string,number>;relayHosts:Record<string,{agentHost:string;publicHost:string}>};
-type View={revision:number;phase:string;message:string;gamePort?:number;config:Config;relays:Relay[];agents:{runnerId:string;name:string;relays:{relayId:string;state:string;reason:string|null;streams:number}[]}[]};
+type UdpStatus={state:string;connections:number;dropped:number;message:string};
+type Relay={sableUdpCapable?:boolean;sableUdp?:UdpStatus|null;runnerId:string;name:string;consentAllowed:boolean;active:boolean;ready:boolean;connected:boolean;capable:boolean;streams:number;impactIfCut:string;router:{label:string;externalPort:number;internalAddress:string;internalPort:number;protocol?:string}[];diagnostics:Record<string,{status:string;detail:string}>};
+type Config={sableUdpEnabled?:boolean;enabled:boolean;relayRunnerId:string|null;candidateRunnerId:string|null;securePort:number;agentHost:string;publicHost:string;graceSeconds:number;retiring:Record<string,number>;relayHosts:Record<string,{agentHost:string;publicHost:string}>};
+type View={revision:number;phase:string;message:string;gamePort?:number;sableUdpBlockers?:string[];config:Config;relays:Relay[];agents:{runnerId:string;name:string;relays:{relayId:string;state:string;reason:string|null;streams:number}[]}[]};
 const eligible=(r:Relay)=>r.connected&&r.capable&&r.consentAllowed;
 const availability=(r:Relay)=>!r.connected?' · 오프라인':!r.capable?' · 상태 보고 대기 / 업데이트 확인':!r.consentAllowed?' · 로컬 허용 필요':'';
 export function DirectRelaySettings(){
@@ -17,20 +18,27 @@ export function DirectRelaySettings(){
  async function run(action:()=>Promise<unknown>,reset=true){setBusy(true);setError('');try{try{await action();}catch(e){if(!(e instanceof ApiError)||e.status!==428)throw e;await auth.login(true);await action();}await load(reset);}catch(e){if(alive.current)setError((e as Error).message);}finally{if(alive.current)setBusy(false);}}
  const first=!view?.config.relayRunnerId||!view.config.enabled;
  const initial=config?.relayRunnerId?view?.relays.find(r=>r.runnerId===config.relayRunnerId):null;
+ const udpTarget=initial||view?.relays.find(r=>r.runnerId===view.config.relayRunnerId);
  const candidate=view?.relays.find(r=>r.runnerId===runner);
  const options=()=>view?.relays.map(r=><option key={r.runnerId} value={r.runnerId} disabled={!eligible(r)}>{r.name}{availability(r)}</option>);
  return <section className="settings-panel" aria-label="직접 TCP 중계">
-  <h2>직접 TCP 중계</h2><p>플레이어 → 중계 실행기 → 게임 실행기 → Minecraft. 관리 Mac은 게임 데이터를 전달하지 않습니다.</p>
+  <h2>직접 중계 · TCP / Sable UDP</h2><p>플레이어 → 중계 실행기 → 게임 실행기 → Minecraft. 관리 Mac은 게임 데이터를 전달하지 않습니다.</p>
   {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}
   <p role="status">{view?`${view.phase} · ${view.message}`:'중계 상태를 불러오는 중입니다…'}</p>
   {config&&view&&<>
-   <p aria-label="공유 게임 접속 포트">플레이어 접속·SRV 포트: <strong>{view.gamePort??view.relays[0]?.router[0]?.externalPort??'미확인'}</strong>. 아래 ‘게임 주소·DNS·기존 관리 Mac 경유 중계’의 공유 게임 포트에서 변경합니다. 실행기 연결 포트와는 별개입니다.</p>
+   <p aria-label="공유 게임 접속 포트">플레이어 접속·SRV 포트: <strong>{view.gamePort??view.relays[0]?.router[0]?.externalPort??'미확인'}</strong>. 아래 ‘공통 접속 주소·포트·DNS’의 공유 게임 포트에서 변경합니다. 실행기 연결 포트와는 별개입니다.</p>
    {first?<>
     <label>최초 중계 실행기<select disabled={busy} aria-label="최초 중계 실행기" value={config.relayRunnerId||''} onChange={e=>edit({...config,relayRunnerId:e.target.value||null})}><option value="">선택하세요</option>{options()}</select></label>
     <p>중계 실행기를 선택하고 ‘직접 중계 사용’을 켠 뒤 변경 사항을 저장하세요. 아직 상태를 보고하지 않은 실행기도 목록에 표시하며, 확인 전에는 선택할 수 없습니다.</p>
    </>:<p>현재 중계 실행기: <strong>{view.relays.find(r=>r.runnerId===view.config.relayRunnerId)?.name||view.config.relayRunnerId}</strong></p>}
    {!view.relays.length&&<p role="status">등록된 활성 실행기가 없습니다. 서버 실행기에서 먼저 등록하세요.</p>}
    <label className="check-label"><input type="checkbox" checked={config.enabled} disabled={busy} onChange={e=>edit({...config,enabled:e.target.checked})}/>직접 중계 사용</label>
+   <h3>전송 방식</h3><p>TCP 중계는 기본으로 사용합니다. Sable UDP는 별도로 선택합니다.</p>
+   <label className="check-label"><input type="checkbox" checked={!!config.sableUdpEnabled} disabled={busy||!config.sableUdpEnabled&&(!udpTarget?.sableUdpCapable||!!view.sableUdpBlockers?.length)} onChange={e=>edit({...config,sableUdpEnabled:e.target.checked})}/>직접 중계에 Sable UDP 추가</label>
+   {!udpTarget?.sableUdpCapable&&<p className="muted">중계 실행기를 선택하고 실행기·상주 게임호스트의 직접 UDP 지원 보고를 기다리세요.</p>}
+   {!!view.sableUdpBlockers?.length&&<p role="status">직접 UDP 업데이트·연결 확인 필요: {view.sableUdpBlockers.join(', ')}</p>}
+   <p className="muted">중계 컴퓨터에 UDP {view.gamePort??'공유 게임 포트'}도 포워딩해야 합니다. UDP 인증은 해당 플레이어의 실제 TCP 연결과 묶습니다. 게임 데이터는 관리 Mac을 거치지 않으며 중계↔게임 실행기 구간은 암호화된 TCP 터널을 사용합니다. 회선 손실 시 지연이 늘 수 있습니다.</p>
+   <p className="muted">NeoForge 1.21.1 · Sable 2.0.6 지원. 보조 모드와 등록 연결은 서버 시작 때 준비합니다. 이미 실행 중인 게임은 다음 정상 시작부터 적용되며, 미연결 시 TCP 대체 통신을 사용합니다.</p>
    <div className="form-grid">
     <label>실행기 연결 포트<input disabled={busy} type="number" min={1024} max={65535} value={config.securePort} onChange={e=>edit({...config,securePort:+e.target.value})}/></label>
     <label>전환 유예 시간 (초)<input disabled={busy} type="number" value={config.graceSeconds} onChange={e=>edit({...config,graceSeconds:+e.target.value})}/></label>
@@ -39,7 +47,7 @@ export function DirectRelaySettings(){
    </div>
    {config.enabled&&first&&(!initial||!eligible(initial))&&<p role="status">{!initial?'저장하려면 최초 중계 실행기를 선택하세요.':'선택한 실행기의 온라인 연결·중계 기능·로컬 허용을 확인해야 저장할 수 있습니다.'}</p>}
    <SaveBar label="직접 중계" dirty={dirty.current} busy={busy} disabled={config.enabled&&first&&(!initial||!eligible(initial))} onReset={()=>adopt(view)} onSave={()=>run(async()=>{const next=await api<View>('/admin/direct-relay','PUT',{config,revision:draftRevision.current});if(alive.current){setView(next);adopt(next);}})}/>
-   <p>설치 화면에서 “관리 웹 소유자의 TCP 중계 사용 허용”을 먼저 켜세요. 공유기·방화벽·DNS는 자동으로 변경하지 않습니다.</p>
+   <p>설치 화면에서 “관리 웹 소유자의 게임 중계 사용 허용 (TCP / Sable UDP)”을 먼저 켜세요. 기존 버전에서는 “TCP 중계 사용 허용”으로 표시됩니다. 공유기·방화벽·DNS는 자동으로 변경하지 않습니다.</p>
    {!first&&<>
     <label>새 중계 실행기<select disabled={busy} aria-label="새 중계 실행기" value={runner} onChange={e=>setRunner(e.target.value)}><option value="">선택하세요</option>{options()}</select></label>
     <div className="actions">
@@ -50,11 +58,13 @@ export function DirectRelaySettings(){
    </>}
    {view.relays.map(r=><div className="member" key={r.runnerId}>
     <h3>{r.name}</h3><p>연결: {r.connected?'온라인':'오프라인'} · 로컬 허용: {!r.capable?'미확인 (상태 보고 대기)':r.consentAllowed?'허용':'거부'} · 활성: {r.active?'켜짐':'꺼짐'} · 준비: {r.ready?'완료':'대기'} · 접속 {r.streams}개</p>
-    <h4>공유기 포트포워딩 입력값</h4><table><thead><tr><th>용도</th><th>외부 TCP 포트</th><th>내부 주소</th><th>내부 TCP 포트</th></tr></thead><tbody>{r.router.map((row,i)=><tr key={i}><td>{row.label}</td><td>{row.externalPort}</td><td>{row.internalAddress||'상태 보고 대기'}</td><td>{row.internalPort}</td></tr>)}</tbody></table>
+    {config.sableUdpEnabled&&<p role="status">Sable UDP: {r.sableUdp?.state||'보고 대기'} · 확인된 접속 {r.sableUdp?.connections||0}개 · {r.sableUdp?.message||'UDP 왕복은 아직 확인되지 않았습니다'}</p>}
+    <h4>공유기 포트포워딩 입력값</h4><div className="relay-port-scroll"><table className="relay-port-table"><thead><tr><th>용도</th><th>프로토콜</th><th>외부 포트</th><th>내부 주소</th><th>내부 포트</th></tr></thead><tbody>{r.router.map((row,i)=><tr key={i}><td>{row.label}</td><td>{row.protocol||'TCP'}</td><td>{row.externalPort}</td><td>{row.internalAddress||'상태 보고 대기'}</td><td>{row.internalPort}</td></tr>)}</tbody></table></div>
     {Object.entries(r.diagnostics).map(([key,d])=><p key={key}>{{consent:'로컬 허용',portConflict:'포트 상태',agentConnection:'실행기 연결',dnsTarget:'DNS 대상',externalReachability:'외부 도달 여부'}[key]||key}: {d.status==='UNVERIFIED'?'미검증':d.status} · {d.detail}</p>)}
-    <button disabled={busy||!eligible(r)} onClick={()=>run(async()=>{const result=await api<{status:string;detail:string}>('/admin/direct-relay/external-check','POST',{runnerId:r.runnerId});setNotice('관리 서버 위치에서의 접속 시험: '+(result.status==='REACHABLE_FROM_MANAGER'?'연결 가능':result.status==='NOT_REACHABLE_FROM_MANAGER'?'연결 불가':'미검증')+' · '+result.detail);},false)}>관리 서버 위치에서 연결 검사</button>
+    <button disabled={busy||!eligible(r)} onClick={()=>run(async()=>{const result=await api<{status:string;detail:string}>('/admin/direct-relay/external-check','POST',{runnerId:r.runnerId});setNotice('관리 서버 위치에서의 접속 시험: '+(result.status==='REACHABLE_FROM_MANAGER'?'연결 가능':result.status==='NOT_REACHABLE_FROM_MANAGER'?'연결 불가':'미검증')+' · '+result.detail);},false)}>관리 서버 위치에서 TCP 연결 검사</button>
     <button disabled={busy||dirty.current||!r.active} onClick={()=>{if(confirm(r.impactIfCut+'\n즉시 차단할까요?'))run(()=>api('/admin/direct-relay/cut','POST',{runnerId:r.runnerId}));}}>즉시 차단</button>
    </div>)}
+   <p className="muted">연결 검사는 TCP 포트만 검사합니다. UDP는 실제 Sable 왕복이 확인되어야 연결됨으로 표시합니다.</p>
    {view.agents.map(a=><div key={a.runnerId}><h3>{a.name} 연결</h3>{a.relays.map(r=><p key={r.relayId}>{r.state} {r.reason||''} · {r.streams}개</p>)}</div>)}
   </>}
  </section>;

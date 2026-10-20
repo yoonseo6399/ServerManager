@@ -1,6 +1,6 @@
-# 직접 TCP 중계 · 상주 서비스 · 업데이트 상태 API (관리 웹 담당자용)
+# 직접 TCP / Sable UDP 중계 · 상주 서비스 · 업데이트 상태 API (관리 웹 담당자용)
 
-관리 웹 `main.tsx`, `Auth.tsx`, 공통 설정 화면은 이 브랜치에서 수정하지 않았다. 아래 계약대로 화면을 구현한다.
+관리 웹의 직접 중계 카드와 공통 포트·DNS 카드가 아래 계약을 사용한다. 기존 관리 Mac 경유 설정은 공통 카드의 접힌 고급 설정에 있다.
 모든 변경 요청(PUT/POST)은 기존과 같이 패스키 재인증(`freshDesktop`, 5분)이 필요하다. 응답은 `Cache-Control: no-store`.
 
 ## 1. 직접 중계 `/api/admin/direct-relay`
@@ -18,7 +18,7 @@
 | POST | `/api/admin/direct-relay/cut` | `{runnerId}` | 즉시 차단(동의 철회 등). `{impactedStreams}` 반환 |
 | POST | `/api/admin/direct-relay/external-check` | `{runnerId}` | 설정된 중계 호스트·포트에만 접속 시험(임의 URL/포트 불가, 10초 1회). 결과 `REACHABLE_FROM_MANAGER` / `NOT_REACHABLE_FROM_MANAGER`는 "관리 서버 위치에서의 시험"이다 |
 
-`config`: `{enabled, relayRunnerId, candidateRunnerId, securePort(기본 6400), agentHost, publicHost, retiring{runnerId:만료epochMs}, graceSeconds, relayHosts{runnerId:{agentHost,publicHost}}}`.
+`config`: `{enabled, relayRunnerId, candidateRunnerId, securePort(기본 6400), agentHost, publicHost, retiring{runnerId:만료epochMs}, graceSeconds, relayHosts{runnerId:{agentHost,publicHost}}, sableUdpEnabled(기본 false)}`.
 `agentHost`는 게임 실행기가 접속할 중계 주소, `publicHost`는 플레이어용 공개 주소(DNS 대상)다. 게임 포트는 기존 공유 중계 포트(`game-network.port`)를 쓴다.
 
 ### 예시 응답 (GET)
@@ -63,6 +63,23 @@
 ### 실행기 로컬 동의
 설정 파일을 직접 만들 필요가 없다. 설치 화면 체크박스 "관리 웹 소유자의 TCP 중계 사용 허용"(신규 기본 꺼짐), 설치 CLI `--allow-tcp-relay` / `--deny-tcp-relay`, 실행기 CLI `--runner-relay-consent=allow|revoke|status`.
 기존 `tcp-relay-enabled=true`·`RUNNER_TCP_RELAY_ENABLED=true`는 자동 이전되어 `consentMigrated` / `consentLockedByEnvironment`로 표시된다. 철회는 관리자 개입 없이 약 1초 안에 중계 소켓을 닫는다.
+
+### 직접 Sable UDP (Beta14)
+
+플레이어의 UDP → 선택한 중계 실행기 → 인증·암호화 DRP1 **TCP** 터널 → 게임 실행기의 `127.0.0.1:게임포트` UDP이다. 관리 Mac은 등록·권한·상태만 전달한다. 순수 종단 UDP가 아니므로 TCP 손실 시 후속 패킷이 기다릴 수 있다. 게임 데이터가 관리 Mac을 거치던 별도 WSS 경로와 구분한다.
+
+- `config.sableUdpEnabled=true`로 명시적으로 켠다. TCP는 기본 경로이며 UDP 오류가 TCP 리스너/기존 연결을 끊지 않는다.
+- 중계·게임 실행기 **상주 게임호스트**가 인증된 `relay-consent` / `drp-status`에 `version=DRP1_UDP1`을 보고해야 켤 수 있다. 제어 계층만 업데이트하고 구버전 상주 호스트가 살아 있으면 지원으로 간주하지 않는다. 재접속 시 보고를 다시 기다린다.
+- `DirectRelayView.sableUdpBlockers`: 업데이트/연결 확인이 필요한 게임 실행기 이름. `relays[].sableUdpCapable`, `sableUdp{state,connections,dropped,message}`로 지원 여부와 실제 UDP 왕복 상태를 구분한다. 인스턴스 조회는 해당 인스턴스의 상태만 반환한다.
+- `router[].protocol`은 TCP 또는 UDP. **공유 게임 포트 TCP + 같은 번호 UDP + 별도 실행기 연결 포트 TCP**를 중계 컴퓨터로 포워딩한다. 예: 게임6700이면 TCP6700/UDP6700, 실행기연결6400이면 TCP6400. `external-check`는 TCP만 검사하며 UDP 외부 도달을 증명하지 않는다.
+- SRV `_minecraft._tcp.<서버주소>`는 공유 게임 포트다. 서버별 서브도메인을 TCP handshake로 식별한 뒤 UDP 토큰을 그 실제 TCP stream에 묶는다. UDP packet에 hostname을 새로 넣거나 모든 서버로 broadcast하지 않는다.
+- NeoForge1.21.1/Sable2.0.6 지원. 보조 모드·localhost 등록 키는 다음 정상 서버 시작 때 준비한다. 이미 실행 중인 JVM에 보조 모드를 주입하지 않으며 강제 재시작하지 않는다. helper HTTP와 키는 상주 호스트가 소유하여 제어 계층 재접속 후에도 유지한다.
+- 원격 임의 주소로 UDP를 보내지 않는다. TCP stream 소유권·instance·정책·ticket epoch·실제 TCP peer IP·일회 등록 UUID를 검증한다. client AUTH3/ACK5와 server0/1/2/4만 전달, 500등록/64pps·유실형64queue/100msTTL 유지. TCP 종료·정책철회·로컬 동의 철회 시 UDP binding도 제거한다.
+- 직접 중계를 처음 선택할 때는 `relayRunnerId`를 PUT 설정에 포함한다. 활성 대상을 바꿀 때는 prepare/commit을 사용한다. 로컬 동의 없는 실행기·오프라인·미확인 상태는 목록에 표시하되 선택하지 못한다.
+- 로컬 허용은 설치기의 “게임 중계 사용 허용 (TCP / Sable UDP)” 또는 기존 호환 CLI로 설정한다. 기본은 꺼짐, UDP는 관리 웹에서 추가로 선택한다. 수동 파일 작성은 필요 없다.
+- 새 UDP opt-in은 기존 settings.json에 추가하지 않고 revision과 묶인 별도 내부 marker로 보관하여 Beta13 스키마 롤백을 지원한다. 쓰기 중단/구버전 설정 변경 시 UDP는 기본 꺼짐으로 복구한다. 이것은 사용자 직접 편집용 설정이 아니다.
+
+상주 호스트 자체 업데이트에는 기존 유휴 조건이 필요하다. 구버전 호스트가 활성 중계 역할 때문에 대기하면 정상 점검 시간에 직접 중계를 끄고 게임·전송을 종료한 뒤 호스트 업데이트를 적용한다. 이후 새 직접 UDP 설정을 저장하고 게임을 시작한다. 설치판/실제 Minecraft·공유기·인터넷의 연속성은 별도 현장 검증 대상이다.
 
 ## 2. 업데이트 상태 `GET /api/runners/{id}/update-status?after=<seq>`
 ```json

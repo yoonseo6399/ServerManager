@@ -16,7 +16,7 @@ import kotlin.io.path.*
 /** One authenticated data-only WSS alongside the control connection. No public listener on the runner. */
 class SableRunner(private val client:HttpClient,private val url:String,private val headers:()->Map<String,String>,
     private val streamAtPort:(Int)->Pair<String,Int>?,private val portForStream:(Int)->Int?,
-    private val register:(String,Int,String)->Boolean):AutoCloseable {
+    private val register:(String,Int,String)->Boolean,private val directMode:Boolean=false):AutoCloseable {
     @Volatile var enabled=false
     private var web:WebSocket?=null
     private var outbox:DatagramOutbox?=null
@@ -25,7 +25,7 @@ class SableRunner(private val client:HttpClient,private val url:String,private v
     private val httpPool=ThreadPoolExecutor(2,2,0L,TimeUnit.SECONDS,ArrayBlockingQueue(32),{r->Thread(r,"sable-local-bridge").apply {isDaemon=true}},ThreadPoolExecutor.AbortPolicy())
     private var bridge:HttpServer?=null
     @Synchronized fun connect() {
-        if(web!=null)return
+        if(directMode || web!=null)return
         val listener=object:WebSocket.Listener {
             private val frame=java.io.ByteArrayOutputStream()
             override fun onOpen(socket:WebSocket){socket.request(1)}
@@ -73,7 +73,7 @@ class SableRunner(private val client:HttpClient,private val url:String,private v
         service.createContext("/register") {exchange->
             try {
                 var status=403
-                if(exchange.requestMethod=="POST" && exchange.requestURI.toString()=="/register" && enabled && web!=null) {
+                if(exchange.requestMethod=="POST" && exchange.requestURI.toString()=="/register" && enabled && (directMode || web!=null)) {
                     val body=exchange.requestBody.readNBytes(129)
                     val parts=String(body,Charsets.US_ASCII).split(' ')
                     val pair=parts.firstOrNull()?.toIntOrNull()?.let(streamAtPort)
@@ -117,7 +117,7 @@ class SableRunner(private val client:HttpClient,private val url:String,private v
         builder.environment()["SM_SABLE_BRIDGE_KEY"]=key
         return "READY"
     }
-    fun heartbeat(){if(enabled && web==null && keys.isNotEmpty())runCatching {connect()};web?.let {socket->runCatching {socket.sendPing(ByteBuffer.wrap(byteArrayOf(1))).orTimeout(2,TimeUnit.SECONDS)} }}
+    fun heartbeat(){if(!directMode && enabled && web==null && keys.isNotEmpty())runCatching {connect()};web?.let {socket->runCatching {socket.sendPing(ByteBuffer.wrap(byteArrayOf(1))).orTimeout(2,TimeUnit.SECONDS)} }}
     fun closeStream(stream:Int){udp.remove(stream)?.close()}
     fun stopped(instance:String){keys.remove(instance)}
     @Synchronized fun disconnect(){web?.abort();web=null;outbox?.close();outbox=null;udp.values.forEach {it.close()};udp.clear()}

@@ -58,9 +58,11 @@ class RelayConsentStore(private val home:Path,private val env:(String)->String?=
 }
 
 data class RelayHostConfig(val on:Boolean,val relayId:String,val secret:String,val gamePort:Int,val securePort:Int,val policy:RelayPolicy,
-    val drain:Boolean=false,val drainSeconds:Long=600)
+    val drain:Boolean=false,val drainSeconds:Long=600,
+    @get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_DEFAULT) val sableUdpEnabled:Boolean=false)
 data class AgentRelayTarget(val relayId:String,val host:String,val port:Int,val drain:Boolean=false)
-data class AgentRelayConfig(val relays:List<AgentRelayTarget>,val instances:Set<String>,val drainSeconds:Long=600)
+data class AgentRelayConfig(val relays:List<AgentRelayTarget>,val instances:Set<String>,val drainSeconds:Long=600,
+    @get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_DEFAULT) val sableUdpEnabled:Boolean=false)
 data class AgentRelayStatus(val relayId:String,val state:String,val reason:String?,val streams:Int,val connectedAt:Long?)
 data class RunnerRelayReport(val consent:RelayConsentState,val hub:RelayHubStatus?,val agents:List<AgentRelayStatus>,val hostActive:Boolean,val bindOk:Boolean,val addresses:List<String> =emptyList())
 
@@ -89,7 +91,7 @@ class DirectRelayRunnerRole(home:Path,private val send:(RunnerMessage)->Boolean,
     fun streamTotal()=(hub?.streamCount() ?: 0)+agents.values.sumOf {it.streamCount()}
     private fun reportConsent(state:RelayConsentState) {
         announced=state
-        send(RunnerMessage("relay-consent",state=if(state.allowed)"ALLOWED" else "DENIED",version="DRP1",detail=mapper.writeValueAsString(state)))
+        send(RunnerMessage("relay-consent",state=if(state.allowed)"ALLOWED" else "DENIED",version="DRP1_UDP1",detail=mapper.writeValueAsString(state)))
     }
     fun onSession(){reportConsent(consent.read());report()}
     /** Called every heartbeat. Honours a local revocation within one tick without waiting for the manager. */
@@ -102,7 +104,7 @@ class DirectRelayRunnerRole(home:Path,private val send:(RunnerMessage)->Boolean,
     fun report() {
         val h=hub;val state=announced ?: consent.read()
         val body=RunnerRelayReport(state,h?.status(),agents.map {(id,a)->AgentRelayStatus(id,a.state.name,a.reason,a.streamCount(),a.connectedAt)},h!=null,lastBindOk,localAddresses())
-        send(RunnerMessage("drp-status",detail=mapper.writeValueAsString(body)))
+        send(RunnerMessage("drp-status",version="DRP1_UDP1",detail=mapper.writeValueAsString(body)))
     }
     /** Returns true when [message] belonged to the direct relay protocol. */
     fun onMessage(message:RunnerMessage):Boolean {
@@ -130,6 +132,7 @@ class DirectRelayRunnerRole(home:Path,private val send:(RunnerMessage)->Boolean,
         active.rotateSecret(secret)
         lastBindOk=active.listen(config.gamePort,config.securePort,bindAddress)
         active.applyPolicy(config.policy)
+        active.sableUdp(config.sableUdpEnabled,config.gamePort,bindAddress)
         hubConfig=config
     }
     private fun ticketFor(relayId:String):RelayTicket? {
@@ -144,21 +147,36 @@ class DirectRelayRunnerRole(home:Path,private val send:(RunnerMessage)->Boolean,
         return ticket?.let {RelayEndpoint(target.host,target.port,it)}
     }
     private val denial=ConcurrentHashMap<String,String>()
+    @Volatile private var sableEnabled=false
+    private val sableBridge=SableRunner(java.net.http.HttpClient.newHttpClient(),"",{emptyMap()},
+        {port->agents.values.mapNotNull {it.streamAtPort(port)}.singleOrNull()?.let {it.first to port}},
+        {null},{instance,port,token->agents.values.mapNotNull {a->a.streamAtPort(port)?.takeIf {it.first==instance}?.let {a to it.second}}.singleOrNull()?.let {(a,stream)->a.registerSable(stream,instance,token)} ?: false},directMode=true)
+    fun prepareSable(instance:Instance,directory:Path):Map<String,String> {
+        val builder=ProcessBuilder("unused")
+        sableBridge.enabled=sableEnabled && instance.id in allowedInstances
+        val status=sableBridge.prepare(instance,directory,builder)
+        return builder.environment().filterKeys {it in setOf("SM_SABLE_BRIDGE_PORT","SM_SABLE_BRIDGE_KEY")}+("status" to status)
+    }
+    fun stopped(instance:String){sableBridge.stopped(instance)}
+
     private fun agent(config:AgentRelayConfig) {
         allowedInstances=config.instances.toSet()
+        sableEnabled=config.sableUdpEnabled
+        if(!sableEnabled)agents.values.forEach {it.disableSable()}
+        sableBridge.enabled=sableEnabled
         config.relays.forEach {target->
             targets[target.relayId]=target
             if(target.drain){agents.remove(target.relayId)?.drain(config.drainSeconds*1000);return@forEach}
             if(agents.containsKey(target.relayId))return@forEach
             val relayId=target.relayId
             val agent=DirectRelayAgent({endpointFor(target)},
-                {id->if(id in allowedInstances)gamePort(id) else null},{id->id in allowedInstances && ready(id)},backoff)
+                {id->if(id in allowedInstances)gamePort(id) else null},{id->id in allowedInstances && ready(id)},backoff,{sableEnabled})
             agents[relayId]=agent;agent.start()
         }
         // Targets the manager no longer lists are drained, never cut mid-game.
         agents.keys.filter {id->config.relays.none {it.relayId==id}}.forEach {id->agents.remove(id)?.drain(config.drainSeconds*1000)}
     }
-    fun close() {hub?.close();hub=null;agents.values.forEach {it.close()};agents.clear()}
+    fun close() {sableBridge.close();hub?.close();hub=null;agents.values.forEach {it.close()};agents.clear()}
 }
 
 /** Private IPv4 addresses to enter in the router's port-forward rule. Never includes loopback or link-local. */

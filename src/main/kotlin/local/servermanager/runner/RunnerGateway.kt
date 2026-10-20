@@ -381,6 +381,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
         io.submit {while(!listener.isClosed){val socket=runCatching {listener.accept()}.getOrNull() ?: break;relayPlayer(socket,instance.id,runnerId)}}
     }
     override fun sableStatus(instance:Instance):SableRelayStatus {
+        if(directRelay?.core?.store?.config()?.enabled==true)return directRelay.core.sableStatus(instance.id)
         if(network?.config()?.sableUdpEnabled!=true)return SableRelayStatus("OFF")
         val runner=instance.runnerId ?: return SableRelayStatus("UNSUPPORTED",message="원격 실행기를 선택하세요")
         if(!runCatching {SignedUpdates.compare(registry.active(runner)?.version ?: "unknown","0.4.6")>=0}.getOrDefault(false))return SableRelayStatus("UNSUPPORTED",message="실행기 0.4.6 이상이 필요합니다")
