@@ -63,6 +63,8 @@ class DirectRelayStore(private val directory:Path) {
 
 /** What the manager must know about the rest of the app; kept narrow so the relay logic is testable in isolation. */
 interface RelayWorld {
+    /** Registered active devices remain visible even before the first capability report. */
+    fun registeredRunnerIds():Set<String> = emptySet()
     fun runner(id:String):RunnerDevice?
     fun connected(id:String):Boolean
     fun runnerName(id:String):String
@@ -80,7 +82,7 @@ data class RelayRunnerView(val runnerId:String,val name:String,val role:String,v
     val active:Boolean,val ready:Boolean,val streams:Int,val internalAddresses:List<String>,val publicHost:String,val gamePort:Int,val securePort:Int,
     val router:List<RelayRouterRow>,val diagnostics:Map<String,RelayCheck>,val impactIfCut:String)
 data class AgentRunnerView(val runnerId:String,val name:String,val relays:List<AgentRelayStatus>)
-data class DirectRelayView(val revision:Long,val config:DirectRelayConfig,val phase:String,val relays:List<RelayRunnerView>,val agents:List<AgentRunnerView>,val message:String)
+data class DirectRelayView(val revision:Long,val config:DirectRelayConfig,val phase:String,val relays:List<RelayRunnerView>,val agents:List<AgentRunnerView>,val message:String,val gamePort:Int)
 
 class DirectRelayManager(val store:DirectRelayStore,private val world:RelayWorld,private val clock:()->Long={System.currentTimeMillis()}) {
     private val mapper=jacksonObjectMapper()
@@ -107,7 +109,7 @@ class DirectRelayManager(val store:DirectRelayStore,private val world:RelayWorld
         }
         return true
     }
-    fun onDisconnect(id:String){reports.remove(id);sentHost.remove(id);sentAgent.remove(id)}
+    fun onDisconnect(id:String){reports.remove(id);consents.remove(id);seenAt.remove(id);sentHost.remove(id);sentAgent.remove(id)}
 
     private fun config()=store.config()
     private fun agentHostFor(id:String):String {val c=config();return c.relayHosts[id]?.agentHost?.ifBlank {null} ?: c.agentHost.ifBlank {c.publicHost}}
@@ -177,6 +179,8 @@ class DirectRelayManager(val store:DirectRelayStore,private val world:RelayWorld
 
     @Synchronized fun save(request:DirectRelaySave):DirectRelayView {
         val c=request.config
+        val previous=config()
+        check(!c.enabled || !previous.enabled || previous.relayRunnerId==null || c.relayRunnerId==previous.relayRunnerId) {"중계 대상 변경은 새 중계 준비·전환을 사용하세요"}
         require(c.securePort in 1024..65535 && c.securePort!=world.gamePort()) {"실행기 연결 포트는 1024~65535이며 게임 포트와 달라야 합니다"}
         listOf(c.agentHost,c.publicHost).forEach {require(it.isEmpty() || (it.length<=253 && it.matches(Regex("[A-Za-z0-9.-]+")))) {"호스트 이름 또는 IPv4 주소만 입력하세요"}}
         require(c.graceSeconds in 0..86400)
@@ -184,7 +188,7 @@ class DirectRelayManager(val store:DirectRelayStore,private val world:RelayWorld
             require(c.relayRunnerId!=null || c.candidateRunnerId!=null) {"중계 실행기를 선택하세요"}
             c.relayRunnerId?.let {require(world.runner(it)!=null) {"등록된 실행기를 선택하세요"}}
             // Turning a relay on for the first time needs local consent; later changes go through prepare/commit.
-            if(config().relayRunnerId!=c.relayRunnerId)c.relayRunnerId?.let {require(consents[it]?.allowed==true && world.connected(it)) {"실행기 소유자가 로컬에서 TCP 중계 사용을 허용하고 온라인이어야 합니다"}}
+            if(!previous.enabled || previous.relayRunnerId!=c.relayRunnerId)c.relayRunnerId?.let {require(consents[it]?.allowed==true && world.connected(it)) {"실행기 소유자가 로컬에서 TCP 중계 사용을 허용하고 온라인이어야 합니다"}}
             require(c.agentHost.isNotBlank() || c.publicHost.isNotBlank()) {"게임 실행기가 연결할 중계 주소를 입력하세요"}
         }
         store.save(request);cuts.clear();reconcile();return view()
@@ -220,7 +224,7 @@ class DirectRelayManager(val store:DirectRelayStore,private val world:RelayWorld
     private fun diag(status:String,detail:String)=RelayCheck(status,detail)
 
     fun view():DirectRelayView {
-        val c=config();val roles=relays();val all=(roles.keys+reports.keys+consents.keys).toList()
+        val c=config();val roles=relays();val all=(world.registeredRunnerIds()+roles.keys+reports.keys+consents.keys).sortedBy {world.runnerName(it)}
         val gamePort=world.gamePort()
         val relayViews=all.filter {world.runner(it)!=null}.map {id->
             val role=roles[id] ?: "NONE";val rep=reports[id];val consent=consents[id];val hub=rep?.hub
@@ -234,7 +238,7 @@ class DirectRelayManager(val store:DirectRelayStore,private val world:RelayWorld
                 rep?.hostActive==true,isReady(id),hub?.agents?.sumOf {it.streams} ?: 0,internal,hosts,gamePort,c.securePort,
                 listOf(RelayRouterRow("게임 접속 (플레이어 → 중계)",gamePort,internal.firstOrNull(),gamePort),RelayRouterRow("실행기 연결 (게임 실행기 → 중계)",c.securePort,internal.firstOrNull(),c.securePort)),
                 mapOf(
-                    "consent" to if(consent?.allowed==true)diag("OK","로컬 허용: ${consent.source}") else diag("DENIED","실행기 로컬 설정에서 허용되지 않았습니다"),
+                    "consent" to when {consent==null->diag("UNKNOWN","중계 상태 보고를 기다리고 있습니다. 실행기 버전과 연결을 확인하세요");consent.allowed->diag("OK","로컬 허용: ${consent.source}");else->diag("DENIED","실행기 로컬 설정에서 허용되지 않았습니다")},
                     "portConflict" to when {hub==null -> diag("UNKNOWN","중계가 시작되지 않았습니다"); hub.lastBindError!=null -> diag("CONFLICT",hub.lastBindError); hub.gameListening && hub.secureListening -> diag("OK","게임 포트와 연결 포트를 열었습니다"); else -> diag("CLOSED","포트가 닫혀 있습니다")},
                     "agentConnection" to when {role=="NONE" -> diag("UNKNOWN","중계 대상이 아닙니다"); needed.isEmpty() -> diag("NO_ROUTE","승인된 서버 경로가 없습니다"); agentsConnected>=needed.size && isReady(id) -> diag("OK","게임 실행기 ${agentsConnected}대 연결"); else -> diag("WAITING","게임 실행기 연결 대기 ${agentsConnected}/${needed.size}")},
                     "dnsTarget" to when {hosts.isBlank() -> diag("UNSET","중계 공개 주소가 설정되지 않았습니다"); resolved.isEmpty() -> diag("UNRESOLVED","$hosts 를 조회하지 못했습니다"); else -> diag("RESOLVED","$hosts → ${resolved.joinToString()} (이 실행기 소유 주소인지는 검증하지 않습니다)")},
@@ -244,7 +248,7 @@ class DirectRelayManager(val store:DirectRelayStore,private val world:RelayWorld
         val agentViews=reports.filter {it.value.agents.isNotEmpty()}.map {(id,rep)->AgentRunnerView(id,world.runnerName(id),rep.agents)}
         val phase=when {!c.enabled -> "OFF"; c.candidateRunnerId!=null -> if(isReady(c.candidateRunnerId)) "CANDIDATE_READY" else "PREPARING"; c.relayRunnerId!=null && isReady(c.relayRunnerId) -> "ACTIVE"; c.relayRunnerId!=null -> "WAITING"; else -> "OFF"}
         val message=when(phase){"OFF"->"직접 중계 꺼짐";"ACTIVE"->"직접 중계 준비 완료";"CANDIDATE_READY"->"새 중계 대상 준비 완료 · 전환 가능";"PREPARING"->"새 중계 대상 준비 중";else->"중계 준비 대기 · 진단을 확인하세요"}
-        return DirectRelayView(store.revision(),c,phase,relayViews,agentViews,message)
+        return DirectRelayView(store.revision(),c,phase,relayViews,agentViews,message,gamePort)
     }
 
     /**
@@ -270,6 +274,7 @@ class DirectRelayService(private val registry:RunnerRegistry,private val manager
     @Volatile var sender:(String,RunnerMessage)->Boolean={_,_->false}
     @Volatile var connectedCheck:(String)->Boolean={false}
     val core=DirectRelayManager(DirectRelayStore(manager.root.resolve("security/direct-relay")),object:RelayWorld {
+        override fun registeredRunnerIds()=registry.activeIds()
         override fun runner(id:String)=registry.active(id)
         override fun connected(id:String)=connectedCheck(id)
         override fun runnerName(id:String)=registry.device(id)?.name ?: id

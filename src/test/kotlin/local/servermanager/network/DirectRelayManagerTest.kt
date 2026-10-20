@@ -41,6 +41,7 @@ class DirectRelayManagerTest {
         lateinit var manager:DirectRelayManager
         fun build(){manager=DirectRelayManager(store,this)}
         fun toManager(from:String,m:RunnerMessage){controlBytes.addAndGet(m.detail.orEmpty().length.toLong()+64);manager.onRunnerMessage(from,m)}
+        override fun registeredRunnerIds()=devices.keys.toSet()
         override fun runner(id:String)=devices[id]
         override fun connected(id:String)=nodes.containsKey(id) && !offline.contains(id)
         override fun runnerName(id:String)=id.take(4)
@@ -76,6 +77,37 @@ class DirectRelayManagerTest {
     }
     private fun enable(w:World,relay:RunnerNode=w.relay,agentHost:String="127.0.0.1")=w.h.manager.save(DirectRelaySave(DirectRelayConfig(true,relay.id,null,w.secure,agentHost,"relay.example.com"),w.h.store.revision()))
 
+    @Test fun `registered devices remain visible before their first report without assuming consent`() {
+        val h=Harness(DirectRelayStore(Files.createTempDirectory("relay-empty-registry")),6700);h.build()
+        val fresh=id();val offline=id()
+        h.devices[fresh]=device(fresh);h.devices[offline]=device(offline)
+        val rows=h.manager.view().relays
+        assertEquals(setOf(fresh,offline),rows.map {it.runnerId}.toSet())
+        assertTrue(rows.none {it.consentAllowed || it.capable || it.ready})
+        assertTrue(rows.all {it.diagnostics.getValue("consent").status=="UNKNOWN"})
+        assertEquals(6700,h.manager.view().gamePort)
+        val req=DirectRelaySave(DirectRelayConfig(true,fresh,securePort=6400,agentHost="127.0.0.1"),h.store.revision())
+        assertFailsWith<IllegalArgumentException>{h.manager.save(req)}
+        h.manager.onConsent("unregistered",RelayConsentState(true,"forged"))
+        assertFalse(h.manager.view().relays.any {it.runnerId=="unregistered"})
+        h.devices.remove(offline);assertEquals(listOf(fresh),h.manager.view().relays.map {it.runnerId})
+    }
+    @Test fun `first save persists selected relay and reconnect requires fresh local consent`() {
+        val w=world()
+        val saved=enable(w)
+        assertEquals(w.relay.id,saved.config.relayRunnerId);assertTrue(saved.config.enabled)
+        assertEquals(w.h.gamePort,saved.gamePort)
+        w.h.manager.onDisconnect(w.relay.id)
+        val pending=w.h.manager.view().relays.single {it.runnerId==w.relay.id}
+        assertFalse(pending.capable);assertFalse(pending.consentAllowed)
+        w.h.manager.save(DirectRelaySave(w.h.store.config().copy(enabled=false),w.h.store.revision()))
+        assertFailsWith<IllegalArgumentException>{enable(w)}
+        w.relay.role.onSession();assertTrue(enable(w).config.enabled)
+        val alternate=id();w.h.devices[alternate]=device(alternate)
+        assertFailsWith<IllegalStateException>{w.h.manager.save(DirectRelaySave(w.h.store.config().copy(relayRunnerId=alternate),w.h.store.revision()))}
+        val stale=w.h.store.revision()-1
+        assertFails {w.h.manager.save(DirectRelaySave(w.h.store.config(),stale))}
+    }
     @Test fun `default install is not allowed and a remote owner cannot enable the relay`() {
         val w=world(consent=false)
         assertFalse(w.relay.consent.read().allowed)
