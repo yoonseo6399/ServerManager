@@ -1,0 +1,40 @@
+{
+  "tag": "v0.7.0-beta.15",
+  "url": "https://github.com/yoonseo6399/ServerManager/releases/tag/v0.7.0-beta.15",
+  "assets": 9,
+  "all_asset_digests_match": true,
+  "downloaded_jar_and_manifest_verified": true,
+  "pinned_ed25519_verified": true,
+  "source_commit": "5c9f6b8b2f37f24c726030c6121e0b1d7e5783c2",
+  "workflow_run": "https://github.com/yoonseo6399/ServerManager/actions/runs/39434598162",
+  "ci_conclusion": "success",
+  "targeted_tests": 27,
+  "full_backend_suite": "skipped_by_user_request",
+  "stable_latest_preserved": "v0.6.3",
+  "local_application": {
+    "active": "0.7.0-beta.15",
+    "host_version": "0.7.0-beta.14",
+    "host_pid_retained": true,
+    "game_pids_retained": true,
+    "components": [
+      {
+        "component": "GAME_HOST",
+        "current": "0.7.0-beta.14",
+        "target": "0.7.0-beta.15",
+        "stage": "WAITING",
+        "waitReason": "GAME_RUNNING",
+        "error": null
+      },
+      {
+        "component": "RUNNER_CONTROL",
+        "current": "0.7.0-beta.15",
+        "target": null,
+        "stage": "DONE",
+        "waitReason": null,
+        "error": null
+      }
+    ],
+    "installed_jar_sha256_matches_signed_manifest": true,
+    "live_game_pid_start_identity_verified": true
+  }
+}

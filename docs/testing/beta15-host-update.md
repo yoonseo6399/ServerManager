@@ -17,3 +17,7 @@
 - 전체 suite 및 다른OS 실행은 사용자 요청으로 생략. 운영 원문로그/비밀 값은 저장소에 넣지 않음. 수정 전 실패XML과 실행 로그는 ignored build/host-readiness-evidence/에 보존.
 
 운영 적용은 공개 서명 자산 검증 후 기존 RunnerUpdater를 통해 예약하고 기존 게임·전송·호스트 유휴 gate를 유지한다. 파일 직접 편집으로 성공 표시를 만들거나 게임을 종료하지 않는다. 최초 확인 뒤 게임이 시작되어 수동 제어계층 재시작 시도는 사전 점검에서 중단되었고 kill은 실행하지 않았다. 실제 적용 결과는 게시 후 별도 기록한다.
+
+## 게시·로컬 적용 결과
+
+Beta15 게시/공개자산 검증 완료(source5c9f6b8, CI39434598162, stable/latest0.6.3보존). 공개 서명 검증된 코드의 기존 RunnerUpdater.install을 보수용 entry에서 호출해 서명·해시·호환성을 다시 검사하고 예약했다. 실행 중 제어계층이 자체gate로 적용했으며 수동kill/설정성공표시편집/호스트강제교체는 하지 않았다. RUNNER_CONTROL15 DONE/errornull; 기존 resident14 및 게임1개 PID/startidentity 유지. GAME_HOST14→15는 WAITING/GAME_RUNNING/errornull로 정상대기. 실제 운영 호스트15 교체는 게임 종료·파일인계 이후이므로 미실행, 동일 실제launchd교체 경로는 격리회귀에서 검증했다. 상세 beta15-release-verification.json.
