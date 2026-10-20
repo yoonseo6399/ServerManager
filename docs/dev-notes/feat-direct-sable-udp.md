@@ -1,4 +1,4 @@
-상태: 직접 Sable UDP·관리 UI 구현 및 범위 검증 완료, Beta14 통합 준비
+상태: 직접 Sable UDP·관리 UI 구현 및 범위 검증 완료, Beta14 통합 완료, 게시 대기
 # feat/direct-sable-udp
 
 - 기반: published Beta13 + fix/direct-relay-selection a784c43. 단독 구현, 전체 테스트와 다른 OS 실행은 사용자 요청으로 생략.
