@@ -111,6 +111,39 @@ object GameHostMain {
         Thread.currentThread().join()
     }
     private fun quote(value:String)="\"" + value.replace("\"","\\\"") + "\""
+    internal fun launchLabel(home:Path)="local.servermanager.game-host."+java.security.MessageDigest.getInstance("SHA-256").digest(home.toAbsolutePath().normalize().toString().toByteArray()).take(12).joinToString(""){"%02x".format(it)}
+    /** Remove only this home's launchd job, whose current PID must match the authenticated host. */
+    internal fun removeLaunchdHost(home:Path,pid:Long):String? {
+        if(!System.getProperty("os.name").startsWith("Mac"))return null
+        val label=launchLabel(home)
+        return try {
+            val query=ProcessBuilder("/bin/launchctl","list",label).redirectErrorStream(true).start()
+            if(!query.waitFor(5,java.util.concurrent.TimeUnit.SECONDS)){query.destroyForcibly();return "HOST_SERVICE_QUERY_TIMEOUT"}
+            if(query.exitValue()==113)return null // this host was not launched by launchd
+            if(query.exitValue()!=0)return "HOST_SERVICE_QUERY_FAILED"
+            val text=query.inputStream.use {it.readNBytes(65536).toString(Charsets.UTF_8)}
+            val actual=Regex("\"PID\"\\s*=\\s*(\\d+)").find(text)?.groupValues?.get(1)?.toLongOrNull()
+            if(actual!=pid)return "HOST_SERVICE_IDENTITY_MISMATCH"
+            val remove=ProcessBuilder("/bin/launchctl","remove",label).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start()
+            if(!remove.waitFor(5,java.util.concurrent.TimeUnit.SECONDS)){remove.destroyForcibly();return "HOST_SERVICE_REMOVE_TIMEOUT"}
+            if(remove.exitValue()!=0)"HOST_SERVICE_REMOVE_FAILED" else null
+        } catch(_:Exception){"HOST_SERVICE_REMOVE_FAILED"}
+    }
+    /** A stale endpoint or an endpoint from an old auto-respawned JVM is never start confirmation. */
+    internal fun waitForEndpoint(home:Path,previousPid:Long?,expectedVersion:String?,waitMillis:Long=30000):Boolean {
+        val end=System.nanoTime()+java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(waitMillis)
+        do {
+            val endpoint=GameHostClient.readEndpoint(home)
+            if(endpoint!=null && endpoint.pid!=previousPid && (expectedVersion==null || endpoint.version==expectedVersion)) {
+                val process=ProcessHandle.of(endpoint.pid).orElse(null)
+                val identified=process?.isAlive==true && endpoint.startMillis>0 && process.info().startInstant().map {it.toEpochMilli()}.orElse(-1)==endpoint.startMillis
+                if(identified && runCatching {java.net.Socket().use {it.connect(java.net.InetSocketAddress("127.0.0.1",endpoint.port),200)};true}.getOrDefault(false))return true
+            }
+            if(System.nanoTime()>=end)return false
+            Thread.sleep(100)
+        } while(true)
+    }
+    private fun jarVersion(jar:String):String?=runCatching {java.util.jar.JarFile(jar).use {z->z.getJarEntry("BOOT-INF/classes/app-version.txt")?.let {entry->z.getInputStream(entry).use {it.readNBytes(128).toString(Charsets.UTF_8).trim().takeIf {v->v.length in 1..100}}}}}.getOrNull()
     /**
      * Starts the host so that it outlives the process (and login-task job) that launched it.
      * macOS: an independent transient launchd job (not a child of the controller job). Windows: a WMI-created process, which is not part of a Task Scheduler job.
@@ -119,6 +152,8 @@ object GameHostMain {
         home.createDirectories()
         val log=home.resolve("host.log")
         val args=listOf(javaBin,"-jar",jar,"--game-host")
+        val previousPid=GameHostClient.readEndpoint(home)?.pid
+        val expectedVersion=jarVersion(jar)
         val mac=System.getProperty("os.name").startsWith("Mac")
         val builder=if(mac) {
             // nohup only ignores SIGHUP; launchd can still terminate a controller's entire process group.
@@ -126,7 +161,7 @@ object GameHostMain {
             val endpoint=GameHostClient.readEndpoint(home)
             if(endpoint!=null && ProcessHandle.of(endpoint.pid).map {it.isAlive}.orElse(false))return false
             if(HostLifecycle.liveGames(home).isNotEmpty())return false
-            val label="local.servermanager.game-host."+java.security.MessageDigest.getInstance("SHA-256").digest(home.toAbsolutePath().normalize().toString().toByteArray()).take(12).joinToString(""){"%02x".format(it)}
+            val label=launchLabel(home)
             val removed=ProcessBuilder("/bin/launchctl","remove",label).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start()
             if(!removed.waitFor(5,java.util.concurrent.TimeUnit.SECONDS)){removed.destroyForcibly();return false}
             val inherited=System.getenv("RUNNER_TCP_RELAY_ENABLED")?.let {mapOf("RUNNER_TCP_RELAY_ENABLED" to it)} ?: emptyMap()
@@ -146,9 +181,7 @@ object GameHostMain {
         val process=builder.start()
         if(!process.waitFor(20,java.util.concurrent.TimeUnit.SECONDS))return false
         if(process.exitValue()!=0)return false
-        val end=System.currentTimeMillis()+15000
-        while(System.currentTimeMillis()<end){if(GameHostClient.readEndpoint(home)!=null)return true;Thread.sleep(200)}
-        return false
+        return waitForEndpoint(home,previousPid,expectedVersion)
     }
 }
 
@@ -212,9 +245,10 @@ object HostLifecycle {
             val state=client.prepareReplacementState()
             if(!state.ready){client.cancelReplacement();return if(state.state=="DRAINING")"RELAY_STREAMS_ACTIVE" else "HOST_NOT_PREPARED"}
         } catch(e:GameHostRejected){return e.reason} catch(_:Exception){return "HOST_UNREACHABLE"} finally {client.close()}
-        handle.destroy()
-        if(!runCatching {handle.onExit().get(10,java.util.concurrent.TimeUnit.SECONDS)}.isSuccess){handle.destroyForcibly()}
-        runCatching {home.resolve("host/endpoint.json").deleteIfExists()}
+        GameHostMain.removeLaunchdHost(home,endpoint.pid)?.let {return it}
+        if(handle.isAlive)handle.destroy()
+        if(!runCatching {handle.onExit().get(10,java.util.concurrent.TimeUnit.SECONDS)}.isSuccess)return "HOST_DID_NOT_EXIT"
+        if(GameHostClient.readEndpoint(home)?.pid==endpoint.pid)runCatching {home.resolve("host/endpoint.json").deleteIfExists()}
         return null
     }
     private fun hostIdentified(endpoint:HostEndpoint,handle:ProcessHandle):Boolean {
@@ -241,8 +275,9 @@ object HostLifecycle {
         // The flag is up, so nothing new can start; verify once more from the outside before ending the process.
         if(liveGames(home).isNotEmpty())return back("GAME_RUNNING")
         if(!hostIdentified(endpoint,handle) || !handle.isAlive)return back("NOT_A_HOST_PROCESS")
+        GameHostMain.removeLaunchdHost(home,endpoint.pid)?.let {return back(it)}
         client.close()
-        handle.destroy()
+        if(handle.isAlive)handle.destroy()
         if(!runCatching {handle.onExit().get(10,java.util.concurrent.TimeUnit.SECONDS)}.isSuccess)return Replacement(false,"HOST_DID_NOT_EXIT")
         // Only the endpoint that still names the process that just exited is removed.
         if(GameHostClient.readEndpoint(home)?.pid==endpoint.pid)runCatching {home.resolve("host/endpoint.json").deleteIfExists()}
