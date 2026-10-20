@@ -23,3 +23,5 @@
 ## 게시 및 호환성
 
 새 Beta14 prerelease로 게시, 기존 stable/main/latest 및 게시된 태그/파일 유지. 관리 앱·중계 실행기·게임 실행기·상주 호스트 모두 새 버전 필요. 기존 signing secret만 사용하며 전체 suite는 `skip_full_tests=true`로 생략한다. 게시 후 공개9assets의 digest, 다운로드JAR/manifest/signature와 pinned Ed25519 서명·내장 버전을 검증하고 별도 기록한다.
+
+Beta14 게시 검증 완료: source7e96823, CI39421495305 SUCCESS(전체 suite skipped). 공개9assets digest, 다운로드JAR/manifest/signature·pinned Ed25519·내장0.7.0-beta.14/DRP1_UDP1/UI 확인. stable/latest v0.6.3 유지. 상세 beta14-release-verification.json.

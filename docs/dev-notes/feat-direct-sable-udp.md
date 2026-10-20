@@ -1,4 +1,4 @@
-상태: 직접 Sable UDP·관리 UI 구현 및 범위 검증 완료, Beta14 통합 준비
+상태: Beta14 게시 및 공개 업데이트 JAR·서명 검증 완료
 # feat/direct-sable-udp
 
 - 기반: published Beta13 + fix/direct-relay-selection a784c43. 단독 구현, 전체 테스트와 다른 OS 실행은 사용자 요청으로 생략.
@@ -9,3 +9,5 @@
 - 설정 추가 필드는 revision-bound 별도 marker에 저장하여 Beta13 롤백의 기존 settings.json 스키마 유지. UDP OFF wire 필드 생략.
 - 관련 백엔드 60개 모두 통과, 후속 UDP bind 재시도 검증 1개 추가. UI6개·프런트 production build·격리 설치기 검증 통과. 상세 docs/testing/beta14-direct-relay.md.
 - 실제 공유기/인터넷/설치 Minecraft 검증은 미실행. 최초 기존 TCP 왕복 검사 1회 실패 원인은 확정하지 못함. 이후 전체 범위 실행 및 관리자 테스트3회 연속 통과, 원문 증거 보존.
+
+- 게시 완료: tag v0.7.0-beta.14 / source7e96823 / CI39421495305 SUCCESS. 9publicassets digest와 실제 JAR/manifest/signature 검증, pinnedEd25519·내장버전·DRP1_UDP1·새UI 확인. stable/latest v0.6.3 보존. docs/testing/beta14-release-verification.json. 게시 태그/자산 변경 없음.

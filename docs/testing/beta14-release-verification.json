@@ -1,0 +1,19 @@
+{
+  "tag": "v0.7.0-beta.14",
+  "url": "https://github.com/yoonseo6399/ServerManager/releases/tag/v0.7.0-beta.14",
+  "assets": 9,
+  "all_asset_digests_match": true,
+  "downloaded_jar_and_manifest_verified": true,
+  "pinned_ed25519_verified": true,
+  "source_commit": "7e9682320b1f02f55ee678b581b257b6f3fbdfcd",
+  "workflow_run": "https://github.com/yoonseo6399/ServerManager/actions/runs/39421495305",
+  "ci_conclusion": "success",
+  "full_backend_suite": "skipped_by_user_request",
+  "jar_sha256": "b4f2975fc7e32c904f174218cb802753fe7d68d0b72460be2b41ba4a515386c2",
+  "embedded_version": "0.7.0-beta.14",
+  "udp_capability_and_ui_verified": true,
+  "stable_latest_preserved": "v0.6.3",
+  "targeted_backend_unique": 61,
+  "ui_cases": 6,
+  "real_router_internet_minecraft_tested": false
+}
