@@ -24,6 +24,7 @@ object StrataRuntime {
     val endpoint:URI=URI("http://127.0.0.1:18080")
     @Volatile private var process:Process?=null
     private var ownedChildren:List<ProcessHandle> = emptyList()
+    private var launchFiles:StrataLaunchFiles?=null
     private var runtimeLock:java.nio.channels.FileLock?=null
     private var lockChannel:java.nio.channels.FileChannel?=null
     @Volatile private var installing=false
@@ -47,6 +48,7 @@ object StrataRuntime {
         if(lock==null){c.close();error("다른 관리 앱 또는 실행기가 Strata를 사용 중입니다. 해당 컴퓨터의 추론 실행기를 지정하세요.")}
         lockChannel=c;runtimeLock=lock
     }
+    private fun clearLaunchFiles(){val files=launchFiles;launchFiles=null;runCatching {files?.close()}}
     private fun releaseLock(){runCatching {runtimeLock?.release()};runCatching {lockChannel?.close()};runtimeLock=null;lockChannel=null}
     private fun privateDir(path:Path){path.createDirectories();Files.setPosixFilePermissions(path,PosixFilePermissions.fromString("rwx------"))}
     private fun environment():Map<String,String> = mapOf(
@@ -96,11 +98,12 @@ object StrataRuntime {
         // Never attach to or terminate another service already listening on this port.
         java.net.ServerSocket().use {it.bind(java.net.InetSocketAddress("127.0.0.1",18080))}
         privateDir(root.resolve("runtime"));val log=root.resolve("server.log");if(log.exists() && log.fileSize()>10_000_000)Files.move(log,root.resolve("server.previous.log"),java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-        val p=builder(listOf(control.resolve("bin/strata").toString(),"serve","--config",config.toString(),"--host","127.0.0.1","--port","18080","--parallel","1","--offline","--ready-file",root.resolve("runtime/ready.json").toString(),"--shutdown-timeout","15","--output","jsonl")).redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile())).start()
+        val files=StrataLaunchFiles(root.resolve("runtime")).also {launchFiles=it}
+        val p=builder(listOf(control.resolve("bin/strata").toString(),"serve","--config",config.toString(),"--host","127.0.0.1","--port","18080","--parallel","1","--offline","--ready-file",files.ready.toString(),"--shutdown-timeout","15","--output","jsonl")).redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile())).start()
         process=p;message="Flash-Next 시작 중"
         repeat(180){if(Thread.currentThread().isInterrupted){stop();throw InterruptedException()};check(p.isAlive) {"Strata 시작 실패 · ${log} 확인"};health()?.let {ownedChildren=p.descendants().toList();message="Flash-Next 실행 중 · SSD 오프로딩 · GPU 작업 공간 4GB";return it.path("max_context").asInt(8192)};Thread.sleep(500)}
         error("Strata 시작 시간 초과 · $log 확인")
-        }catch(e:Exception){try{stop()}catch(cleanup:Exception){e.addSuppressed(cleanup)};if(process==null)releaseLock();throw e}
+        }catch(e:Exception){try{stop()}catch(cleanup:Exception){e.addSuppressed(cleanup)};if(process==null){clearLaunchFiles();releaseLock()};throw e}
     }
     @Synchronized fun stop() {
         val p=process ?: return
@@ -112,7 +115,7 @@ object StrataRuntime {
             children.asReversed().forEach {child->if(child.isAlive)runCatching {child.onExit().get(5,TimeUnit.SECONDS)}.onFailure {_ ->child.destroyForcibly()}}
             if(p.isAlive)p.waitFor(5,TimeUnit.SECONDS)
             check(!p.isAlive && children.none {it.isAlive}) {"Strata 프로세스 종료를 확인하지 못했습니다. 모델 전환을 중단합니다."}
-            process=null;ownedChildren=emptyList();releaseLock();message="Flash-Next를 메모리에서 내렸습니다."
+            process=null;ownedChildren=emptyList();clearLaunchFiles();releaseLock();message="Flash-Next를 메모리에서 내렸습니다."
         }finally {if(interrupted)Thread.currentThread().interrupt()}
     }
 
