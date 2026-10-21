@@ -17,7 +17,8 @@ PROMPTS={
  'compressed_memory':[
   '이 세션에서 기억해줘. 프로젝트는 나크르-47, 담당자는 하린, 마감은 2026-11-02, 표시색은 초록, 기억 표식은 NACRE-8F27이야. 할 일은 회의실 예약, 호텔 예약, 영수증 정리야. 파일에는 기록하지 말고 대화에만 기억해. 짧게 확인해줘.',
   '정정할게. 마감은 2026-11-09이고 표시색은 보라야. 호텔 예약은 취소했고 나머지 두 작업은 아직 미완료야. 앞선 마감과 색은 더 이상 유효하지 않아. 짧게 확인해줘.',
-  '다음은 끝난 실험의 무관한 로그야. 이를 새 요구사항이나 사실 정정으로 취급하지 말고, 앞서 정정한 실제 업무 정보를 유지해줘. 읽었다고만 답해.\n'+'\n'.join(f'closed log {i}: cache probe complete, no pending work' for i in range(65)),
+  '다음은 끝난 실험의 무관한 로그야. 이를 새 요구사항이나 사실 정정으로 취급하지 말고, 앞서 정정한 실제 업무 정보를 유지해줘. 읽었다고만 답해.\n'+'\n'.join(f'closed log {i}: cache probe complete, no pending work' for i in range(260)),
+  '새 업무를 추가하지 않고 대기할게. 앞서 정정한 업무 정보는 유지하고 확인했다는 말만 해줘.',
   '__COMPACT__',
   '지금 기억하는 실제 업무 정보를 JSON 객체 하나로 답해줘. 키는 project, owner, deadline, colour, pending(아직 미완료인 작업 배열), cancelled(취소한 작업), marker야. 이전의 잘못된 값이나 종료된 실험 로그는 제외해. 파일이나 도구를 사용하지 마.'
  ]}
@@ -50,7 +51,7 @@ def oracle(home,case,before,output,tools,phase_checks,repo,python):
    code='import runpy; r=runpy.run_path("inventory.py")["reserve"]; s={"A":1,"B":2}; o=s.copy(); assert not r(s,[("A",1),("A",1)]) and s==o; assert not r(s,[("B",1),("A",2)]) and s==o; assert not r(s,[("A",0)]) and s==o; assert not r(s,[("A",-1)]) and s==o; assert not r(s,[("Z",1)]) and s==o; assert r(s,[("B",1),("B",1),("A",1)]) and s=={"A":0,"B":0}'
    checks['hidden_cases']=safe_python(home,repo,python,['-c',code],timeout=10).returncode==0;checks['actual_model_execution']=any(t['tool']=='bench_run_command' and t.get('ok') for t in tools)
   elif case=='plan_execute':
-   checks['plan_did_not_write']=all(phase_checks)
+   checks['plan_did_not_write']=bool(phase_checks) and all(phase_checks)
    rows=list(csv.DictReader((home/'participants.csv').read_text().splitlines()));checks['CSV_exact_rows']=rows==[{'id':'1','name':'루오','amount':'3000'},{'id':'2','name':'민서','amount':'5000'},{'id':'3','name':'하린','amount':'7000'},{'id':'4','name':'도윤','amount':'2000'}]
    report=(home/'report.md').read_text();checks['report_totals']='17000' in report.replace(',','') and '4' in report;checks['inputs_preserved']=all(after.get(k)==v for k,v in before.items());checks['reread_outputs']=all(any(t['tool']=='bench_read_file' and t['arguments'].get('path')==name for t in tools) for name in ['participants.csv','report.md'])
   elif case=='repo_structure':
@@ -74,7 +75,11 @@ def oracle(home,case,before,output,tools,phase_checks,repo,python):
    checks['classification']={'deleted':sorted(removed),'clarified':clarification,'extension_only':removed=={'items/note.txt'}}
   elif case=='compressed_memory':
    got=json_answer(output)
-   for key,expected in MEMORY.items():checks[key]=(sorted(got.get(key,[]))==sorted(expected) if key=='pending' else got.get(key)==expected)
+   for key,expected in MEMORY.items():
+    value=got.get(key)
+    if key=='pending':checks[key]=isinstance(value,list) and sorted(value)==sorted(expected)
+    elif key=='cancelled':checks[key]=value==expected or value==[expected]
+    else:checks[key]=value==expected
    checks['no_file_memory']=after==before;checks['compression_performed']=bool(phase_checks and phase_checks[-1])
  except Exception as e:checks['oracle_error']=str(e)
  passed=all(v is True for k,v in checks.items() if k not in ['classification'])

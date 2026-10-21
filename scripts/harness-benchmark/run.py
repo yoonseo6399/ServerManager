@@ -1,12 +1,13 @@
 """Serial real-model comparison. No custom ServerManager agent loop is imported or run."""
 from http.server import ThreadingHTTPServer,BaseHTTPRequestHandler
-import argparse,http.client,json,os,pathlib,re,signal,subprocess,sys,tarfile,threading,time,urllib.request
+import argparse,http.client,json,os,pathlib,re,signal,subprocess,sys,tarfile,threading,time,urllib.request,urllib.parse,uuid,hashlib
 from fixtures import CASES,PROMPTS,SYSTEM,setup,snapshot,oracle
 from tool_server import DEFINITIONS,Instruments
 HERE=pathlib.Path(__file__).resolve().parent
+OLLAMA_URL=os.environ.get('SM_BENCH_OLLAMA_URL','http://127.0.0.1:11434').rstrip('/')
 def ollama(path,value=None,method=None):
  data=None if value is None else json.dumps(value).encode()
- raw=urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:11434'+path,data=data,method=method,headers={'Content-Type':'application/json'}),timeout=50).read()
+ raw=urllib.request.urlopen(urllib.request.Request(OLLAMA_URL+path,data=data,method=method,headers={'Content-Type':'application/json'}),timeout=50).read()
  return json.loads(raw) if raw else {}
 def memory():
  result={}
@@ -35,9 +36,11 @@ class Proxy(BaseHTTPRequestHandler):
   if self.path!='/v1/chat/completions':self.send_error(403);return
   q=json.loads(self.rfile.read(int(self.headers.get('Content-Length',0))));assert q['model']==STATE.alias,(q['model'],STATE.alias)
   q['reasoning_effort']='none';q['temperature']=0;q['max_tokens']=min(int(q.get('max_tokens') or q.get('max_completion_tokens') or 2048),2048);q.pop('max_completion_tokens',None)
-  record={'at':time.time(),'model':q['model'],'max_tokens':q['max_tokens'],'messages':len(q.get('messages',[])),'tools':len(q.get('tools',[]))};out=STATE.output;number=len(list(out.glob('request-*.json')))+1
-  (out/f'request-{number:03}.json').write_text(json.dumps(q,ensure_ascii=False))
-  started=time.monotonic();first=None;metrics=None;usage=None;raw=(out/f'response-{number:03}.jsonl').open('wb');c=http.client.HTTPConnection('127.0.0.1',11434,timeout=240)
+  number=uuid.uuid4().hex
+  record={'id':number,'at':time.time(),'phase':len(STATE.phases),'model':q['model'],'max_tokens':q['max_tokens'],'messages':len(q.get('messages',[])),'tools':len(q.get('tools',[]))};out=STATE.output
+  (out/f'request-{number}.json').write_text(json.dumps(q,ensure_ascii=False))
+  backend=urllib.parse.urlsplit(OLLAMA_URL)
+  started=time.monotonic();first=None;metrics=None;usage=None;raw=(out/f'response-{number}.jsonl').open('wb');c=http.client.HTTPConnection(backend.hostname,backend.port,timeout=240)
   try:
    c.request('POST',self.path,json.dumps(q).encode(),{'Content-Type':'application/json'});r=c.getresponse();record['status']=r.status;self.send_response(r.status);self.send_header('Content-Type',r.getheader('Content-Type','application/json'));self.send_header('Connection','close');self.end_headers()
    while True:
@@ -66,7 +69,8 @@ def main():
   with tarfile.open(archive) as tf:tf.extractall(repo)
  ref=subprocess.check_output(['git','rev-parse',a.repo_ref],text=True).strip();alias='sm-oss-bench-'+re.sub('[^a-z0-9-]','',a.model.lower())+'-'+str(int(time.time()))+':latest';assert not ollama('/api/ps')['models'],'Another model is loaded; do not interrupt it.'
  ollama('/api/create',{'model':alias,'from':a.model,'parameters':{'num_ctx':a.window,'temperature':0,'num_predict':2048},'stream':False});STATE.alias=alias;STATE.window=a.window
- metadata={'model_source':a.model,'alias':alias,'window':a.window,'repo':ref,'thinking':'none','temperature':0,'output_cap':2048,'baseline_memory':memory(),'frameworks':a.frameworks.split(','),'cases':a.cases.split(','),'custom_harness_included':False}
+ metadata={'model_source':a.model,'alias':alias,'window':a.window,'repo':ref,'thinking':'none','temperature':0,'output_cap':2048,'baseline_memory':memory(),'frameworks':a.frameworks.split(','),'cases':a.cases.split(','),'custom_harness_included':False,'ollama_url':OLLAMA_URL,'kv_cache_profile':os.environ.get('SM_BENCH_CACHE_TYPE','server default')}
+ (root/'source-hashes.json').write_text(json.dumps({p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in HERE.iterdir() if p.suffix in ['.py','.mjs']},indent=2))
  (root/'metadata.json').write_text(json.dumps(metadata,indent=2));servers=[ThreadingHTTPServer(('127.0.0.1',18085),Control),ThreadingHTTPServer(('127.0.0.1',18084),Proxy)]
  for server in servers:threading.Thread(target=server.serve_forever,daemon=True).start()
  results=[]
