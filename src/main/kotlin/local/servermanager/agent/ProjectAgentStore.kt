@@ -8,7 +8,7 @@ import kotlin.io.path.*
 data class ProjectAgentPreferences(val model:String?=null,val think:Boolean=true,val explicitPermission:Boolean=true,val revision:Long=0)
 data class ProjectAgentProject(val name:String,val path:String)
 data class ProjectAgentMessage(val role:String,val content:String,@get:com.fasterxml.jackson.annotation.JsonIgnore val native:String?=null)
-data class ProjectAgentChannel(val guild:String,val channel:String,val user:String,val project:String?,val home:String,val history:List<ProjectAgentMessage> = emptyList(),val contextLimit:Int=2867,val contextEpoch:Long=0,val executionWindow:Int=8192,val outputTokens:Int=4096)
+data class ProjectAgentChannel(val guild:String,val channel:String,val user:String,val project:String?,val home:String,val history:List<ProjectAgentMessage> = emptyList(),val contextLimit:Int=4500,val contextEpoch:Long=0,val executionWindow:Int=8192,val outputTokens:Int=2048)
 data class ProjectAgentData(val preferences:Map<String,ProjectAgentPreferences> = emptyMap(),val projects:Map<String,List<ProjectAgentProject>> = emptyMap(),val channels:Map<String,ProjectAgentChannel> = emptyMap(),val gradleConsent:Map<String,Set<String>> = emptyMap())
 
 private data class ProjectAgentProfiles(val windows:Map<String,Int> = emptyMap(),val outputs:Map<String,Int> = emptyMap(),val limits:Map<String,Int> = emptyMap(),val epochs:Map<String,Long> = emptyMap())
@@ -24,6 +24,14 @@ class ProjectAgentStore(private val directory:Path) {
     private val profiles=if(profilesFile.exists())mapper.readValue<ProjectAgentProfiles>(profilesFile.readText())else ProjectAgentProfiles()
     private val metadata=if(metadataFile.exists())mapper.readValue<ProjectAgentMetadata>(metadataFile.readText())else ProjectAgentMetadata()
     private var data=(if(file.exists())mapper.readValue<ProjectAgentData>(file.readText()) else ProjectAgentData()).let {loaded->loaded.copy(gradleConsent=metadata.gradleConsent,channels=loaded.channels.mapValues {(id,channel)->channel.copy(contextLimit=(if(profiles.epochs[id]==metadata.epochs[id])profiles.limits[id]else null) ?: metadata.limits[id] ?: 2867,contextEpoch=metadata.epochs[id] ?: 0,executionWindow=profiles.windows[id] ?: 8192,outputTokens=profiles.outputs[id] ?: 4096)})}
+    internal val profileDirectory:Path get()=directory
+    @Synchronized internal fun piState(channel:ProjectAgentChannel):Path {
+        val key=java.security.MessageDigest.getInstance("SHA-256").digest("${channel.guild}:${channel.channel}:${channel.user}:${channel.home}".toByteArray()).joinToString(""){"%02x".format(it)}
+        val root=directory.resolve("pi-sessions").resolve(key);root.createDirectories()
+        val generation=root.resolve("generation");if(!generation.exists())generation.writeText("initial")
+        val value=generation.readText();require(value.matches(Regex("[a-zA-Z0-9-]{1,64}")))
+        return root.resolve(value).also {it.createDirectories()}
+    }
     private fun key(guild:String,user:String)="$guild:$user"
     private val plansFile=directory.resolve("project-agent-plans.json")
     private var plans:Map<String,ProjectAgentTaskPlan> = if(plansFile.exists())mapper.readValue<Map<String,ProjectAgentTaskPlan>>(plansFile.readText()).filterKeys {profiles.epochs[it]==metadata.epochs[it]}else emptyMap()
@@ -87,8 +95,10 @@ class ProjectAgentStore(private val directory:Path) {
     @Synchronized fun context(channel:String,user:String,reset:Boolean=false,limit:Int?=null,window:Int?=null,output:Int?=null):ProjectAgentChannel {
         val previous=data.channels[channel] ?: error("에이전트 채널이 아닙니다.");check(previous.user==user)
         val budget=LocalContextBudget(window ?: previous.executionWindow,output ?: previous.outputTokens)
-        require(limit==null || limit in 1024..budget.input-16) {"압축 기준은 1024~${budget.input-16} 토큰입니다. 실행 창·출력 예약에 맞춰 설정하세요."}
-        val next=previous.copy(history=if(reset)emptyList() else previous.history,contextLimit=limit ?: (if(window!=null && window!=previous.executionWindow)(budget.input*0.8).toInt()else previous.contextLimit.coerceAtMost(budget.input-16)),contextEpoch=previous.contextEpoch+1,executionWindow=budget.window,outputTokens=budget.output)
+        val input=budget.window-budget.output-256
+        require(limit==null || limit in 1024..input-16) {"압축 기준은 1024~${input-16} 토큰입니다. 실행 창·출력 예약에 맞춰 설정하세요."}
+        val next=previous.copy(history=if(reset)emptyList() else previous.history,contextLimit=limit ?: (if(window!=null && window!=previous.executionWindow)(input*0.8).toInt()else previous.contextLimit.coerceAtMost(input-16)),contextEpoch=previous.contextEpoch+1,executionWindow=budget.window,outputTokens=budget.output)
+        if(reset){val oldState=piState(previous);oldState.parent.resolve("generation").writeText(java.util.UUID.randomUUID().toString())}
         persist(data.copy(channels=data.channels+(channel to next)))
         if(reset)runCatching {clearNotes(channel)}
         return next

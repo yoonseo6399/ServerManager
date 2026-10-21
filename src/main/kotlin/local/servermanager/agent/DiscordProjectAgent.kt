@@ -51,7 +51,7 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
                     models("model","이번 요청의 모델 (생략하면 기본 모델)"),OptionData(OptionType.BOOLEAN,"think","이번 요청의 Thinking (지원 모델만)",false),OptionData(OptionType.INTEGER,"turns","이번 요청의 최대 턴 수 (역할 상한 이내)",false).setRequiredRange(1,100)),
                 SubcommandData("context","채널 문맥 조회·초기화·자동 압축 설정").addOptions(
                     OptionData(OptionType.STRING,"action","문맥 작업",true).addChoice("상태","status").addChoice("초기화","reset").addChoice("압축 기준","configure").addChoice("지금 압축","compact"),
-                    OptionData(OptionType.INTEGER,"limit","자동 압축 기준 (실행 창의 입력 예산 이내)",false).setRequiredRange(1024,10984),
+                    OptionData(OptionType.INTEGER,"limit","자동 압축 기준 (실행 창의 입력 예산 이내)",false).setRequiredRange(1024,15600),
                     OptionData(OptionType.INTEGER,"window","실행 창 (16K는 메모리 압력 증가)",false).addChoice("8K · 기본",8192L).addChoice("16K · 메모리 주의",16384L),
                     OptionData(OptionType.INTEGER,"output","출력 예약 토큰",false).setRequiredRange(512,4096)),
                 SubcommandData("link","관리 웹 소유자 계정 연결").addOption(OptionType.STRING,"code","웹 AI 설정에서 발급한 일회용 코드",true),
@@ -182,12 +182,12 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
                             session=store.context(session.channel,session.user,action=="reset",if(action=="configure")event.getOption("limit")?.asLong?.toInt()else null,if(action=="configure")event.getOption("window")?.asLong?.toInt()else null,if(action=="configure")event.getOption("output")?.asLong?.toInt()else null)
                             if(action=="compact"){
                                 val job=jobs.begin(session.channel,session.user)
-                                try {val compact=ProjectAgentMemory.compress(session.history,inference(session));privateAccess(event.jda,session);store.history(session.channel,compact,session.contextEpoch)}finally{jobs.finish(session.channel,job)}
+                                try {engine.compact(session.channel,session.user,inference(session)){privateAccess(event.jda,session)}}finally{jobs.finish(session.channel,job)}
                                 session=store.channel(session.channel)!!
                             }
                         }
                         val llm=inference(session);val maximum=llm.modelLimit()
-                        hook.editOriginal("${if(action=="reset")"문맥을 초기화했습니다. 프로젝트 정보는 유지됩니다.\n" else ""}최근 15분 대화 참여자 ${audience.audience(session.channel).participantIds.size}명 (관측된 발언 기준)\n문맥 약 ${session.history.sumOf {ProjectAgentContext.estimatedTokens(it.content)}} tokens (대화 기록 추정) · 압축 기준 ${session.contextLimit}\n실행 창 ${session.executionWindow} · 입력 예산 ${LocalContextBudget(session.executionWindow,session.outputTokens).input} · 출력 예약 ${session.outputTokens} · 모델 최대 ${maximum?.toString() ?: "확인 불가"}\n${LocalContextBudget(session.executionWindow,session.outputTokens).warning}").queue({}, {})
+                        hook.editOriginal("${if(action=="reset")"문맥을 초기화했습니다. 프로젝트 정보는 유지됩니다.\n" else ""}최근 15분 대화 참여자 ${audience.audience(session.channel).participantIds.size}명 (관측된 발언 기준)\nPi 최근 문맥 ${engine.contextTokens(session)?.toString() ?: "미수신"} tokens · 설정 압축 기준 ${session.contextLimit} · Pi 적용 기준 ${maxOf(session.contextLimit,minOf(4096,session.executionWindow-session.outputTokens-256))}\n실행 창 ${session.executionWindow} · 입력 예산 ${session.executionWindow-session.outputTokens-256} · 출력 예약 ${session.outputTokens} · 모델 최대 ${maximum?.toString() ?: "확인 불가"}\n${LocalContextBudget(session.executionWindow,session.outputTokens).warning}").queue({}, {})
                     }
                     "stop"->{jobs.stop(event.channel.id,event.user.id);engine.stop(event.channel.id,event.user.id);hook.editOriginal("현재 작업과 대기 승인을 중단했습니다.").queue({}, {})}
                     "run"->{
@@ -256,7 +256,7 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
         val inference=inference(session,model)
         // Audience routing is deterministic and immediate; no coding-model inference before acknowledgement.
         check(!job.cancelled.get() && !Thread.currentThread().isInterrupted) {"작업을 중단했습니다."}
-        val main=channel.sendMessageEmbeds(EmbedBuilder().setTitle("${LocalModels.label(model)} · 요청 인식 완료").setDescription(prompt.take(1800)).setFooter("최근 대화 참여자 ${(audience.audience(session.channel).participantIds+session.user).size}명 · 모델 응답 대기").build()).setComponents(ActionRow.of(Button.danger("qa:stop:${job.id}","에이전트 중지"))).setAllowedMentions(emptyList()).complete()
+        val main=channel.sendMessageEmbeds(EmbedBuilder().setTitle("Pi · ${LocalModels.label(model)} · 요청 인식 완료").setDescription(prompt.take(1800)).setFooter("최근 대화 참여자 ${(audience.audience(session.channel).participantIds+session.user).size}명 · 모델 응답 대기").build()).setComponents(ActionRow.of(Button.danger("qa:stop:${job.id}","에이전트 중지"))).setAllowedMentions(emptyList()).complete()
         val events=DiscordProjectAgentDisplay(channel,main,prompt,model,job.id,maxTurns=maxTurns)
         var lastCheck=0L
         fun active() {
@@ -271,18 +271,21 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
     private fun inference(session:ProjectAgentChannel,override:String?=null):ProjectAgentInference {
         val chosen=qwen.config();val model=override ?: store.preferences(session.guild,session.user).model ?: chosen.model
         return object:ProjectAgentInference {
-            private var last:QwenUsage?=null;private var helperInput=0L;private var helperOutput=0L;private var helperCalls=0;private var nativeReply:String?=null
+            private var last:QwenUsage?=null;private var helperInput=0L;private var helperOutput=0L;private var helperCalls=0;private var nativeReply:String?=null;private var wasLimited=false;private var currentUsage:QwenUsage?=null
             override fun nativeTools()=true
             override fun nativeMessage()=nativeReply
+            override fun limited()=wasLimited
+            override fun providerUsage()=currentUsage
             override fun generate(messages:List<ProjectAgentMessage>,think:Boolean,progress:(QwenProgress)->Unit):String {
-                val main=messages.firstOrNull()?.content?.startsWith("You are 루오노타르")==true
-                val budget=LocalContextBudget(session.executionWindow,session.outputTokens).let {if(main)it else it.helper()}
+                val pi=PiWire.decode(messages)
+                val main=pi?.path("tools")?.let {it.isArray && it.size()>0} ?: (messages.firstOrNull()?.content?.startsWith("You are 루오노타르")==true)
+                val budget=LocalContextBudget(session.executionWindow,session.outputTokens).let {if(main || pi!=null)it else it.helper()}
                 val response=QwenRequests.conversationWithBudget(model,messages,think,chosen.runnerId,budget,progress).answer
-                nativeReply=response.nativeMessage
+                nativeReply=response.nativeMessage;wasLimited=response.limited;currentUsage=QwenUsage(response.inputTokens,response.tokens,response.inputTokens?.toInt() ?: 0,response.modelContext,executionWindow=budget.window,inputBudget=budget.window-budget.output-256,outputReserved=budget.output,tokensPerSecond=response.tokensPerSecond,memory=response.memory)
                 if(!main){helperInput+=response.inputTokens ?: 0;helperOutput+=response.tokens;helperCalls++}
-                last=if(main)QwenUsage(response.inputTokens,response.tokens,messages.sumOf {ProjectAgentContext.messageTokens(it)}+(if(main && ProjectAgentNativeTools.active(messages))ProjectAgentNativeTools.overhead(messages.first().content)else 0),response.modelContext,helperInput=helperInput,helperOutput=helperOutput,helperCalls=helperCalls,executionWindow=budget.window,inputBudget=budget.input,outputReserved=budget.output,tokensPerSecond=response.tokensPerSecond,memory=response.memory)
+                last=if(main)QwenUsage(response.inputTokens,response.tokens,response.inputTokens?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt() ?: messages.sumOf {ProjectAgentContext.messageTokens(it)},response.modelContext,helperInput=helperInput,helperOutput=helperOutput,helperCalls=helperCalls,executionWindow=budget.window,inputBudget=if(pi!=null)budget.window-budget.output-256 else budget.input,outputReserved=budget.output,tokensPerSecond=response.tokensPerSecond,memory=response.memory)
                     else (last ?: QwenUsage(executionWindow=budget.window,inputBudget=budget.input,outputReserved=session.outputTokens)).copy(helperInput=helperInput,helperOutput=helperOutput,helperCalls=helperCalls)
-                check(!response.limited) {"로컬 모델 출력 한도에 도달했습니다. 문맥을 압축하거나 요청을 나눠주세요."};return response.text
+                check(!response.limited || pi!=null) {"로컬 모델 출력 한도에 도달했습니다. 문맥을 압축하거나 요청을 나눠주세요."};return response.text
             }
             override fun usage()=last
             override fun modelLimit():Int?=runCatching {RemoteLlm.modelLimitProvider?.invoke(model,chosen.runnerId) ?: if(chosen.runnerId==null)LocalLlm().modelContext(model) else null}.getOrNull()
@@ -315,7 +318,7 @@ internal class DiscordProjectAgentDisplay(private val channel:TextChannel,privat
         main.editMessageEmbeds(snapshot.first).setComponents(buttons).setAllowedMentions(emptyList()).queue({complete()},{complete()})
     },intervalMillis=editIntervalMillis)
     private fun footer()=usage?.let(QwenMetricsText::footer) ?: "입력·출력 토큰 대기"
-    private fun render(status:String,done:Boolean=false){edits.offer(EmbedBuilder().setTitle("${LocalModels.label(model)} · $status").setFooter(footer()).build() to done,done)}
+    private fun render(status:String,done:Boolean=false){edits.offer(EmbedBuilder().setTitle("Pi · ${LocalModels.label(model)} · $status").setFooter(footer()).build() to done,done)}
     private fun reply(turn:Int)=replies.getOrPut(turn){DiscordAgentText(channel,editIntervalMillis)}
     @Synchronized fun emit(event:ProjectAgentEvent) {
         if(finished)return
@@ -342,6 +345,7 @@ internal class DiscordProjectAgentDisplay(private val channel:TextChannel,privat
                     render("턴 ${tn(event.turn)} · 도구 실행")
                 }
             }
+            "tool_output_snapshot"->{logs[event.turn]?.let {(text,writer)->text.setLength(0);text.append(event.text);writer.offer(text.toString())};render("턴 ${tn(event.turn)} · 실시간 출력")}
             "tool_output"->{if(event.text.isNotEmpty())logs[event.turn]?.let {(text,writer)->text.append(event.text);writer.offer(text.toString())};render("턴 ${tn(event.turn)} · 도구 실행 ${"%.1f".format(java.util.Locale.ROOT,event.seconds)}초")}
             "tool_end"->{
                 logs[event.turn]?.let {(text,writer)->writer.offer(text.toString().ifBlank {"출력 없음"},true)}

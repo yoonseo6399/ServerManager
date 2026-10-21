@@ -302,7 +302,17 @@ class RunnerGatewayTest {
             assertFalse(profileBody.path("budget").has("input"));assertEquals(2,profileBody.path("messages").size())
             deliver(RunnerMessage("llm-result",state="OK",token=profileWire.token,detail="""{"text":"profile ok","limited":false,"seconds":1.0,"tokens":2}"""))
             assertEquals("profile ok",profiled.get(2,java.util.concurrent.TimeUnit.SECONDS)!!.answer.text)
+            val piMessages=listOf(ProjectAgentMessage("system",PiWire.PREFIX+"""{"model":"local-agent","messages":[{"role":"user","content":"Pi request"}]}"""))
+            assertFailsWith<IllegalStateException> {gateway.llmBudgetConversation("14b",piMessages,false,"runner",LocalContextBudget(16384,2048)) {}}
+            deliver(RunnerMessage("llm-capability",state="OLLAMA_AGENT_V3",detail="CONTEXT_TOOLS_V1",version="PI_PROVIDER_V1"));sent.clear()
+            val pi=java.util.concurrent.CompletableFuture.supplyAsync {gateway.llmBudgetConversation("14b",piMessages,false,"runner",LocalContextBudget(16384,2048)) {}}
+            val piDeadline=System.nanoTime()+2_000_000_000L;while(sent.isEmpty() && System.nanoTime()<piDeadline)Thread.sleep(2)
+            val piRequest=mapper.readValue<RunnerMessage>((sent.single() as TextMessage).payload)
+            assertEquals("agent-profile:14b",piRequest.state);assertTrue(mapper.readTree(piRequest.command).path("messages")[0].path("content").asText().startsWith(PiWire.PREFIX))
+            deliver(RunnerMessage("llm-result",state="OK",token=piRequest.token,detail="""{"text":"Pi ok","nativeMessage":"{\"role\":\"assistant\",\"content\":\"Pi ok\"}","limited":false,"seconds":1.0,"tokens":2}"""))
+            assertContains(pi.get(2,java.util.concurrent.TimeUnit.SECONDS)!!.answer.nativeMessage!!,"Pi ok")
             deliver(RunnerMessage("llm-capability",state="OLLAMA_AGENT_V3"))
+            assertFailsWith<IllegalStateException> {gateway.llmBudgetConversation("14b",piMessages,false,"runner",LocalContextBudget(16384,2048)) {}}
             assertFailsWith<IllegalStateException> {gateway.llmBudgetConversation("14b",messages,true,"runner",LocalContextBudget(16384,2048)) {}}
             for(size in listOf("qwen3-coder-30b","gemma4-12b","gemma4-31b")) {
                 sent.clear()

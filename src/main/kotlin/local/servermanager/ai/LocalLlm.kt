@@ -126,20 +126,21 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
     /** A bounded conversation; reviewers pass a fresh two-message list with no acting-agent context. */
     fun conversation(size:String,messages:List<ProjectAgentMessage>,think:Boolean=true,progress:(QwenProgress)->Unit={}):Answer = conversationWithBudget(size,messages,think,LocalContextBudget.DEFAULT,progress)
     fun conversationWithBudget(size:String,messages:List<ProjectAgentMessage>,think:Boolean,budget:LocalContextBudget,progress:(QwenProgress)->Unit={}):Answer {
-        require(size in SIZES && messages.size in 1..32 && messages.all {it.role in setOf("system","user","assistant")} && messages.sumOf {it.content.length}<=140000)
+        val pi=PiWire.decode(messages)
+        require(size in SIZES && messages.size in 1..32 && messages.all {it.role in setOf("system","user","assistant")} && messages.sumOf {it.content.length}<=(if(pi!=null)190000 else 140000))
         val native=ProjectAgentNativeTools.active(messages)
         val overhead=if(native)ProjectAgentNativeTools.overhead(messages.first().content)else 0
-        require(messages.sumOf {ProjectAgentContext.messageTokens(it)}+overhead<=budget.input) {"설정된 입력 예산(${budget.input})보다 문맥이 큽니다. 파일·변경을 작은 구간으로 나눠 요청하세요."}
+        require(pi!=null || messages.sumOf {ProjectAgentContext.messageTokens(it)}+overhead<=budget.input) {"설정된 입력 예산(${budget.input})보다 문맥이 큽니다. 파일·변경을 작은 구간으로 나눠 요청하세요."}
         check(inference.tryAcquire()) {"다른 로컬 모델 요청이 진행 중입니다."}
         try {
             if(LocalModels.get(size).backend=="strata") {unloadQwen();return StrataLlm().conversation(messages,think,budget,progress)}
             StrataRuntime.stop()
             unloadQwen(tag(size))
-            val body=mapper.writeValueAsString(mapOf("model" to tag(size),"messages" to (if(native)ProjectAgentNativeTools.wire(messages)else messages),"think" to LocalModels.thinking(size,think),"stream" to true,
-                "keep_alive" to "1m","options" to (mapOf("num_ctx" to budget.window,"num_predict" to budget.output)+if(messages.firstOrNull()?.content?.startsWith("Independent command-risk reviewer")==true)mapOf("temperature" to 0)else emptyMap()))+
-                if(native)mapOf("tools" to ProjectAgentNativeTools.definitions(messages.first().content))else mapOf("format" to ProjectAgentFormats.forMessages(messages)))
+            val body=mapper.writeValueAsString(mapOf("model" to tag(size),"messages" to (if(pi!=null)PiWire.ollamaMessages(pi) else if(native)ProjectAgentNativeTools.wire(messages)else messages),"think" to LocalModels.thinking(size,think),"stream" to true,
+                "keep_alive" to "1m","options" to (mapOf("num_ctx" to budget.window,"num_predict" to budget.output)+if(pi!=null)mapOf("temperature" to pi.path("temperature").asDouble(0.0).coerceIn(0.0,1.0))else if(messages.firstOrNull()?.content?.startsWith("Independent command-risk reviewer")==true)mapOf("temperature" to 0)else emptyMap()))+
+                if(pi!=null)mapOf("tools" to pi.path("tools")) else if(native)mapOf("tools" to ProjectAgentNativeTools.definitions(messages.first().content))else mapOf("format" to ProjectAgentFormats.forMessages(messages)))
             trace?.invoke("request",body)
-            val request=HttpRequest.newBuilder(endpoint.resolve("/api/chat")).timeout(Duration.ofMinutes(3)).header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build()
+            val request=HttpRequest.newBuilder(endpoint.resolve("/api/chat")).timeout(Duration.ofMinutes(if(pi!=null)20 else 3)).header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build()
             val start=System.nanoTime();val opened=java.util.concurrent.atomic.AtomicReference<java.io.InputStream?>()
             val cancelled=java.util.concurrent.atomic.AtomicBoolean(false)
             val headers=client.sendAsync(request,HttpResponse.BodyHandlers.ofInputStream())
@@ -159,16 +160,16 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
                         content.append(chunk.path("message").path("content").asText());thinking.append(chunk.path("message").path("thinking").asText())
                         chunk.path("message").path("tool_calls").takeIf {it.isArray}?.forEach {call->calls.add(call);check(calls.size<=16)}
                         check(!cancelled.get()) {"Ollama 생성을 중단했습니다."}
-                        if(System.nanoTime()-last>TimeUnit.MILLISECONDS.toNanos(250)){progress(QwenProgress(thinking.toString(),(if(native)content.toString()else QwenVisibleText.message(content.toString()))).bounded());last=System.nanoTime()}
+                        if(System.nanoTime()-last>TimeUnit.MILLISECONDS.toNanos(250)){progress(QwenProgress(thinking.toString(),(if(native || pi!=null)content.toString()else QwenVisibleText.message(content.toString()))).bounded());last=System.nanoTime()}
                         if(chunk.path("done").asBoolean()){done=true;limited=chunk.path("done_reason").asText()=="length";tokens=chunk.path("eval_count").asLong();inputTokens=chunk.get("prompt_eval_count")?.asLong();duration=chunk.get("eval_duration")?.asLong();break}
                     }}
-                    progress(QwenProgress(thinking.toString(),(if(native)content.toString()else QwenVisibleText.message(content.toString()))).bounded())
-                    check(done && (native || content.isNotBlank())) {"Ollama 답변이 완료되지 않았습니다. 문맥·출력 한도를 확인하세요."}
-                    val text=if(native)ProjectAgentNativeTools.reply(content.toString(),calls)else content.toString()
-                    Answer(text,limited,(System.nanoTime()-start)/1e9,tokens,thinking.takeLast(4000).toString(),inputTokens,modelContext(size),if(native && calls.size==1)ProjectAgentNativeTools.assistant(content.toString(),calls,thinking.toString())else null,LlmMemory.rate(tokens,duration),memory())
+                    progress(QwenProgress(thinking.toString(),(if(native || pi!=null)content.toString()else QwenVisibleText.message(content.toString()))).bounded())
+                    check(done && (native || pi!=null || content.isNotBlank())) {"Ollama 답변이 완료되지 않았습니다. 문맥·출력 한도를 확인하세요."}
+                    val text=if(pi!=null)content.toString() else if(native)ProjectAgentNativeTools.reply(content.toString(),calls)else content.toString()
+                    Answer(text,limited,(System.nanoTime()-start)/1e9,tokens,thinking.takeLast(4000).toString(),inputTokens,modelContext(size),if(pi!=null)PiWire.assistant(content.toString(),calls,thinking.toString()) else if(native && calls.size==1)ProjectAgentNativeTools.assistant(content.toString(),calls,thinking.toString())else null,LlmMemory.rate(tokens,duration),memory())
                 }
             }
-            return try {pending.get(185,TimeUnit.SECONDS)} catch(e:Exception){cancelled.set(true);headers.cancel(true);pending.cancel(true);runCatching {opened.get()?.close()};runCatching {headers.getNow(null)?.body()?.close()};if(e is InterruptedException)Thread.currentThread().interrupt();val failure=generateSequence<Throwable>(e){it.cause}.firstOrNull {it is IllegalStateException && it.message.orEmpty().startsWith("Ollama HTTP ")};throw IllegalStateException(when {e is InterruptedException->"Ollama 생성을 중단했습니다.";failure!=null->failure.message;else->"Ollama 대화 실패 또는 3분 제한 초과입니다."},e)}
+            return try {pending.get(if(pi!=null)1205 else 185,TimeUnit.SECONDS)} catch(e:Exception){cancelled.set(true);headers.cancel(true);pending.cancel(true);runCatching {opened.get()?.close()};runCatching {headers.getNow(null)?.body()?.close()};if(e is InterruptedException)Thread.currentThread().interrupt();val failure=generateSequence<Throwable>(e){it.cause}.firstOrNull {it is IllegalStateException && it.message.orEmpty().startsWith("Ollama HTTP ")};throw IllegalStateException(when {e is InterruptedException->"Ollama 생성을 중단했습니다.";failure!=null->failure.message;else->"Ollama 대화 실패 또는 3분 제한 초과입니다."},e)}
         }finally {inference.release()}
     }
 

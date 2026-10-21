@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export the actual source templates without reading any runtime profile, conversation or credential."""
+"""Export current Pi host instructions without reading private runtime data."""
 import argparse
 import json
 from pathlib import Path
@@ -9,46 +9,33 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'src/main/kotlin/local/servermanager'
 
 
-def source(file):
-    return (SOURCE / file).read_text()
-
-
-def raw(file, pattern):
-    match = re.search(pattern, source(file), re.S)
-    if not match:
-        raise RuntimeError(f'Prompt layout changed: {file}: {pattern}')
-    return match.group(1).strip()
-
-
 def literal(file, prefix):
-    pattern = r'"(' + re.escape(prefix) + r'(?:[^"\\]|\\.)*)"'
-    match = re.search(pattern, source(file))
+    match = re.search(r'"(' + re.escape(prefix) + r'(?:[^"\\]|\\.)*)"', (SOURCE / file).read_text())
     if not match:
         raise RuntimeError(f'Prompt missing: {file}: {prefix}')
     return json.loads('"' + match.group(1) + '"')
 
 
 def document():
+    engine = (SOURCE / 'agent/ProjectAgentEngine.kt').read_text()
+    risk = re.search(r'ProjectAgentMessage\("system","""(Independent command-risk reviewer.*?)"""\)', engine, re.S)
+    bridge = (ROOT / 'src/main/resources/pi/bridge.mjs').read_text()
+    compact = re.search(r"session\.compact\('([^']*)'\)", bridge)
+    if not risk or not compact:
+        raise RuntimeError('Pi prompt layout changed')
     items = [
-        ('공식 Ollama 도구 에이전트 system 템플릿', 'agent/ProjectAgentEngine.kt', raw('agent/ProjectAgentEngine.kt', r'val baseSystem=if\(native\)ProjectAgentMessage\("system","""(.*?)"""\)')),
-        ('레거시 JSON 에이전트 system 템플릿', 'agent/ProjectAgentEngine.kt', raw('agent/ProjectAgentEngine.kt', r'val system=ProjectAgentMessage\("system","""(.*?)"""\)')),
-        ('도구 목록', 'agent/ProjectAgentTools.kt', raw('agent/ProjectAgentTools.kt', r'val description="""(.*?)"""\+harness')),
-        ('검색·부분 수정 작업 요령', 'agent/ProjectAgentTools.kt', raw('agent/ProjectAgentTools.kt', r'val harness="""(.*?)"""')),
-        ('독립 위험 검토 system', 'agent/ProjectAgentEngine.kt', raw('agent/ProjectAgentEngine.kt', r'ProjectAgentMessage\("system","""(Independent command-risk reviewer.*?)"""\)')),
-        ('문맥 압축 system', 'agent/ProjectAgentMemory.kt', literal('agent/ProjectAgentMemory.kt', 'Context compressor.')),
-        ('명령 결과 요약 system', 'agent/ProjectAgentMemory.kt', literal('agent/ProjectAgentMemory.kt', 'Tool-result summarizer.')),
-        ('요구사항 추출 system', 'agent/ProjectAgentLedger.kt', literal('agent/ProjectAgentLedger.kt', 'Requirement extractor.')),
-        ('레거시 라우팅 분류 system', 'agent/ProjectAgentEngine.kt', literal('agent/ProjectAgentEngine.kt', 'You are a routing classifier,')),
+        ('Pi 기본 지시문에 추가되는 system', 'agent/ProjectAgentEngine.kt', literal('agent/ProjectAgentEngine.kt', 'You are 루오노타르,')),
+        ('독립 위험 검토 system', 'agent/ProjectAgentEngine.kt', risk.group(1).strip()),
+        ('수동 압축 추가 지시문', 'src/main/resources/pi/bridge.mjs', compact.group(1)),
+        ('레거시 대화 최초 이관 안내', 'agent/ProjectAgentEngine.kt', literal('agent/ProjectAgentEngine.kt', 'Legacy conversational handover only;')),
+        ('호환 라우팅 분류 system', 'agent/ProjectAgentEngine.kt', literal('agent/ProjectAgentEngine.kt', 'Routing only.')),
     ]
-    result = ['# AI 문맥 지시문 원문', '',
+    result = ['# AI 문맥 지시문 원문 — Pi 엔진', '',
               '생성: `python3 scripts/export-agent-context.py`. 검증: `python3 scripts/export-agent-context.py --check`.', '',
-              '소스 템플릿을 그대로 추출한다. `${...}`는 실행 시 Kotlin이 치환하는 자리이며 실제 계정·경로·대화는 포함하지 않는다. 전체 메시지 순서·권한별 차이·예산은 [agent-context.md](agent-context.md)를 참고한다.', '',
-              '도구 목록에는 작업 요령이 뒤이어 붙는다. 친구 READ/EDIT에는 `descriptionFor`의 짧은 권한별 목록이 사용된다. 레거시 라우팅 분류기는 자연어 채널의 기본 경로가 아니다.', '']
-    for label, file, text in items:
-        result += [f'## {label}', '', f'소스: `{file}`', '', '```text', text, '```', '']
-    result += ['## 권한별 도구 목록 선택 코드', '', '```kotlin',
-               raw('agent/ProjectAgentTools.kt', r'(fun descriptionFor\(tier:String\).*?)\n    }'), '```', '',
-               '## 레거시·보조 응답 JSON 스키마 생성 코드', '', '```kotlin', source('agent/ProjectAgentFormats.kt').strip(), '```', '', '## 공식 함수 등록·네이티브 응답 변환 코드', '', '```kotlin', source('agent/ProjectAgentNativeTools.kt').strip(), '```', '']
+              '운영 프로필·대화·비밀 값 없이 현재 소스 템플릿만 추출한다. `$home` 등은 실행 시 치환된다. [문맥 구성](agent-context.md)과 [Pi 엔진 구조](pi-agent-runtime.md)를 참고한다.', '',
+              'Pi의 기본 system·도구 설명·자동 압축 프롬프트는 고정 SDK 1.3.0이 생성한다. 아래는 앱이 추가하는 부분이며 전체 SDK 프롬프트를 대체하지 않는다. 이전 custom actor/요구사항 추출/압축 프롬프트는 생산 경로에서 사용하지 않는다.', '']
+    for label, file, value in items:
+        result += [f'## {label}', '', f'소스: `{file}`', '', '```text', value, '```', '']
     return '\n'.join(result)
 
 

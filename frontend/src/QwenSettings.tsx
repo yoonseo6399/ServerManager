@@ -25,7 +25,7 @@ export function QwenSettings(){
  async function installStrata(){const result=await run(()=>api<Strata>('/admin/qwen/strata/install','POST',{runnerId}));if(result){setNotice(result.message);await check();}}
  useEffect(()=>{if(!probe||!ready)return;let active=true,inFlight=false;const timer=setInterval(()=>{if(inFlight)return;inFlight=true;api<Probe>('/admin/qwen/probe','POST',{runnerId}).then(p=>{if(active)setProbe(p);}).catch(()=>{}).finally(()=>{inFlight=false;});},10000);return()=>{active=false;clearInterval(timer);};},[!!probe,ready,runnerId]);
  async function unload(){const result=await run(()=>api<Probe>('/admin/qwen/unload','POST',{runnerId}));if(result){setProbe(result);setNotice('로컬 모델을 메모리에서 내렸습니다.');}}
- return <section className="discord-settings" aria-labelledby="qwen-heading"><h2 id="qwen-heading">로컬 LLM</h2>
+ return <section className="discord-settings" aria-labelledby="qwen-heading"><h2 id="qwen-heading">로컬 LLM</h2><p>프로젝트 에이전트 엔진: <strong>Pi 1.3.0</strong>. 첫 /agent 요청에서 검증된 런타임을 자동 준비합니다. 관리 앱과 추론 실행기를 함께 업데이트하세요. 일반 로컬 채팅은 도구를 실행하지 않습니다.</p>
  <p><code>/agent</code>의 추론 컴퓨터와 공통 기본 모델을 고릅니다. 프로젝트 도구·명령은 관리 앱 컴퓨터에서 실행합니다. Thinking 지원 모델은 기본 켜짐이며 Discord 옵션으로 끌 수 있습니다. Coder는 Thinking을 지원하지 않아 자동으로 끕니다. 지원 모델은 하나씩 메모리에 올리며 모델을 바꾸면 이전 모델을 먼저 내립니다. 관리 앱과 추론 실행기를 함께 업데이트하세요. 27B는 검증한 GGUF Q4_K_M을 사용합니다. Flash-Next는 Strata SSD 오프로딩으로 실행하며 아래 버튼으로 설치합니다.</p>
  {error&&<p role="alert" className="alert error-banner">{error}</p>}{notice&&<p role="status" className="notice alert">{notice}</p>}
  <form onSubmit={e=>{e.preventDefault();save();}}><fieldset className="discord-fieldset" disabled={busy||!view}>
