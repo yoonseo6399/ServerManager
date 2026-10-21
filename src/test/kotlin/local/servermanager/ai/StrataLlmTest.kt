@@ -40,4 +40,15 @@ class StrataLlmTest {
         val text=QwenMetricsText.footer(QwenUsage(tokensPerSecond=12.5,memory=LlmMemory(totalBytes=24L*1073741824,usedBytes=18L*1073741824,pressure="정상")))
         assertContains(text,"12.5 tok/s");assertContains(text,"18.0/24.0 GiB");assertFalse(QwenMetricsText.footer(QwenUsage()).contains("0.0 tok/s"))
     }
+    @Test fun `Pi native schemas bypass legacy parser and preserve multiple calls`() {
+        val data="data: " + mapper.writeValueAsString(mapOf("choices" to listOf(mapOf("delta" to mapOf("tool_calls" to listOf(
+            mapOf("index" to 0,"id" to "pi_read","function" to mapOf("name" to "read","arguments" to "{\"path\":\"note.txt\"}")),
+            mapOf("index" to 1,"id" to "pi_search","function" to mapOf("name" to "search","arguments" to "{\"pattern\":\"value\"}")))),"finish_reason" to "tool_calls")))) + "\n\ndata: [DONE]\n\n"
+        val q=mapper.writeValueAsString(mapOf("messages" to listOf(mapOf("role" to "developer","content" to "Pi native instructions"),mapOf("role" to "user","content" to "read")),"tools" to listOf(mapOf("type" to "function","function" to mapOf("name" to "read","parameters" to mapOf("type" to "object","properties" to emptyMap<String,Any>()))))))
+        serve(data,{raw->val body=mapper.readTree(raw);assertEquals("system",body.path("messages")[0].path("role").asText());assertEquals("read",body.path("tools")[0].path("function").path("name").asText());assertFalse(body.has("response_format"))}) {llm->
+            val result=llm.conversation(listOf(ProjectAgentMessage("system",PiWire.PREFIX+q)),false,LocalContextBudget())
+            val raw=mapper.readTree(result.nativeMessage!!);assertEquals(2,raw.path("tool_calls").size());assertEquals("read",raw.path("tool_calls")[0].path("function").path("name").asText());assertEquals("search",raw.path("tool_calls")[1].path("function").path("name").asText())
+        }
+    }
+
 }
