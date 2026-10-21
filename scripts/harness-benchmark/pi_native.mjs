@@ -9,7 +9,7 @@ const runtime=await ModelRuntime.create({modelsPath,authPath:path.join(agentDir,
 const tools=[];
 // Upstream prompt remains; only automatic external resources are disabled in this controlled integration.
 const loader={getExtensions:()=>({extensions:[],errors:[],runtime:createExtensionRuntime()}),getSkills:()=>({skills:[],diagnostics:[]}),getPrompts:()=>({prompts:[],diagnostics:[]}),getThemes:()=>({themes:[],diagnostics:[]}),getAgentsFiles:()=>({agentsFiles:[]}),getSystemPrompt:()=>undefined,getSystemPromptSource:()=>undefined,getAppendSystemPrompt:()=>[spec.system],getAppendSystemPromptSources:()=>[],extendResources:()=>{},reload:async()=>{}};
-const options={cwd:spec.home,agentDir,model:runtime.getModel('local',spec.model),modelRuntime:runtime,thinkingLevel:'off',resourceLoader:loader,tools:['read','bash','edit','write'],settingsManager:SettingsManager.inMemory({compaction:{enabled:true,reserveTokens:2048,keepRecentTokens:128},retry:{enabled:false}})};
+const options={cwd:spec.home,agentDir,model:runtime.getModel('local',spec.model),modelRuntime:runtime,thinkingLevel:'off',resourceLoader:loader,tools:['read','bash','edit','write'],settingsManager:SettingsManager.inMemory({compaction:{enabled:true,reserveTokens:2048,keepRecentTokens:Number(process.env.SM_BENCH_PI_KEEP_RECENT||128)},retry:{enabled:false}})};
 let {session}=await createAgentSession({...options,sessionManager:SessionManager.create(spec.home,path.join(agentDir,'sessions'))});
 function attach(s){s.subscribe(e=>{if(e.type==='tool_execution_start'||e.type==='tool_execution_end')fs.appendFileSync(path.join(spec.output,'native-events.jsonl'),JSON.stringify({at:Date.now()/1000,...e})+'\n')})};attach(session);
 const result={framework:'pi',answers:[],compression:[],errors:[],sessionFile:null};

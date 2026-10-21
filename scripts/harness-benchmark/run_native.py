@@ -70,7 +70,7 @@ def main():
   with tarfile.open(archive) as tf:tf.extractall(repo)
  ref=subprocess.check_output(['git','rev-parse',a.repo_ref],text=True).strip();alias='sm-oss-bench-'+re.sub('[^a-z0-9-]','',a.model.lower())+'-'+str(int(time.time()))+':latest';assert not ollama('/api/ps')['models'],'Another model is loaded; do not interrupt it.'
  ollama('/api/create',{'model':alias,'from':a.model,'parameters':{'num_ctx':a.window,'temperature':0,'num_predict':2048},'stream':False});STATE.alias=alias;STATE.window=a.window
- metadata={'model_source':a.model,'alias':alias,'window':a.window,'repo':ref,'thinking':'none','temperature':0,'output_cap':2048,'baseline_memory':memory(),'frameworks':a.frameworks.split(','),'cases':a.cases.split(','),'tool_track':'upstream-native','versions':{'hermes':'0.22.2 d923a5e','pi':'1.3.0','opencode':'1.19.3'},'custom_harness_included':False,'ollama_url':OLLAMA_URL,'kv_cache_profile':os.environ.get('SM_BENCH_CACHE_TYPE','server default')}
+ metadata={'model_source':a.model,'alias':alias,'window':a.window,'repo':ref,'thinking':'none','temperature':0,'output_cap':2048,'baseline_memory':memory(),'frameworks':a.frameworks.split(','),'cases':a.cases.split(','),'pi_keep_recent_tokens':int(os.environ.get('SM_BENCH_PI_KEEP_RECENT','128')),'tool_track':'upstream-native','versions':{'hermes':'0.22.2 d923a5e','pi':'1.3.0','opencode':'1.19.3'},'custom_harness_included':False,'ollama_url':OLLAMA_URL,'kv_cache_profile':os.environ.get('SM_BENCH_CACHE_TYPE','server default')}
  (root/'benchmark-source').mkdir(exist_ok=True)
  for source in HERE.iterdir():
   if source.suffix in ['.py','.mjs','.md']:(root/'benchmark-source'/source.name).write_bytes(source.read_bytes())

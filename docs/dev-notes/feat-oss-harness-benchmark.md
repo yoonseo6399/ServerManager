@@ -1,4 +1,4 @@
-상태: 27B·64K 공통 도구 교정 시험 진행 · 기본 도구 비교 준비·격리 검증 완료 · 운영 변경 없음
+상태: native 8과제×3엔진 실행 완료 · 원시 결과·수동 감사 보존 · Pi 압축·OpenCode 시간 제한 추가 검증 중
 # feat/oss-harness-benchmark
 
 - 사용자 결정: 커스텀 모델 실행 루프·계획/압축 하네스를 폐기하고 오픈소스로 대체한다. 먼저 Hermes까지 실제 비교한다. 기존 인가·파일 경로 검사·명시적 승인 등 backend 보안 경계는 엔진 교체와 별개다.
@@ -29,3 +29,26 @@
 - native SDK/import/OpenCode --version과 격리 검증 통과: 허용 폴더 쓰기, 외부 사용자·임시 파일 읽기 거부, 저장소 쓰기 거부, 외부 인터넷 거부, 로컬 시험 API 접근, 민감 인증 환경변수 비상속. `/private/tmp/sm-native-isolation-probe/results.json`. 첫 SBPL 주소 문법 오류는 준비 오류로 수정 후 재검증했다.
 - native 이벤트 연결/구문 검증 완료. shell에서 여러 동작을 한 번에 실행할 수 있으므로 read-before-delete·두 Python 예제 실행·소스 근거는 수동 감사를 별도로 표시한다. 기존 instrument 도구 이벤트를 허위로 만들어 통과시키지 않는다.
 - 다음: 공통 코드 과제 세 엔진 완료 경계에서 종료 → native 8과제 직렬 실행 → 실제 바이트/실행/기억 및 압축 토큰을 비교 → 선정 및 런타임 교체. 아직 대체 엔진 선정·제품 교체·릴리즈는 완료하지 않았다.
+
+
+## 1차 실제 결과
+
+- native 코드 수정은 Hermes187.88초/Pi161.46초/OpenCode178.79초 모두 통과. CRLF·원문·숨은 함수 검증과 실제 모델 Python assertion exit0을 확인했다. 공통 도구 실패와 분리한다.
+- native 총8과제×3엔진 실행 완료. 계획/승인 후 CSV, Python 별, 바이트 합치기/검증 후 삭제, 명시적 내용 기준 텍스트 선택은 세 엔진 모두 통과했고 compound shell 순서도 수동 감사했다.
+- 애매한 삭제는 Pi/OpenCode가 먼저 질문했다. Hermes는4개를 먼저 삭제한 뒤 .py만 별도로 질문해 사전 rubric 실패.
+- 기억은 Hermes/OpenCode 원문7/7. Pi 원문2/7이지만 의미7/7이고 요약에 원래 한국어 이름도 있어 정보 소실5개라고 보고하지 않는다. 영어화된 식별자는 별도 위험이다.
+- 실제 입력: Hermes8914→8349, Pi6123→6306, OpenCode9512→5661. API 강제 압축이며 자동 임계치 도달 검증으로 주장하지 않는다. Pi는 큰 로그 turn을 보호했다.
+- Pi keepRecent32 추가 표본은 원문7/7이지만 입력6102→6311로 증가. 공식 prepareCompaction의 cutpoint를 오프라인 확인했고16에서 큰 로그를 제외하는 경계를 확인했다. 실제16 시험 대기/진행.
+- repo 조사: Hermes/Pi600초에 structure.json 없음. OpenCode는 어댑터 HTTP360초가 먼저 걸려 품질 실패로 합산하지 않고650초로 고쳐 외부600초 재시험. native 진행 JSON을3초마다 보존하게 계측 보완. 모델 루프/도구/프롬프트는 바꾸지 않았다.
+- 분석: docs/benchmarks/oss-harness-qwen27-20261021.md. 상세 raw 경로와 한계 포함. 운영 앱/봇/게임, 버전, 릴리즈는 변경하지 않았다.
+
+
+## 완료 판정
+
+- native 본 시험8과제×3엔진과 추가3회(Pi keep32/16, OpenCode repo600초)를 마쳤다. 커스텀 하네스는 비교 대상에서 제외했다. solo 작업이며 전체 회귀/다른 OS는 생략했다.
+- Pi keep16:243.01초, 실제 입력6103→2628(약56.9% 감소), 원문7/7·파일 기억 금지 통과. 이는 압축 경계 확인용 값이며 제품 기본값으로 적용하지 않았다. keep32도 원문7/7이었지만 입력은 늘었다. 초기 원문2/7 결과도 삭제하지 않는다.
+- OpenCode 재시험: 실제600.03초에도 structure.json 미완성. 진행 JSON에는13개 native 도구 part가 보존됐다. 자동 결과 tool_calls0은 최종 어댑터 기록 부재이며 실제0호출이 아니다.
+- Pi1.3.0을 기본 대체 엔진으로 우선 선정. SDK native loop/session/compaction/editor 사용, 기존 custom actor loop 폐기, ServerManager는 Discord와 backend 권한/독립 위험검토/추론 연결을 담당하는 경계로 한다. 운영 연결·설치/업데이트·회귀와 실제교체는 별도 구현이 남았다. 이번 브랜치는 제품 교체를 완료한 것으로 표시하지 않는다.
+- 시험 모델0 확인, 전용 Ollama11435만 종료. 기존11434 응답, pressure1, wired_limit_mb20480 유지. 운영 앱·게임·봇 재시작 없음.
+- docs/benchmarks/oss-harness-qwen27-20261021.md에 전체 결과·실패 원인·설정 의존성·미실행 범위를 정리했다. 프로젝트 루트 benchmark-evidence에 raw archive·SHA256 manifest·runtime 설치 증거·정리 확인을 보존한다.
+- 릴리즈 설명용: '27B로 Pi·OpenCode·Hermes 기본 도구와 세션 압축을 실제 비교하고 Pi를 대체 엔진으로 선정했습니다. 이번 변경은 시험 코드/보고서이며 운영 엔진 전환은 포함하지 않습니다.'

@@ -17,6 +17,7 @@ def isolated(command,out,repo,source,python,node,pi_package,hermes_source,hermes
  profile=out/'sandbox.sb';profile.write_text(policy)
  env={'HOME':str(out/'runtime-home'),'TMPDIR':str(out/'tmp')+'/', 'PATH':':'.join([str(pathlib.Path(python).parent),str(pathlib.Path(node).parent),'/Applications/ChatGPT.app/Contents/Resources/codex-cli/codex-path','/usr/bin','/bin','/usr/sbin','/sbin']),
       'LANG':'en_US.UTF-8','PYTHONNOUSERSITE':'1','PYTHONDONTWRITEBYTECODE':'1','TERM':'dumb','NO_COLOR':'1','TERMINAL_ENV':'local','TERMINAL_CWD':str(out/'project'),'SHELL':'/bin/bash'}
+ if os.environ.get('SM_BENCH_PI_KEEP_RECENT'):env['SM_BENCH_PI_KEEP_RECENT']=os.environ['SM_BENCH_PI_KEEP_RECENT']
  return ['/usr/bin/sandbox-exec','-f',str(profile),*command],env
 
 def events(out,framework,adapter,home):
