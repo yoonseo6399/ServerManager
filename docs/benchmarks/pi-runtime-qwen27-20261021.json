@@ -33,7 +33,8 @@
     "read",
     "bash"
   ],
-  "actorUsage": [
+  "fullEvidenceSha256": "c7669e062cb6503049e4040a29938ff754800d00fd6644dff7834eefb83feccd",
+  "emittedUsageSnapshots": [
     {
       "input": 2837,
       "output": 25,
@@ -227,5 +228,14 @@
       }
     }
   ],
-  "fullEvidenceSha256": "c7669e062cb6503049e4040a29938ff754800d00fd6644dff7834eefb83feccd"
+  "executionEnvironment": {
+    "ollamaEndpoint": "private loopback 11435",
+    "kvCache": "q8_0",
+    "flashAttention": true,
+    "parallel": 1,
+    "thinking": false,
+    "contextWindow": 16384,
+    "outputReservation": 2048,
+    "note": "Usage snapshots include independent risk review calls; production KV settings were not modified."
+  }
 }

@@ -1,4 +1,4 @@
-상태: Pi SDK 기본 엔진 구현·관련 기능 32개 및 실제 Qwen27 연쇄 도구 통과 · 릴리즈 통합 대기
+상태: Beta17 게시 완료 · 공개 자산9개·다운로드 JAR/Pi 구성·고정 Ed25519 서명 검증 완료
 # feat/pi-agent-runtime
 
 - 사용자 요청: Pi를 실제 기본 엔진으로 넣고 새 Beta 릴리즈. 단독 작업, 전체 테스트·다른 OS 실행 생략.
@@ -13,3 +13,7 @@
 - live 중 메모리 주의, 스왑 약6.37→9.23GiB. 테스트 모델 해제 후 전용 Ollama11435 종료, 운영11434 및 wired20480 보존. 운영 앱/게임/실행기 설치·재시작 안 함.
 - 미실행: 전체 테스트, 다른 OS, 실제 Discord 네트워크/버튼, 실제 여러 컴퓨터 Pi end-to-end, Flash 전체 Pi loop. Strata provider는 모의 HTTP 검증이며 시작/정지는 별도 수정 브랜치 검증.
 - 구조/주입문서: docs/architecture/pi-agent-runtime.md, agent-context.md, agent-context-prompts.md. 예전 actor 소스는 호환·실험용이며 기본 엔진 fallback이 아님.
+
+- 게시: https://github.com/yoonseo6399/ServerManager/releases/tag/v0.7.0-beta.17 · CI39605313470 성공, 전체 suite skipped 확인. stable/latest v0.6.3 보존. 실제 운영 서비스 업데이트/재시작 안 함.
+- live 조건 보충: 전용 Ollama11435, KV q8_0/Flash Attention on/parallel1. 운영 Ollama의 KV 설정은 바꾸지 않았으며 동일 속도·메모리를 보장하지 않음. telemetry snapshots에는 독립 위험 검토도 포함.
+- 원시 fixture/통합 검증 보관: 프로젝트 benchmark-evidence/pi-runtime-beta17-20261021.tar.gz, SHA256 38c29433afb2668219486d172d37dda14f60fa523bdb13252543d0b90c13323f.
