@@ -280,6 +280,17 @@ class RunnerGatewayTest {
             deliver(RunnerMessage("llm-progress",token=agentRequest.token,detail=mapper.writeValueAsString(QwenProgress("streamed thought","partial answer"))));assertEquals("streamed thought",thinking)
             deliver(RunnerMessage("llm-result",state="OK",token=agentRequest.token,detail="""{"text":"done","limited":false,"seconds":1.0,"tokens":5,"thinking":"checking"}"""))
             assertEquals("done",conversation.get(2,java.util.concurrent.TimeUnit.SECONDS)!!.answer.text)
+            assertFailsWith<IllegalStateException> {gateway.llmChat("qwen38-flash-next","hello",false,"runner")}
+            deliver(RunnerMessage("llm-capability",state="OLLAMA_AGENT_V3",detail="CONTEXT_TOOLS_V1",command="STRATA_V1"));sent.clear()
+            val newModel=java.util.concurrent.CompletableFuture.supplyAsync {gateway.llmChat("qwen38-flash-next","hello",false,"runner")}
+            val newDeadline=System.nanoTime()+2_000_000_000L;while(sent.isEmpty() && System.nanoTime()<newDeadline)Thread.sleep(2)
+            val newRequest=mapper.readValue<RunnerMessage>((sent.single() as TextMessage).payload)
+            assertEquals("qwen38-flash-next",newRequest.state)
+            deliver(RunnerMessage("llm-result",state="OK",token=newRequest.token,detail="""{"text":"new backend","limited":false,"seconds":10.0,"tokens":77,"tokensPerSecond":7.7,"memory":{"totalBytes":24000,"usedBytes":17000}}"""))
+            val metrics=newModel.get(2,java.util.concurrent.TimeUnit.SECONDS)!!.answer
+            assertEquals(7.7,metrics.tokensPerSecond);assertEquals(24000L,metrics.memory!!.totalBytes)
+            deliver(RunnerMessage("llm-capability",state="OLLAMA_AGENT_V3"))
+
             assertFailsWith<IllegalStateException> {gateway.llmBudgetConversation("14b",messages,true,"runner",LocalContextBudget(16384,2048)) {}}
             deliver(RunnerMessage("llm-capability",state="OLLAMA_AGENT_V3",detail="CONTEXT_TOOLS_V1"));sent.clear()
             val profiled=java.util.concurrent.CompletableFuture.supplyAsync {gateway.llmBudgetConversation("14b",messages,true,"runner",LocalContextBudget(16384,2048)) {}}

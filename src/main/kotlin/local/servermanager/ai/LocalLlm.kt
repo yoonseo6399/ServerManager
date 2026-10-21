@@ -27,8 +27,8 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
         require(endpoint.scheme=="http" && endpoint.host in setOf("localhost","127.0.0.1","[::1]","::1") && endpoint.rawUserInfo==null && endpoint.rawQuery==null && endpoint.rawFragment==null && endpoint.path in setOf("","/")) {"OLLAMA_URL은 로컬 Ollama의 HTTP 주소여야 합니다."}
     }
     data class OllamaModel(val name:String,val sizeBytes:Long)
-    data class Status(val reachable:Boolean,val version:String?,val models:List<OllamaModel>,val loaded:List<String>,val tags:Map<String,String>,val installed:Map<String,Boolean>,val message:String,val modelLimits:Map<String,Int> = emptyMap())
-    data class Answer(val text:String,val limited:Boolean,val seconds:Double,val tokens:Long,val thinking:String="",val inputTokens:Long?=null,val modelContext:Int?=null,@get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) val nativeMessage:String?=null)
+    data class Status(val reachable:Boolean,val version:String?,val models:List<OllamaModel>,val loaded:List<String>,val tags:Map<String,String>,val installed:Map<String,Boolean>,val message:String,val modelLimits:Map<String,Int> = emptyMap(),val memory:LlmMemory?=null,val strata:StrataRuntime.Status?=null)
+    data class Answer(val text:String,val limited:Boolean,val seconds:Double,val tokens:Long,val thinking:String="",val inputTokens:Long?=null,val modelContext:Int?=null,@get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) val nativeMessage:String?=null,val tokensPerSecond:Double?=null,val memory:LlmMemory?=null)
     private val client=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
     private fun get(path:String):com.fasterxml.jackson.databind.JsonNode {
         val request=HttpRequest.newBuilder(endpoint.resolve(path)).timeout(Duration.ofSeconds(8)).GET().build()
@@ -65,6 +65,7 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
         return stale
     }
     fun modelContext(size:String):Int? {
+        if(LocalModels.get(size).backend=="strata")return 8192
         val cacheKey=endpoint.toString()+tag(size)
         modelMetadata[cacheKey]?.takeIf {System.currentTimeMillis()-it.first<300_000}?.let {return it.second}
         return runCatching {
@@ -74,15 +75,23 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
             mapper.readTree(bytes).path("model_info").properties().firstOrNull {it.key.endsWith(".context_length")}?.value?.asInt()?.takeIf {it>0}}
     }.getOrNull().also {modelMetadata[cacheKey]=System.currentTimeMillis() to it}
     }
+    private fun memory():LlmMemory = runCatching {
+        val rows=get("/api/ps").path("models");val sizes=rows.mapNotNull {it.get("size")?.asLong()}
+        if(rows.isEmpty || sizes.isNotEmpty())LlmMemory.sample(sizes.sum(),"Ollama 전체 할당")else LlmMemory.sample()
+    }.getOrElse {LlmMemory.sample()}
+    fun unloadAll():Status {
+        check(inference.tryAcquire()) {"다른 로컬 모델 요청이 진행 중입니다."}
+        try {StrataRuntime.stop();unloadQwen();return probe()}finally {inference.release()}
+    }
     fun probe():Status {
-        val tags=SIZES.associateWith {tag(it)}
-        return try {
-            val version=get("/api/version").path("version").asText().takeIf {it.isNotBlank()}
-            val models=get("/api/tags").path("models").map {OllamaModel(it.path("name").asText(),it.path("size").asLong())}.filter {it.name.isNotBlank()}
-            val installed=tags.mapValues {(_,tag)->models.any {it.name==tag}}
-            val missing=installed.filterValues {!it}.keys.map {"${LocalModels.label(it)}(${tags.getValue(it)})"}
-            Status(true,version,models,loaded(),tags,installed,if(missing.isEmpty())"Ollama가 실행 중이고 지원 모델 5개가 모두 설치되어 있습니다." else "Ollama는 실행 중이지만 ${missing.joinToString(", ")} 모델이 없습니다. ollama pull로 받으세요.",tags.keys.mapNotNull {key->if(installed[key]==true)modelContext(key)?.let {key to it}else null}.toMap())
-        } catch(e:Exception) {Status(false,null,emptyList(),emptyList(),tags,tags.mapValues {false},"Ollama에 연결하지 못했습니다. 실행 여부와 OLLAMA_URL을 확인하세요.")}
+        val tags=SIZES.associateWith {tag(it)};val strata=StrataRuntime.status()
+        val version=runCatching {get("/api/version").path("version").asText().takeIf {it.isNotBlank()}}.getOrNull()
+        val models=runCatching {get("/api/tags").path("models").map {OllamaModel(it.path("name").asText(),it.path("size").asLong())}.filter {it.name.isNotBlank()}}.getOrDefault(emptyList())
+        val installed=tags.mapValues {(id,tag)->if(LocalModels.get(id).backend=="strata")strata.installed else models.any {it.name==tag}}
+        val missing=installed.filter {(id,ok)->!ok && LocalModels.get(id).backend=="ollama"}.keys.map {LocalModels.label(it)}
+        val loaded=loaded()+if(strata.running)listOf(StrataRuntime.MODEL)else emptyList()
+        return Status(version!=null || strata.running,version,models,loaded,tags,installed,if(version!=null)"Ollama 실행 중"+(if(missing.isEmpty())" · Ollama 모델 모두 설치됨"else " · 미설치: ${missing.joinToString()}")+" · Flash-Next는 별도 Strata 엔진을 사용합니다."else "Ollama에 연결하지 못했습니다. Flash-Next 상태는 아래에서 확인하세요.",
+            tags.keys.mapNotNull {key->if(installed[key]==true)modelContext(key)?.let {key to it}else null}.toMap(),if(strata.running)StrataRuntime.memory()else memory(),strata)
     }
     fun chat(size:String,prompt:String,think:Boolean=false):Answer {
         check(inference.tryAcquire()) {"다른 로컬 모델 요청이 진행 중입니다."}
@@ -90,6 +99,8 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
     }
     private fun chatLocked(size:String,prompt:String,think:Boolean):Answer {
         require(size in SIZES && prompt.isNotBlank() && prompt.length<=6000)
+        if(LocalModels.get(size).backend=="strata") {unloadQwen();return StrataLlm().conversation(listOf(ProjectAgentMessage("user",prompt)),think,LocalContextBudget(output=2048),plain=true)}
+        StrataRuntime.stop()
         val model=tag(size)
         unloadQwen(model)
         val body=mapper.writeValueAsString(mapOf("model" to model,"messages" to listOf(mapOf("role" to "user","content" to prompt)),
@@ -109,7 +120,7 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
         check(result.path("done").asBoolean() && !result.has("error")) {"Ollama가 완료된 응답을 반환하지 않았습니다."}
         val text=result.path("message").path("content").asText()
         check(text.isNotBlank()) {"최종 답변이 없습니다. 출력 한도 또는 모델 상태를 확인하세요."}
-        return Answer(text,result.path("done_reason").asText()=="length",(System.nanoTime()-start)/1e9,result.path("eval_count").asLong())
+        return Answer(text,result.path("done_reason").asText()=="length",(System.nanoTime()-start)/1e9,result.path("eval_count").asLong(),inputTokens=result.get("prompt_eval_count")?.asLong(),tokensPerSecond=LlmMemory.rate(result.path("eval_count").asLong(),result.get("eval_duration")?.asLong()),memory=memory())
     }
 
     /** A bounded conversation; reviewers pass a fresh two-message list with no acting-agent context. */
@@ -121,6 +132,8 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
         require(messages.sumOf {ProjectAgentContext.messageTokens(it)}+overhead<=budget.input) {"설정된 입력 예산(${budget.input})보다 문맥이 큽니다. 파일·변경을 작은 구간으로 나눠 요청하세요."}
         check(inference.tryAcquire()) {"다른 로컬 모델 요청이 진행 중입니다."}
         try {
+            if(LocalModels.get(size).backend=="strata") {unloadQwen();return StrataLlm().conversation(messages,think,budget,progress)}
+            StrataRuntime.stop()
             unloadQwen(tag(size))
             val body=mapper.writeValueAsString(mapOf("model" to tag(size),"messages" to (if(native)ProjectAgentNativeTools.wire(messages)else messages),"think" to LocalModels.thinking(size,think),"stream" to true,
                 "keep_alive" to "1m","options" to (mapOf("num_ctx" to budget.window,"num_predict" to budget.output)+if(messages.firstOrNull()?.content?.startsWith("Independent command-risk reviewer")==true)mapOf("temperature" to 0)else emptyMap()))+
@@ -140,19 +153,19 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
                         override fun read():Int=super.read().also {if(it>=0){count++;check(count<=524288)}}
                         override fun read(b:ByteArray,off:Int,len:Int):Int=super.read(b,off,len).also {if(it>0){count+=it;check(count<=524288)}}
                     }
-                    val content=StringBuilder();val thinking=StringBuilder();var last=0L;var done=false;var limited=false;var tokens=0L;var inputTokens:Long?=null;val calls=mutableListOf<com.fasterxml.jackson.databind.JsonNode>()
+                    val content=StringBuilder();val thinking=StringBuilder();var last=0L;var done=false;var limited=false;var tokens=0L;var inputTokens:Long?=null;var duration:Long?=null;val calls=mutableListOf<com.fasterxml.jackson.databind.JsonNode>()
                     bounded.bufferedReader().use {reader->while(true){
                         val line=reader.readLine() ?: break;trace?.invoke("chunk",line);val chunk=mapper.readTree(line);check(!chunk.has("error")) {"Ollama가 요청을 완료하지 못했습니다."}
                         content.append(chunk.path("message").path("content").asText());thinking.append(chunk.path("message").path("thinking").asText())
                         chunk.path("message").path("tool_calls").takeIf {it.isArray}?.forEach {call->calls.add(call);check(calls.size<=16)}
                         check(!cancelled.get()) {"Ollama 생성을 중단했습니다."}
                         if(System.nanoTime()-last>TimeUnit.MILLISECONDS.toNanos(250)){progress(QwenProgress(thinking.toString(),(if(native)content.toString()else QwenVisibleText.message(content.toString()))).bounded());last=System.nanoTime()}
-                        if(chunk.path("done").asBoolean()){done=true;limited=chunk.path("done_reason").asText()=="length";tokens=chunk.path("eval_count").asLong();inputTokens=chunk.get("prompt_eval_count")?.asLong();break}
+                        if(chunk.path("done").asBoolean()){done=true;limited=chunk.path("done_reason").asText()=="length";tokens=chunk.path("eval_count").asLong();inputTokens=chunk.get("prompt_eval_count")?.asLong();duration=chunk.get("eval_duration")?.asLong();break}
                     }}
                     progress(QwenProgress(thinking.toString(),(if(native)content.toString()else QwenVisibleText.message(content.toString()))).bounded())
                     check(done && (native || content.isNotBlank())) {"Ollama 답변이 완료되지 않았습니다. 문맥·출력 한도를 확인하세요."}
                     val text=if(native)ProjectAgentNativeTools.reply(content.toString(),calls)else content.toString()
-                    Answer(text,limited,(System.nanoTime()-start)/1e9,tokens,thinking.takeLast(4000).toString(),inputTokens,modelContext(size),if(native && calls.size==1)ProjectAgentNativeTools.assistant(content.toString(),calls,thinking.toString())else null)
+                    Answer(text,limited,(System.nanoTime()-start)/1e9,tokens,thinking.takeLast(4000).toString(),inputTokens,modelContext(size),if(native && calls.size==1)ProjectAgentNativeTools.assistant(content.toString(),calls,thinking.toString())else null,LlmMemory.rate(tokens,duration),memory())
                 }
             }
             return try {pending.get(185,TimeUnit.SECONDS)} catch(e:Exception){cancelled.set(true);headers.cancel(true);pending.cancel(true);runCatching {opened.get()?.close()};runCatching {headers.getNow(null)?.body()?.close()};if(e is InterruptedException)Thread.currentThread().interrupt();val failure=generateSequence<Throwable>(e){it.cause}.firstOrNull {it is IllegalStateException && it.message.orEmpty().startsWith("Ollama HTTP ")};throw IllegalStateException(when {e is InterruptedException->"Ollama 생성을 중단했습니다.";failure!=null->failure.message;else->"Ollama 대화 실패 또는 3분 제한 초과입니다."},e)}

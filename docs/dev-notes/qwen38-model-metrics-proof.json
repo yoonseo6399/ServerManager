@@ -1,0 +1,49 @@
+{
+  "fixture": "temporary CRLF file, random marker; read_file then report",
+  "models": [
+    {
+      "id": "qwen38-27b",
+      "read_requested": true,
+      "actual_file_used": true,
+      "original_bytes_preserved": true,
+      "seconds": 41.406976751,
+      "tokensPerSecond": 12.732845951822412,
+      "memory": {
+        "totalBytes": 25769803776,
+        "usedBytes": 25628606464,
+        "swapUsedBytes": 7804551168,
+        "pressure": "주의",
+        "modelBytes": 16935876033,
+        "modelMetric": "Ollama 전체 할당",
+        "wiredLimitMb": 20480,
+        "sampledAt": 1792545688757
+      },
+      "context": 262144
+    },
+    {
+      "id": "qwen38-flash-next",
+      "read_requested": true,
+      "actual_file_used": true,
+      "original_bytes_preserved": true,
+      "seconds": 167.365670874,
+      "tokensPerSecond": 7.9,
+      "memory": {
+        "totalBytes": 25769803776,
+        "usedBytes": 25404669952,
+        "swapUsedBytes": 6811748925,
+        "pressure": "정상",
+        "modelBytes": 10050650112,
+        "modelMetric": "RSS 합계·공유 중복 가능",
+        "wiredLimitMb": 20480,
+        "sampledAt": 1792545867862
+      },
+      "context": 8192
+    }
+  ],
+  "cancellation": {
+    "interrupted": true,
+    "seconds": 0.0062365
+  },
+  "full_suite": "not run by user direction",
+  "platform": "Apple M4 Pro / 24GiB / macOS15.1"
+}

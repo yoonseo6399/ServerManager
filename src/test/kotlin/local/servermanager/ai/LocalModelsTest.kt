@@ -9,8 +9,8 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 
 class LocalModelsTest {
     @TempDir lateinit var temp:Path
-    @Test fun `five catalog entries persist without changing legacy defaults and reject unknown IDs`() {
-        assertEquals(listOf("14b","30b","qwen3-coder-30b","gemma4-12b","gemma4-31b"),LocalLlm.SIZES)
+    @Test fun `seven catalog entries persist without changing legacy defaults and reject unknown IDs`() {
+        assertEquals(listOf("14b","30b","qwen3-coder-30b","gemma4-12b","gemma4-31b","qwen38-27b","qwen38-flash-next"),LocalLlm.SIZES)
         assertEquals("14b",QwenSettings(temp).config().model)
         for(m in LocalModels.all){
             assertEquals(m.tag,LocalLlm.tag(m.id))

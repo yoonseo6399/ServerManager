@@ -5,7 +5,13 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 
-data class QwenUsage(val input:Long?=null,val output:Long?=null,val estimatedContext:Int=0,val modelContext:Int?=null,val purpose:String="main",val helperInput:Long=0,val helperOutput:Long=0,val helperCalls:Int=0,val executionWindow:Int=8192,val inputBudget:Int=3600,val outputReserved:Int=4096)
+data class QwenUsage(val input:Long?=null,val output:Long?=null,val estimatedContext:Int=0,val modelContext:Int?=null,val purpose:String="main",val helperInput:Long=0,val helperOutput:Long=0,val helperCalls:Int=0,val executionWindow:Int=8192,val inputBudget:Int=3600,val outputReserved:Int=4096,val tokensPerSecond:Double?=null,val memory:LlmMemory?=null)
+
+internal object QwenMetricsText {
+    fun footer(usage:QwenUsage):String=usage.let {"문맥 약 ${it.estimatedContext}/${it.executionWindow} · 입력 예산 ${it.inputBudget} · 출력 예약 ${it.outputReserved} · 입력 ${it.input ?: "미수신"} · 출력 ${it.output ?: "미수신"} · 모델 최대 ${it.modelContext ?: "확인 불가"} · 보조 수신 ${it.helperCalls}회 입력 ${it.helperInput}/출력 ${it.helperOutput}"}+
+        " · 생성 "+(usage.tokensPerSecond?.takeIf {it.isFinite() && it>0}?.let {String.format(java.util.Locale.ROOT,"%.1f tok/s",it)} ?: "측정 대기")+
+        (usage.memory?.let {" · "+it.compact()} ?: " · 메모리 미수신")
+}
 
 /** Snapshots, not token deltas: a slow Discord edit may skip intermediate snapshots without losing text. */
 data class QwenProgress(val thinking:String="",val text:String="") {
