@@ -80,3 +80,9 @@ Discord 인증·역할·채널 → ProjectAgentEngine (권한/수명/전송)
 bash의 일반 스크립트 실행은 독립 검토에 진입점의 실제 UTF-8 내용·경로·SHA-256을 추가한다. python/node/bash 등 리터럴 실행과 빌드 설정 일부를 비실행 방식으로 읽으며 최대4개·파일당64KiB 읽기·4096자 표시/전체6000자다. 프로젝트 밖/비밀/프로필/symlink/큰 파일/바이너리/동적 구문은 읽지 않고 누락 이유를 전달한다. imports/의존성/다운로드 훅과 전체 효과를 증명하지 않으므로 UNKNOWN의 명시 승인 요구는 유지한다. 내용은 untrusted data다. 승인·실행 직전 내용 해시·진입점이 바뀌면 차단한다. OS 수준 원자적 격리는 아니다. DENY는 미실행과 짧은 이유를 모델에 전달하며, ASK는 이유와 명시 승인 카드를 표시한다.
 
 관리 웹 로컬 LLM의 추론 요청 제한 (분):1~240분, 기본20. Pi /agent의 행동·독립 검토·압축의 요청 한 번에 적용하고 다음 요청부터 로컬 Ollama/Strata 및 원격 실행기에 같은 값을 전달한다. 여러 턴 전체와 셸 timeout은 별도다. rollback용 qwen.json은 runner/model만 저장하고 제한은 qwen-execution.json에 별도 저장한다. Pi SDK provider/Node HTTP idle timeout도 맞추고 중복 provider 재시도는 끈다. 메모리 경고 승인·재시도 대기를 위한 내부 transport 여유는 모델 요청 제한을 늘리지 않는다. 관리자와 추론 실행기를 같이 업데이트해야 한다.
+
+## 명령 실행 통합 (fix/pi-bash-unification)
+
+Pi에 제한형 `sh`를 더 이상 등록하지 않는다. OWNER의 명령 실행은 native `bash` 하나로 통일하며 `cd`, 연결 명령, git도 같은 독립 위험 검토·정확한 명시 승인·출력 기록 경로를 거친다. READ/EDIT 역할에 임의 Bash 권한을 추가하지 않는다. 내부 레거시 `ProjectAgentShell`은 다른 제한형 검색/이전 테스트 호환용으로 남지만 Pi의 명령 도구가 아니다. 과거 세션에 남은 sh 호출은 유효한 도구 사용 예시가 아님을 안내한다.
+
+제거된 sh 이름으로 호스트를 직접 호출하면 실행 없이 `TOOL_INPUT_ERROR`를 반환한다. 이 입력 오류는 권한 거절로 영구 잠그지 않는다. 실제 독립 검토 DENY·사용자 거절·승인 만료·권한 검사 실패의 요청 내 우회 방지와 프로젝트 밖/UNKNOWN Bash·push/PR의 명시 승인은 유지한다. 일반 입력 검증 실패 전체를 복구 가능으로 바꾸지 않는다.
