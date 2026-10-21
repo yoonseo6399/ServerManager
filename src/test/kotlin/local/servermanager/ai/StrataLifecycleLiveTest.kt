@@ -19,13 +19,13 @@ class StrataLifecycleLiveTest {
         try {
             repeat(3) {
                 assertEquals(8192,StrataRuntime.start());assertTrue(StrataRuntime.status().running)
-                val active=dirs()-before-stale.directory;assertEquals(1,active.size)
+                val active=dirs()-before-setOf(stale.directory);assertEquals(1,active.size)
                 val run=active.single();assertTrue(run.resolve("ready.json").isRegularFile());assertTrue(runs.add(run.fileName.toString()));assertEquals(runs.size,runs.toSet().size)
                 if(it==2) {
                     val answer=llm.chat("qwen38-flash-next","Reply with exactly READY_OK and nothing else.",false)
                     assertEquals("READY_OK",answer.text.trim());assertNotNull(answer.tokensPerSecond)
                 }
-                StrataRuntime.stop();assertFalse(StrataRuntime.status().running);assertEquals(before+stale.directory,dirs());assertEquals("stale test record",stale.ready.readText())
+                StrataRuntime.stop();assertFalse(StrataRuntime.status().running);assertEquals(before+setOf(stale.directory),dirs());assertEquals("stale test record",stale.ready.readText())
             }
         }finally{StrataRuntime.stop();stale.close()}
         Path.of("build/strata-lifecycle-live.json").writeText(jacksonObjectMapper().writeValueAsString(mapOf("starts" to 3,"stale_ignored" to true,"owned_ready_cleaned" to true,"real_reply" to "READY_OK","distinct_directories" to runs)))
