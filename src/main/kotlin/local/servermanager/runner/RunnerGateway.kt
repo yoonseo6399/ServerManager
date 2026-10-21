@@ -82,6 +82,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
     }
     private val agentLlmRunners=ConcurrentHashMap.newKeySet<String>()
     private val piLlmRunners=ConcurrentHashMap.newKeySet<String>()
+    private val memoryLlmRunners=ConcurrentHashMap.newKeySet<String>()
     private val strataLlmRunners=ConcurrentHashMap.newKeySet<String>()
     private val budgetLlmRunners=ConcurrentHashMap.newKeySet<String>()
     private val streamingLlmRunners=ConcurrentHashMap.newKeySet<String>()
@@ -133,6 +134,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
 
     fun llmBudgetConversation(size:String,messages:List<ProjectAgentMessage>,think:Boolean,runnerId:String?,budget:LocalContextBudget,progress:(QwenProgress)->Unit):RemoteLlm.Result? {
         val id=runnerId ?: budgetLlmRunners.sorted().firstOrNull {llmReady(it)} ?: streamingLlmRunners.sorted().firstOrNull {llmReady(it)} ?: return null
+        if(PiWire.active(messages) || budget.allowCriticalMemory || budget.requestTimeoutSeconds!=1200)check(id in memoryLlmRunners) {"메모리 위험 중단·승인과 설정 타임아웃을 지원하도록 추론 실행기도 새 버전으로 업데이트하세요."}
         if(PiWire.active(messages))check(id in piLlmRunners) {"Pi 에이전트에는 추론 실행기도 새 버전으로 업데이트해야 합니다. 기존 엔진으로 대체하지 않습니다."}
         if(id !in budgetLlmRunners) {
             check(!ProjectAgentNativeTools.active(messages)) {"공식 Ollama 도구 호출에는 추론 실행기도 새 Beta 11로 업데이트해야 합니다."}
@@ -142,7 +144,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
         }
         check(llmReady(id)) {"선택한 실행기가 오프라인이거나 LLM 허용이 해제됐습니다."}
         val payload=mapper.writeValueAsString(mapOf("messages" to messages.map {mapOf("role" to it.role,"content" to it.content,"native" to it.native)},"budget" to budget))
-        val answer=mapper.treeToValue(llmCall(id,"agent-profile:$size",payload,think,if(PiWire.active(messages))1215 else inferenceTimeout(id,size),progress),LocalLlm.Answer::class.java)
+        val answer=mapper.treeToValue(llmCall(id,"agent-profile:$size",payload,think,budget.requestTimeoutSeconds.toLong()+15,progress),LocalLlm.Answer::class.java)
         return RemoteLlm.Result(answer,registry.active(id)?.name ?: id)
     }
 
@@ -175,7 +177,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
             return
         }
         tcpRelays.remove(id)?.close()
-        restartRunners.remove(id);llmRunners.remove(id);agentLlmRunners.remove(id);streamingLlmRunners.remove(id);budgetLlmRunners.remove(id);strataLlmRunners.remove(id);piLlmRunners.remove(id);llmAnswered.remove(id)
+        restartRunners.remove(id);llmRunners.remove(id);agentLlmRunners.remove(id);streamingLlmRunners.remove(id);budgetLlmRunners.remove(id);strataLlmRunners.remove(id);piLlmRunners.remove(id);memoryLlmRunners.remove(id);llmAnswered.remove(id)
         registry.tcpRelayCapability(id,false)
         registry.connected(id)
         directRelay?.core?.onDisconnect(id) // Consent/capability must come from this authenticated connection.
@@ -207,6 +209,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
             }
             "llm-capability" -> {
                 val active=registry.active(id)!=null
+                if(event.token=="AGENT_SAFETY_PROFILE_V1" && event.state=="OLLAMA_AGENT_V3" && active)memoryLlmRunners.add(id)else memoryLlmRunners.remove(id)
                 if(event.version=="PI_PROVIDER_V1" && event.state=="OLLAMA_AGENT_V3" && active)piLlmRunners.add(id)else piLlmRunners.remove(id)
                 if(event.state=="OLLAMA_AGENT_V3" && event.command=="STRATA_V1" && event.detail=="CONTEXT_TOOLS_V1" && active)strataLlmRunners.add(id)else strataLlmRunners.remove(id)
                 if(event.state=="OLLAMA_AGENT_V3" && event.detail=="CONTEXT_TOOLS_V1" && active)budgetLlmRunners.add(id)else budgetLlmRunners.remove(id)
@@ -315,7 +318,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
             tcpRelays.remove(id)?.close()
             udpOutboxes.remove(id)?.close();udpSessions.remove(id)?.let {runCatching {it.close()}};sable.removeRunner(id)
             tokens.remove(id);registry.disconnected(id);manager.remoteDisconnected(id);directRelay?.core?.onDisconnect(id)
-            restartRunners.remove(id);llmRunners.remove(id);agentLlmRunners.remove(id);streamingLlmRunners.remove(id);budgetLlmRunners.remove(id);strataLlmRunners.remove(id);piLlmRunners.remove(id);llmAnswered.remove(id);llmRequests.values.filter {it.runner==id}.forEach {it.future.completeExceptionally(IllegalStateException("실행기가 연결 해제됐습니다"))}
+            restartRunners.remove(id);llmRunners.remove(id);agentLlmRunners.remove(id);streamingLlmRunners.remove(id);budgetLlmRunners.remove(id);strataLlmRunners.remove(id);piLlmRunners.remove(id);memoryLlmRunners.remove(id);llmAnswered.remove(id);llmRequests.values.filter {it.runner==id}.forEach {it.future.completeExceptionally(IllegalStateException("실행기가 연결 해제됐습니다"))}
             workspaceRequests.values.filter {it.runner==id}.forEach {it.future.completeExceptionally(IllegalStateException("실행기가 연결 해제됐습니다. 파일을 다시 확인하세요"))}
             sockets.values.filter { it.runnerId==id }.forEach { closeStream(it,false) }
         }

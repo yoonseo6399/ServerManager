@@ -21,10 +21,10 @@ class PiAgentRuntimeTest {
         return Triple(store,ProjectAgentEngine(store,{ProjectAgentTools(profile.resolve("logs"))},runtime=shared),ProjectAgentLimits(12,tier))
     }
     private class Model(val inputTokens:Int=100,val risk:String="""{"action":"ALLOW","risk":"LOW","projectScope":"INSIDE","reason":"요청한 프로젝트 내부의 작은 변경"}""",val script:(JsonNode)->JsonNode):ProjectAgentInference {
-        private var raw:String?=null;var actorCalls=0;val requests=mutableListOf<JsonNode>()
+        private var raw:String?=null;var actorCalls=0;var riskCalls=0;val requests=mutableListOf<JsonNode>()
         override fun generate(messages:List<ProjectAgentMessage>,think:Boolean,progress:(QwenProgress)->Unit):String {
             val q=PiWire.decode(messages)
-            if(q==null){raw=null;return risk}
+            if(q==null){riskCalls++;raw=null;return risk}
             requests.add(q);actorCalls++;val node=script(q);raw=node.toString();return node.path("content").asText("")
         }
         override fun nativeMessage()=raw
@@ -32,11 +32,51 @@ class PiAgentRuntimeTest {
     }
     private fun call(name:String,args:Any)=mapper.valueToTree<JsonNode>(mapOf("role" to "assistant","content" to "","tool_calls" to listOf(mapOf("id" to java.util.UUID.randomUUID().toString(),"type" to "function","function" to mapOf("name" to name,"arguments" to mapper.writeValueAsString(args))))))
     private fun answer(text:String)=mapper.valueToTree<JsonNode>(mapOf("role" to "assistant","content" to text,"tool_calls" to emptyList<Any>()))
+    @Test fun `per request window updates Pi budget without mutating channel settings`() {
+        val (store,engine,limits)=setup();val model=Model {answer("완료")};val events=mutableListOf<ProjectAgentEvent>()
+        engine.use {it.runWindow("channel","user","Tester","인사",store.preferences("guild","user"),model,limits,8192,3600,{},{e->events.add(e)})}
+        assertEquals(16384,store.channel("channel")!!.executionWindow)
+        assertTrue(events.any {it.kind=="status" && it.text.contains("자동 압축 기준 5888") && it.text.contains("모델 요청 제한 60분")})
+    }
+    @Test fun `owner natural approval grants exactly displayed operation and cannot be reused`() {
+        val (store,engine,limits)=setup();val file=Path.of(store.channel("channel")!!.home).resolve("approved.txt")
+        val model=Model {q->if(q.path("messages").toString().contains("APPROVED_CONTENT"))answer("완료")else call("write",mapOf("path" to "approved.txt","content" to "APPROVED_CONTENT"))}
+        engine.use {e->e.run("channel","user","Tester","파일 생성",store.preferences("guild","user"),model,limits,{},{event->if(event.kind=="approval") {
+            assertFalse(e.approveText("channel","other","실행해"){})
+            assertFalse(e.approveText("channel","user","실행하지 마라고 했잖아"){})
+            assertTrue(e.approveText("channel","user","하라고"){})
+            assertFalse(e.approveText("channel","user","허용"){})
+        }})}
+        assertEquals("APPROVED_CONTENT",file.readText())
+    }
+    @Test fun `question accepts custom text outside the proposed choices and grants no execution permission`() {
+        val (store,engine,limits)=setup();var asked=false
+        val model=Model {q->if(q.path("messages").toString().contains("CUSTOM_CHOICE_725"))answer("답변 확인")else call("ask_user",mapOf("question" to "어떤 이름으로 할까요?","choices" to listOf("A","B")))}
+        engine.use {e->e.run("channel","user","Tester","질문해줘",store.preferences("guild","user"),model,limits,{},{event->if(event.kind=="question") {
+            asked=true;assertTrue(e.answerQuestion("channel","user",null,"CUSTOM_CHOICE_725"){})
+        }})}
+        assertTrue(asked);assertTrue(model.requests.last().toString().contains("execution_approved"))
+    }
+    @Test fun `script content is independently reviewed and denial reason returns without executing it`() {
+        val (store,engine,limits)=setup();val home=Path.of(store.channel("channel")!!.home);val marker=home.resolve("should-not-exist")
+        val script="from pathlib import Path\nPath('should-not-exist').write_text('executed')\n# fixture intent: change /etc/hosts\n";home.resolve("helper.py").writeText(script)
+        val prefs=store.settings("guild","user","14b",false,false);var actor=0;var inspected=false;var raw:String?=null
+        val model=object:ProjectAgentInference {
+            override fun generate(messages:List<ProjectAgentMessage>,think:Boolean,progress:(QwenProgress)->Unit):String {
+                val q=PiWire.decode(messages)
+                if(q==null){val payload=mapper.readTree(messages.last().content);val file=payload.path("executable_evidence").path("files").single();assertEquals(script,file.path("content").asText());assertEquals(64,file.path("sha256").asText().length);assertFalse(think);inspected=true;return """{"action":"DENY","risk":"HIGH","projectScope":"OUTSIDE","reason":"허가 없는 /etc/hosts 시스템 파일 변경 위험"}"""}
+                raw=if(actor++==0)call("bash",mapOf("command" to "python3 helper.py")).toString()else {assertContains(q.toString(),"EXECUTION_DENIED");assertContains(q.toString(),"/etc/hosts");answer("위험한 시스템 파일 변경이 포함되어 실행하지 않았습니다.").toString()};return mapper.readTree(raw).path("content").asText()
+            }
+            override fun nativeMessage()=raw
+        }
+        engine.use {it.run("channel","user","Tester","요청해서 만든 helper.py를 실행해줘",prefs,model,limits,{},{e->assertNotEquals("tool_start",e.kind)})}
+        assertTrue(inspected);assertFalse(marker.exists())
+    }
     @Test fun `native read edit reread preserves bytes after explicit approval`() {
-        val (store,engine,limits)=setup();val file=Path.of(store.channel("channel")!!.home).resolve("a.txt");val original="HEAD\r\nvalue=1\r\nTAIL\r\n";file.writeBytes(original.toByteArray());var step=0;var approvals=0
+        val (store,engine,limits)=setup();val file=Path.of(store.channel("channel")!!.home).resolve("a.txt");val original="HEAD\r\nvalue=1\r\nTAIL\r\n";file.writeBytes(original.toByteArray());var step=0;var approvals=0;val changes=mutableListOf<ProjectAgentFileChange>()
         val model=Model {q->when(step++){0->call("read",mapOf("path" to "a.txt"));1->call("edit",mapOf("path" to "a.txt","edits" to listOf(mapOf("oldText" to "value=1","newText" to "value=2"))));2->call("read",mapOf("path" to "a.txt"));else->answer("수정과 재조회를 완료했습니다.")}}
-        engine.use {it.run("channel","user","Tester","a.txt value만2로 수정하고 다시 읽어줘",store.preferences("guild","user"),model,limits,{},{e->if(e.kind=="approval"){approvals++;it.approve("channel","user",e.token!!,true){}}})}
-        assertEquals(original.replace("value=1","value=2"),file.readBytes().toString(Charsets.UTF_8));assertEquals(1,approvals);assertEquals(4,model.actorCalls)
+        engine.use {it.run("channel","user","Tester","a.txt value만2로 수정하고 다시 읽어줘",store.preferences("guild","user"),model,limits,{},{e->changes.addAll(e.changes);if(e.kind=="approval"){approvals++;it.approve("channel","user",e.token!!,true){}}})}
+        assertEquals(original.replace("value=1","value=2"),file.readBytes().toString(Charsets.UTF_8));assertEquals(1,approvals);assertEquals(4,model.actorCalls);assertEquals(original,changes.single().before);assertContains(changes.single().diff,"+value=2")
         assertTrue(store.piState(store.channel("channel")!!).resolve("current-session.txt").exists());assertTrue(model.requests.first().path("messages").toString().contains("Tester"))
     }
     @Test fun `native editor cannot execute after denial and session can resume`() {
@@ -111,6 +151,41 @@ class PiAgentRuntimeTest {
             val fresh=Model {q->assertFalse(q.path("messages").toString().contains("CODE_742"));answer("새 세션입니다.")}
             e.run("channel","user","안녕",store.preferences("guild","user"),fresh,{},{})
         }
+    }
+
+    @Test fun `automatic low compound bash executes once with stable call id exit code and reviewer reason`() {
+        val (store,engine,_)=setup();val home=Path.of(store.channel("channel")!!.home);home.resolve("a.txt").writeText("ORIGINAL");var step=0;val events=mutableListOf<ProjectAgentEvent>()
+        val model=Model {when(step++){0->call("bash",mapOf("command" to "pwd && cat a.txt"));else->answer("확인 완료")}}
+        val pref=store.settings("guild","user",null,null,false)
+        engine.use {it.run("channel","user","파일 확인",pref,model,{},{event->events.add(event);assertNotEquals("approval",event.kind)})}
+        assertEquals(1,model.riskCalls);val start=events.single {it.kind=="tool_start"};val end=events.single {it.kind=="tool_end"}
+        assertNotNull(start.callId);assertEquals(start.callId,end.callId);assertEquals(0,end.exitCode);assertContains(end.plan!!.description,"pwd && cat a.txt");assertNotNull(end.risk);assertContains(end.text,"ORIGINAL")
+    }
+    @Test fun `silent rm result keeps command exit status and exact removed file`() {
+        val (store,engine,_)=setup();val file=Path.of(store.channel("channel")!!.home).resolve("scratch.txt").also {it.writeText("fixture")};var step=0;val events=mutableListOf<ProjectAgentEvent>()
+        val model=Model {when(step++){0->call("bash",mapOf("command" to "rm -- scratch.txt"));else->answer("삭제 완료")}}
+        engine.use {it.run("channel","user","scratch.txt 삭제",store.preferences("guild","user"),model,{},{event->events.add(event);if(event.kind=="approval")it.approve("channel","user",event.token!!,true){}})}
+        assertFalse(file.exists());val end=events.single {it.kind=="tool_end"};assertEquals(0,end.exitCode);assertContains(end.plan!!.description,"rm -- scratch.txt");assertContains(end.text,"종료 코드 0")
+    }
+    @Test fun `denied git reaches acting model as not executed and cannot be retried`() {
+        val (store,engine,_)=setup();var step=0;var asks=0
+        val model=Model {q->when(step++){0->call("bash",mapOf("command" to "git push origin main"));else->{val results=q.path("messages").filter {it.path("role").asText()=="tool"}.joinToString {it.path("content").asText()};assertContains(results,"EXECUTION_DENIED");assertContains(results,"실행되지 않았습니다");answer("승인이 거절되어 push하지 않았습니다.")}}}
+        val pref=store.settings("guild","user",null,null,false)
+        engine.use {it.run("channel","user","push 해줘",pref,model,{},{event->if(event.kind=="approval"){asks++;it.approve("channel","user",event.token!!,false){}};assertNotEquals("tool_start",event.kind)})}
+        assertEquals(1,asks)
+    }
+    @Test fun `ordinary outside read may proceed after exact owner approval despite advisory deny`() {
+        val (store,engine,_)=setup();val outside=temp.resolve("outside.txt").also {it.writeText("OUTSIDE_VERIFIED")};var step=0;var asks=0
+        val model=Model(risk="""{"action":"DENY","risk":"HIGH","reason":"외부 경로","projectScope":"OUTSIDE"}""") {q->when(step++){0->call("read",mapOf("path" to outside.toString()));else->{assertContains(q.path("messages").toString(),"OUTSIDE_VERIFIED");answer("승인 후 조회했습니다.")}}}
+        val pref=store.settings("guild","user",null,null,false)
+        engine.use {it.run("channel","user","외부 파일 읽기",pref,model,{},{event->if(event.kind=="approval"){asks++;it.approve("channel","user",event.token!!,true){}}})};assertEquals(1,asks)
+    }
+    @Test fun `choice answer is data only and grants no permission to following outside write`() {
+        val (store,engine,_)=setup();val outside=temp.resolve("outside.txt").also {it.writeText("KEEP")};var step=0;var questions=0;var approvals=0
+        val model=Model {q->when(step++){0->call("ask_user",mapOf("question" to "어떤 파일을 변경할까요?","choices" to listOf("외부 파일","프로젝트 파일")));1->{assertContains(q.path("messages").toString(),"execution_approved");call("write",mapOf("path" to outside.toString(),"content" to "must not write"))};else->answer("질문 답변은 받았지만 실행 승인이 없어 변경하지 않았습니다.")}}
+        val pref=store.settings("guild","user",null,null,false)
+        engine.use {e->e.run("channel","user","파일 선택 후 처리",pref,model,{},{event->if(event.kind=="question"){questions++;assertFails {e.answerQuestion("channel","other",event.token!!,"0") {}};assertTrue(e.answerQuestion("channel","user",event.token!!,"0") {});assertFails {e.answerQuestion("channel","user",event.token!!,"0") {}}};if(event.kind=="approval"){approvals++;e.approve("channel","user",event.token!!,false){}}})}
+        assertEquals(1,questions);assertEquals(1,approvals);assertEquals("KEEP",outside.readText())
     }
 
 }

@@ -39,16 +39,17 @@ test('owner picks a runner and model, checks the remote Ollama environment and u
  await expect(section).toContainText('Ollama 0.12.0 실행 중');await expect(section).toContainText('qwen3:30b');await expect(section).toContainText('메모리에 올라감');await expect(section).toContainText('18.0 GiB / 24.0 GiB');await expect(section).toContainText('20.0 GiB');await expect(section).toContainText('스왑 1.0 GiB');
  await section.getByRole('button',{name:'Flash-Next 설치 (약 66.4GB)',exact:true}).click();
  await expect.poll(()=>installed).toEqual([{runnerId:'gpu'}]);await expect(section).toContainText('설치 완료');await expect(section.getByRole('button',{name:'Flash-Next 설치 (약 66.4GB)',exact:true})).toBeDisabled();
+ await section.getByLabel('추론 요청 제한 (분)').fill('60');
  for(const id of ['qwen3-coder-30b','gemma4-12b','gemma4-31b','qwen38-27b','qwen38-flash-next']){
   await section.getByLabel('모델').selectOption(id);
   if(id==='qwen3-coder-30b')await expect(section).toContainText('Thinking 미지원');
   if(id==='gemma4-31b')await expect(section).toContainText('스왑');
   await section.getByRole('button',{name:'로컬 LLM 설정 저장',exact:true}).click();
-  await expect.poll(()=>saved.at(-1)).toEqual({runnerId:'gpu',model:id});
+  await expect.poll(()=>saved.at(-1)).toEqual({runnerId:'gpu',model:id,requestTimeoutMinutes:60});
  }
  await section.getByLabel('모델').selectOption('30b');
  await section.getByRole('button',{name:'로컬 LLM 설정 저장',exact:true}).click();
- await expect.poll(()=>saved.at(-1)).toEqual({runnerId:'gpu',model:'30b'});
+ await expect.poll(()=>saved.at(-1)).toEqual({runnerId:'gpu',model:'30b',requestTimeoutMinutes:60});
  await section.getByRole('button',{name:'메모리에서 내리기',exact:true}).click();
  await expect.poll(()=>unloaded).toEqual([{runnerId:'gpu'}]);
  await expect(section.getByRole('button',{name:'메모리에서 내리기',exact:true})).toBeDisabled();

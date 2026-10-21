@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
+import {Agent,setGlobalDispatcher} from 'undici';
 import {createAgentSession,DefaultResourceLoader,ModelRuntime,SessionManager,SettingsManager} from '@earendil-works/pi-coding-agent';
 const line=readline.createInterface({input:process.stdin});
 let configResolve;const initial=new Promise(r=>configResolve=r);const waiting=new Map();let session;let sequence=0;let ended=false;
@@ -10,13 +11,13 @@ line.on('line',raw=>{try{const q=JSON.parse(raw);if(q.type==='config')configReso
 line.on('close',()=>{if(!ended){session?.abort();process.exitCode=1;setTimeout(()=>process.exit(1),500).unref()}});
 async function rpc(kind,payload){const id=String(++sequence);send({type:'rpc',id,kind,...payload});return await new Promise((resolve,reject)=>waiting.set(id,{resolve,reject}))}
 try{
- const c=await initial;const agentDir=c.state;fs.mkdirSync(agentDir,{recursive:true,mode:0o700});
+ const c=await initial;const transportMs=(2*c.requestTimeoutSeconds+630)*1000;setGlobalDispatcher(new Agent({headersTimeout:transportMs,bodyTimeout:transportMs}));const agentDir=c.state;fs.mkdirSync(agentDir,{recursive:true,mode:0o700});
  const modelsPath=path.join(agentDir,'models.json');
  fs.writeFileSync(modelsPath,JSON.stringify({providers:{managed:{baseUrl:c.api,api:'openai-completions',apiKey:c.token,models:[{id:c.model,name:c.model,contextWindow:c.window,maxTokens:c.output,reasoning:c.think,input:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0}}]}}}),{mode:0o600});
  const runtime=await ModelRuntime.create({modelsPath,authPath:path.join(agentDir,'auth.json'),modelsStorePath:path.join(agentDir,'catalog.json'),allowModelNetwork:false,refreshOnCreate:false});
- const settings=SettingsManager.inMemory({compaction:{enabled:true,reserveTokens:c.window-c.limit,keepRecentTokens:Math.min(512,Math.max(16,Math.floor(c.limit/8)))},retry:{enabled:false}});
+ const settings=SettingsManager.inMemory({compaction:{enabled:true,reserveTokens:c.window-c.limit,keepRecentTokens:Math.min(512,Math.max(16,Math.floor(c.limit/8)))},httpIdleTimeoutMs:transportMs,retry:{enabled:false,provider:{maxRetries:0,timeoutMs:transportMs}}});
  const extension=pi=>{
-  pi.on('tool_call',async e=>{try{if(e.toolName==='bash')e.input.timeout=Math.min(1800,Math.max(1,Number(e.input.timeout)||900));const v=await rpc('authorize',{call:e.toolCallId,name:e.toolName,args:e.input});if(!v.allowed)return{block:true,reason:v.reason||'Backend refused'}}catch(error){return{block:true,reason:String(error?.message||error)}}});
+  pi.on('tool_call',async e=>{try{if(e.toolName==='bash')e.input.timeout=Math.min(1800,Math.max(1,Number(e.input.timeout)||900));const v=await rpc('authorize',{call:e.toolCallId,name:e.toolName,args:e.input});if(!v.allowed)return{block:true,reason:v.reason||'EXECUTION_DENIED: Tool was NOT executed. Backend refused permission; do not bypass or claim success.'}}catch(error){return{block:true,reason:String(error?.message||error)}}});
   for(const t of c.extraTools)pi.registerTool({...t,label:t.name,execute:async(id,args,signal,onUpdate)=>{const r=await rpc('execute',{call:id,name:t.name,args});return {content:[{type:'text',text:r.text}],details:r}}});
  };
  // Load only this application's inline extension, never project/global plugins or skills.
@@ -27,7 +28,7 @@ try{
  ({session}=await createAgentSession({cwd:c.home,agentDir,modelRuntime:runtime,model:runtime.getModel('managed',c.model),thinkingLevel:c.think?'medium':'off',settingsManager:settings,resourceLoader:loader,sessionManager:manager,tools:c.toolNames}));
  fs.writeFileSync(file,session.sessionFile,{mode:0o600});
  session.subscribe(e=>{
-  if(['tool_execution_start','tool_execution_update','tool_execution_end'].includes(e.type)){const slim={...e};for(const key of ['result','partialResult'])if(slim[key])slim[key]={content:(slim[key].content||[]).filter(p=>p.type==='text').map(p=>({...p,text:p.text.slice(0,60000)}))};send({type:'event',event:slim})}
+  if(['tool_execution_start','tool_execution_update','tool_execution_end'].includes(e.type)){const slim={...e};for(const key of ['result','partialResult'])if(slim[key])slim[key]={exitCode:slim[key].structuredContent?.exit_code??slim[key].details?.exitCode??null,content:(slim[key].content||[]).filter(p=>p.type==='text').map(p=>({...p,text:p.text.slice(0,60000)}))};send({type:'event',event:slim})}
   if(['compaction_start','compaction_end','auto_compaction_start','auto_compaction_end'].includes(e.type))send({type:'compaction',event:e.type,error:e.errorMessage?.slice(0,500),aborted:e.aborted===true});
  });
  if(!fs.existsSync(path.join(agentDir,'imported'))){

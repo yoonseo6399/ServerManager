@@ -8,6 +8,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal class ProjectAgentJobs:AutoCloseable {
     data class Job(val user:String,val id:String=UUID.randomUUID().toString(),val thread:Thread=Thread.currentThread(),val cancelled:AtomicBoolean=AtomicBoolean())
     private val jobs=ConcurrentHashMap<String,Job>()
+    fun isBusy(channel:String)=jobs.containsKey(channel)
     fun begin(channel:String,user:String):Job = Job(user).also {check(jobs.putIfAbsent(channel,it)==null) {"이 채널에서 작업 중입니다. 중지 버튼으로 먼저 중단하세요."}}
     fun stop(channel:String,user:String,id:String?=null) {
         val job=jobs[channel] ?: error("이미 끝난 작업입니다.")
