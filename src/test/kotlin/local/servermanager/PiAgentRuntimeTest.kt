@@ -32,6 +32,42 @@ class PiAgentRuntimeTest {
     }
     private fun call(name:String,args:Any)=mapper.valueToTree<JsonNode>(mapOf("role" to "assistant","content" to "","tool_calls" to listOf(mapOf("id" to java.util.UUID.randomUUID().toString(),"type" to "function","function" to mapOf("name" to name,"arguments" to mapper.writeValueAsString(args))))))
     private fun answer(text:String)=mapper.valueToTree<JsonNode>(mapOf("role" to "assistant","content" to text,"tool_calls" to emptyList<Any>()))
+    @Test fun `only native bash is offered and resumed git inspection uses exact approval`() {
+        val (store,engine,limits)=setup();val home=Path.of(store.channel("channel")!!.home)
+        val repo=home.resolve("repo").createDirectories()
+        fun git(vararg args:String) {val p=ProcessBuilder(listOf("/usr/bin/git")+args).directory(repo.toFile()).redirectErrorStream(true).start();val output=p.inputStream.bufferedReader().readText();assertEquals(0,p.waitFor(),output)}
+        git("init");git("remote","add","origin","https://example.invalid/fixture.git")
+        var step=0;var asks=0;val events=mutableListOf<ProjectAgentEvent>()
+        val model=Model {q->
+            val names=q.path("tools").map {it.path("function").path("name").asText()}
+            assertContains(names,"bash");assertFalse("sh" in names)
+            when(step++) {
+                0->call("sh",mapOf("command" to "cd repo && git status --short"))
+                1->{assertContains(q.path("messages").toString(),"sh");assertFalse(q.path("messages").filter {it.path("role").asText()=="tool"}.toString().contains("EXECUTION_DENIED"));call("bash",mapOf("command" to "cd repo && git status --short && git remote -v"))}
+                else->{assertContains(q.path("messages").toString(),"https://example.invalid/fixture.git");answer("승인 후 원격 설정 확인 완료")}
+            }
+        }
+        val prefs=store.settings("guild","user",null,null,false)
+        engine.use {e->
+            e.run("channel","user","Tester","git 상태와 원격 확인",prefs,model,limits,{},{event->events.add(event);if(event.kind=="approval"){asks++;e.approve("channel","user",event.token!!,true){}}})
+            val resumed=Model {q->val names=q.path("tools").map {it.path("function").path("name").asText()};assertContains(names,"bash");assertFalse("sh" in names);assertContains(q.path("messages").toString(),"원격 설정 확인 완료");answer("기억합니다")}
+            e.run("channel","user","이전 결과 기억해?",prefs,resumed,{},{})
+        }
+        assertEquals(1,asks);assertEquals(1,model.riskCalls)
+        assertTrue(events.none {it.kind=="denied"});assertEquals(0,events.single {it.kind=="tool_end" && it.plan?.tool?.name=="bash"}.exitCode)
+    }
+    @Test fun `retired shell is not advertised or executable for any role`() {
+        for(tier in listOf(AgentAccess.OWNER,AgentAccess.EDIT,AgentAccess.READ)) {
+            assertFalse(PiToolPolicy.extras(tier).any {it["name"]=="sh"})
+            val (store,engine,_)=setup(tier)
+            engine.use {
+                val home=Path.of(store.channel("channel")!!.home)
+                val tools=ProjectAgentTools(temp.resolve("logs")).also {it.tier=tier}
+                val policy=PiToolPolicy(store.profileDirectory,home,tools,tier)
+                assertFailsWith<PiToolInputException> {policy.check("sh",mapper.valueToTree(mapOf("command" to "pwd")))}
+            }
+        }
+    }
     @Test fun `per request window updates Pi budget without mutating channel settings`() {
         val (store,engine,limits)=setup();val model=Model {answer("완료")};val events=mutableListOf<ProjectAgentEvent>()
         engine.use {it.runWindow("channel","user","Tester","인사",store.preferences("guild","user"),model,limits,8192,3600,{},{e->events.add(e)})}
