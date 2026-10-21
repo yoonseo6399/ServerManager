@@ -304,11 +304,11 @@ class RunnerGatewayTest {
             assertEquals("profile ok",profiled.get(2,java.util.concurrent.TimeUnit.SECONDS)!!.answer.text)
             val piMessages=listOf(ProjectAgentMessage("system",PiWire.PREFIX+"""{"model":"local-agent","messages":[{"role":"user","content":"Pi request"}]}"""))
             assertFailsWith<IllegalStateException> {gateway.llmBudgetConversation("14b",piMessages,false,"runner",LocalContextBudget(16384,2048)) {}}
-            deliver(RunnerMessage("llm-capability",state="OLLAMA_AGENT_V3",detail="CONTEXT_TOOLS_V1",version="PI_PROVIDER_V1",token="MEMORY_GUARD_V1"));sent.clear()
-            val pi=java.util.concurrent.CompletableFuture.supplyAsync {gateway.llmBudgetConversation("14b",piMessages,false,"runner",LocalContextBudget(16384,2048)) {}}
+            deliver(RunnerMessage("llm-capability",state="OLLAMA_AGENT_V3",detail="CONTEXT_TOOLS_V1",version="PI_PROVIDER_V1",token="AGENT_SAFETY_PROFILE_V1"));sent.clear()
+            val pi=java.util.concurrent.CompletableFuture.supplyAsync {gateway.llmBudgetConversation("14b",piMessages,false,"runner",LocalContextBudget(16384,2048,requestTimeoutSeconds=3600)) {}}
             val piDeadline=System.nanoTime()+2_000_000_000L;while(sent.isEmpty() && System.nanoTime()<piDeadline)Thread.sleep(2)
             val piRequest=mapper.readValue<RunnerMessage>((sent.single() as TextMessage).payload)
-            assertEquals("agent-profile:14b",piRequest.state);assertTrue(mapper.readTree(piRequest.command).path("messages")[0].path("content").asText().startsWith(PiWire.PREFIX))
+            assertEquals(3600,mapper.readTree(piRequest.command).path("budget").path("requestTimeoutSeconds").asInt());assertEquals("agent-profile:14b",piRequest.state);assertTrue(mapper.readTree(piRequest.command).path("messages")[0].path("content").asText().startsWith(PiWire.PREFIX))
             deliver(RunnerMessage("llm-result",state="OK",token=piRequest.token,detail="""{"text":"Pi ok","nativeMessage":"{\"role\":\"assistant\",\"content\":\"Pi ok\"}","limited":false,"seconds":1.0,"tokens":2}"""))
             assertContains(pi.get(2,java.util.concurrent.TimeUnit.SECONDS)!!.answer.nativeMessage!!,"Pi ok")
             deliver(RunnerMessage("llm-capability",state="OLLAMA_AGENT_V3"))

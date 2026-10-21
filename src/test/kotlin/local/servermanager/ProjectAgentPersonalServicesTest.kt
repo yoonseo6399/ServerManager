@@ -8,16 +8,36 @@ import kotlin.test.*
 
 class ProjectAgentPersonalServicesTest {
     @TempDir lateinit var temp:Path
-    @Test fun `history grants persist per owner guild and revoke forum descendants immediately`() {
+    @Test fun `provider source ACL isolates consumer server channel and user and forum revokes immediately`() {
         val grants=ProjectAgentHistoryGrants(temp)
-        assertFails {grants.requireAllowed("g","u","100")}
-        grants.set("g","u","100",true)
-        ProjectAgentHistoryGrants(temp).requireAllowed("g","u","101","100")
-        assertFails {grants.requireAllowed("other","u","100")};assertFails {grants.requireAllowed("g","other","100")}
-        grants.set("g","u","100",false)
-        assertFails {grants.requireAllowed("g","u","101","100")}
-        grants.set("g","u","101",true);grants.requireAllowed("g","u","101","100")
-        assertFails {grants.requireAllowed("g","u","102","100")}
+        grants.register("provider","11","100","FORUM")
+        assertFails {grants.requireAllowed("consumer","200","22","100")}
+        grants.bind("provider","11","100","consumer","200",setOf("22"),true)
+        assertEquals("provider",ProjectAgentHistoryGrants(temp).requireAllowed("consumer","200","22","101","100").guild)
+        assertFails {grants.requireAllowed("other","200","22","100")}
+        assertFails {grants.requireAllowed("consumer","201","22","100")}
+        assertFails {grants.requireAllowed("consumer","200","23","100")}
+        assertFails {grants.bind("provider","other","100","consumer","200",setOf("22"),true)}
+        grants.revokeTarget("provider","11","100","200")
+        assertFails {grants.requireAllowed("consumer","200","22","101","100")}
+        grants.bind("provider","11","100","consumer","200",setOf("22"),true)
+        grants.remove("provider","11","100");assertFails {grants.requireAllowed("consumer","200","22","100")}
+    }
+    @Test fun `cross server read uses provider authority and never requires recipient source membership`() {
+        val grants=ProjectAgentHistoryGrants(temp);grants.register("provider","11","100","FORUM");grants.bind("provider","11","100","consumer","200",setOf("22"),true)
+        val jda=org.mockito.Mockito.mock(net.dv8tion.jda.api.JDA::class.java)
+        val guild=org.mockito.Mockito.mock(net.dv8tion.jda.api.entities.Guild::class.java,org.mockito.Mockito.RETURNS_DEEP_STUBS)
+        val member=org.mockito.Mockito.mock(net.dv8tion.jda.api.entities.Member::class.java){call->if(call.method.name=="hasPermission")true else org.mockito.Mockito.RETURNS_DEFAULTS.answer(call)}
+        val forum=org.mockito.Mockito.mock(net.dv8tion.jda.api.entities.channel.concrete.ForumChannel::class.java)
+        org.mockito.Mockito.`when`(guild.id).thenReturn("provider");org.mockito.Mockito.`when`(guild.selfMember).thenReturn(org.mockito.Mockito.mock(net.dv8tion.jda.api.entities.SelfMember::class.java){call->if(call.method.name=="hasPermission")true else org.mockito.Mockito.RETURNS_DEFAULTS.answer(call)})
+        org.mockito.Mockito.`when`(guild.retrieveMemberById("11").useCache(false).timeout(5,java.util.concurrent.TimeUnit.SECONDS).complete()).thenReturn(member)
+        org.mockito.Mockito.`when`(forum.id).thenReturn("100");org.mockito.Mockito.`when`(forum.guild).thenReturn(guild)
+        org.mockito.Mockito.`when`(jda.getGuildChannelById("100")).thenReturn(forum)
+        var authority="";val history=DiscordProjectAgentHistory({jda},grants){authority=it.guild+":"+it.owner}
+        val session=ProjectAgentChannel("consumer","200","22",null,temp.toString())
+        assertSame(forum,history.check(session,"100"));assertEquals("provider:11",authority)
+        org.mockito.Mockito.verify(guild,org.mockito.Mockito.never()).retrieveMemberById("22")
+        grants.revokeTarget("provider","11","100","200");assertFails {history.check(session,"100")}
     }
     @Test fun `one shot schedules persist claim once isolate owners and never replay after restart`() {
         var now=Instant.parse("2026-10-22T00:00:00Z");val store=ProjectAgentSchedules(temp){now}
@@ -54,6 +74,6 @@ class ProjectAgentPersonalServicesTest {
         val checked=policy.check("schedule_task",mapper.readTree("""{"action":"cancel","id":"${task.id}"}"""))
         val risk=PiApprovalDecision.effective(checked,ProjectAgentRisk("ALLOW","LOW","모델 허용","INSIDE"))
         assertEquals("ASK",risk.action);assertTrue(PiApprovalDecision.human(false,checked.display,risk,false))
-        assertTrue(PiToolPolicy.extras(AgentAccess.READ).none {it["name"] in ProjectAgentServicePort.names})
+        assertTrue(PiToolPolicy.extras(AgentAccess.READ).none {it["name"]=="schedule_task"});assertTrue(PiToolPolicy.extras(AgentAccess.READ).map {it["name"]}.containsAll(ProjectAgentServicePort.historyNames))
     }
 }

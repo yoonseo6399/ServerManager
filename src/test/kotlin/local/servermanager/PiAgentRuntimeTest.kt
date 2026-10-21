@@ -34,9 +34,9 @@ class PiAgentRuntimeTest {
     private fun answer(text:String)=mapper.valueToTree<JsonNode>(mapOf("role" to "assistant","content" to text,"tool_calls" to emptyList<Any>()))
     @Test fun `per request window updates Pi budget without mutating channel settings`() {
         val (store,engine,limits)=setup();val model=Model {answer("완료")};val events=mutableListOf<ProjectAgentEvent>()
-        engine.use {it.runWindow("channel","user","Tester","인사",store.preferences("guild","user"),model,limits,8192,{},{e->events.add(e)})}
+        engine.use {it.runWindow("channel","user","Tester","인사",store.preferences("guild","user"),model,limits,8192,3600,{},{e->events.add(e)})}
         assertEquals(16384,store.channel("channel")!!.executionWindow)
-        assertTrue(events.any {it.kind=="status" && it.text.contains("자동 압축 기준 5888")})
+        assertTrue(events.any {it.kind=="status" && it.text.contains("자동 압축 기준 5888") && it.text.contains("모델 요청 제한 60분")})
     }
     @Test fun `owner natural approval grants exactly displayed operation and cannot be reused`() {
         val (store,engine,limits)=setup();val file=Path.of(store.channel("channel")!!.home).resolve("approved.txt")
@@ -56,6 +56,21 @@ class PiAgentRuntimeTest {
             asked=true;assertTrue(e.answerQuestion("channel","user",null,"CUSTOM_CHOICE_725"){})
         }})}
         assertTrue(asked);assertTrue(model.requests.last().toString().contains("execution_approved"))
+    }
+    @Test fun `script content is independently reviewed and denial reason returns without executing it`() {
+        val (store,engine,limits)=setup();val home=Path.of(store.channel("channel")!!.home);val marker=home.resolve("should-not-exist")
+        val script="from pathlib import Path\nPath('should-not-exist').write_text('executed')\n# fixture intent: change /etc/hosts\n";home.resolve("helper.py").writeText(script)
+        val prefs=store.settings("guild","user","14b",false,false);var actor=0;var inspected=false;var raw:String?=null
+        val model=object:ProjectAgentInference {
+            override fun generate(messages:List<ProjectAgentMessage>,think:Boolean,progress:(QwenProgress)->Unit):String {
+                val q=PiWire.decode(messages)
+                if(q==null){val payload=mapper.readTree(messages.last().content);val file=payload.path("executable_evidence").path("files").single();assertEquals(script,file.path("content").asText());assertEquals(64,file.path("sha256").asText().length);assertFalse(think);inspected=true;return """{"action":"DENY","risk":"HIGH","projectScope":"OUTSIDE","reason":"허가 없는 /etc/hosts 시스템 파일 변경 위험"}"""}
+                raw=if(actor++==0)call("bash",mapOf("command" to "python3 helper.py")).toString()else {assertContains(q.toString(),"EXECUTION_DENIED");assertContains(q.toString(),"/etc/hosts");answer("위험한 시스템 파일 변경이 포함되어 실행하지 않았습니다.").toString()};return mapper.readTree(raw).path("content").asText()
+            }
+            override fun nativeMessage()=raw
+        }
+        engine.use {it.run("channel","user","Tester","요청해서 만든 helper.py를 실행해줘",prefs,model,limits,{},{e->assertNotEquals("tool_start",e.kind)})}
+        assertTrue(inspected);assertFalse(marker.exists())
     }
     @Test fun `native read edit reread preserves bytes after explicit approval`() {
         val (store,engine,limits)=setup();val file=Path.of(store.channel("channel")!!.home).resolve("a.txt");val original="HEAD\r\nvalue=1\r\nTAIL\r\n";file.writeBytes(original.toByteArray());var step=0;var approvals=0;val changes=mutableListOf<ProjectAgentFileChange>()

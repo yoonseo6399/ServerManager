@@ -23,7 +23,7 @@ class LocalContextBudgetTest {
         assertEquals(3584,mapper.readTree(temp.resolve("settings/project-agent-context.json").readText()).path("limits").path("c").asInt(),"older 8K apps must not inherit a 16K compression threshold")
         val legacy=mapper.readTree(temp.resolve("settings/project-agent.json").readText()).path("channels").path("c")
         assertFalse(legacy.has("executionWindow"));assertFalse(legacy.has("outputTokens"))
-        assertEquals(setOf("window","output"),mapper.valueToTree<com.fasterxml.jackson.databind.JsonNode>(LocalContextBudget(16384,2048)).fieldNames().asSequence().toSet())
+        assertEquals(setOf("window","output","requestTimeoutSeconds"),mapper.valueToTree<com.fasterxml.jackson.databind.JsonNode>(LocalContextBudget(16384,2048)).fieldNames().asSequence().toSet())
         assertFails {store.context("c","u",window=32768)};assertFails {store.context("c","other",window=16384)}
         assertFails {store.context("c","u",window=8192,limit=8000)}
         assertEquals(3600,LocalContextBudget.DEFAULT.input)

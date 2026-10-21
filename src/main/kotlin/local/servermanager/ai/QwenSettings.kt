@@ -13,21 +13,23 @@ import kotlin.io.path.exists
 import kotlin.io.path.readText
 
 /** [runnerId] null means automatic: the first opted-in runner, else the manager computer. [model] is the default for /local-llm. */
-data class QwenConfig(val runnerId:String?=null,val model:String="14b")
+data class QwenConfig(val runnerId:String?=null,val model:String="14b",val requestTimeoutMinutes:Int=20)
 
 class QwenSettings(private val directory:Path) {
     private val mapper=jacksonObjectMapper()
     private val file=directory.resolve("qwen.json")
-    fun config():QwenConfig = runCatching {if(file.exists())mapper.readValue<QwenConfig>(file.readText()) else QwenConfig()}.getOrDefault(QwenConfig()).takeIf {valid(it)} ?: QwenConfig()
-    fun valid(c:QwenConfig)=c.model in LocalLlm.SIZES && (c.runnerId==null || c.runnerId.matches(Regex("[A-Za-z0-9_-]{1,80}")))
+    private val executionFile=directory.resolve("qwen-execution.json")
+    fun config():QwenConfig = runCatching {if(file.exists())mapper.readValue<QwenConfig>(file.readText()) else QwenConfig()}.getOrDefault(QwenConfig()).takeIf {valid(it)}.let {base->(base ?: QwenConfig()).copy(requestTimeoutMinutes=runCatching {if(executionFile.exists())mapper.readTree(executionFile.readText()).path("requestTimeoutMinutes").asInt(20).also {require(it in 1..240)}else 20}.getOrDefault(20))}
+    fun valid(c:QwenConfig)=c.requestTimeoutMinutes in 1..240 && c.model in LocalLlm.SIZES && (c.runnerId==null || c.runnerId.matches(Regex("[A-Za-z0-9_-]{1,80}")))
     fun save(c:QwenConfig) {
-        require(valid(c)) {"로컬 모델 또는 실행기 ID를 확인하세요."}
-        GeminiKeyPoolStore(directory).writePrivate(file,mapper.writeValueAsString(c))
+        require(valid(c)) {"로컬 모델·실행기와 추론 요청 제한(1~240분)을 확인하세요."}
+        GeminiKeyPoolStore(directory).writePrivate(file,mapper.writeValueAsString(mapOf("runnerId" to c.runnerId,"model" to c.model)))
+        GeminiKeyPoolStore(directory).writePrivate(executionFile,mapper.writeValueAsString(mapOf("requestTimeoutMinutes" to c.requestTimeoutMinutes)))
     }
 }
 
 data class QwenRunnerView(val id:String,val name:String,val online:Boolean,val capability:String)
-class SaveQwenSettings(val runnerId:String?=null,val model:String="14b")
+class SaveQwenSettings(val runnerId:String?=null,val model:String="14b",val requestTimeoutMinutes:Int=20)
 class QwenRunnerRequest(val runnerId:String="")
 
 @RestController
@@ -48,8 +50,8 @@ class QwenSettingsApi(private val manager:ServerManager,private val registry:Run
     @PutMapping fun save(@RequestBody body:SaveQwenSettings,request:HttpServletRequest,authentication:Authentication):Map<String,Any?> {
         freshDesktop(request)
         body.runnerId?.let {target(authentication.name,it)}
-        val next=QwenConfig(body.runnerId?.takeIf {it.isNotBlank()},body.model)
-        if(!settings.valid(next)) throw ResponseStatusException(HttpStatus.BAD_REQUEST,"로컬 모델 또는 실행기 ID를 확인하세요.")
+        val next=QwenConfig(body.runnerId?.takeIf {it.isNotBlank()},body.model,body.requestTimeoutMinutes)
+        if(!settings.valid(next)) throw ResponseStatusException(HttpStatus.BAD_REQUEST,"로컬 모델·실행기와 추론 요청 제한(1~240분)을 확인하세요.")
         val before=settings.config()
         settings.save(next)
         val unloaded=if(before.model!=next.model||before.runnerId!=next.runnerId) before.runnerId?.takeIf {gateway.llmReady(it)}?.let {runCatching {gateway.llmAdmin(it,"unload")}.isSuccess} else null

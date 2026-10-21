@@ -6,5 +6,5 @@ import java.nio.file.Path
 interface ProjectAgentServicePort {
     fun plan(home:Path,call:ProjectAgentTool):ProjectAgentPlan
     fun execute(call:ProjectAgentTool,active:()->Unit):ProjectAgentToolResult
-    companion object {val names=setOf("schedule_task","list_chat_channels","read_chat_history","list_forum_posts")}
+    companion object {val historyNames=setOf("list_chat_channels","read_chat_history","list_forum_posts");val names=historyNames+"schedule_task"}
 }

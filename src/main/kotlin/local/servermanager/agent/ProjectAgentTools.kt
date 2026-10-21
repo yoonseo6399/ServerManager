@@ -19,7 +19,7 @@ class ProjectAgentTools(private val logs:Path,private val files:ProjectAgentFile
     companion object {
         val names=ProjectAgentServicePort.names+setOf("list_files","read_file","find_files","search_text","write_file","delete_path","run_command","build","test","git","make_new_project","list_attachments","read_attachment","save_attachment","upload_file","sh","edit_file","read_result","search")
         /** Tools each permission tier may even propose. Everything else is refused before planning. */
-        val readTools=setOf("list_files","read_file","find_files","search_text","sh","list_attachments","read_attachment","read_result","search")
+        val readTools=ProjectAgentServicePort.historyNames+setOf("list_files","read_file","find_files","search_text","sh","list_attachments","read_attachment","read_result","search")
         fun allowed(tier:String):Set<String> = when(tier) {AgentAccess.OWNER->names;AgentAccess.EDIT->readTools+setOf("edit_file","write_file");else->readTools}
         val harness="""Code work routine (follow it, do not skip steps):
 1 locate unknown positions: search {"pattern":"symbol","path":"src","glob":"*.kt","fixed":true,"context":2}; find_files locates names only. search_text is a legacy literal-search alias. Never reread a whole large file.

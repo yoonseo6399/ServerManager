@@ -1,8 +1,8 @@
 package local.servermanager
 
 /** Validated on both sides of the runner protocol; model text cannot enlarge the execution window. */
-data class LocalContextBudget(val window:Int=8192,val output:Int=4096,@get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_DEFAULT) val allowCriticalMemory:Boolean=false) {
-    init {require(window in setOf(8192,16384) && output in 512..4096 && window-output>=4096) {"실행 창은 8192/16384, 출력 예약은 512~4096 토큰입니다."}}
+data class LocalContextBudget(val window:Int=8192,val output:Int=4096,@get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_DEFAULT) val allowCriticalMemory:Boolean=false,val requestTimeoutSeconds:Int=1200) {
+    init {require(requestTimeoutSeconds in 60..14400) {"모델 요청 제한은 1~240분입니다."};require(window in setOf(8192,16384) && output in 512..4096 && window-output>=4096) {"실행 창은 8192/16384, 출력 예약은 512~4096 토큰입니다."}}
     @get:com.fasterxml.jackson.annotation.JsonIgnore
     val input:Int get()=minOf(if(window==8192)3600 else 11000,window-output-256)
     @get:com.fasterxml.jackson.annotation.JsonIgnore

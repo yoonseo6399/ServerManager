@@ -42,9 +42,10 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
     private val memoryApprovals=ConcurrentHashMap<String,MemoryApproval>()
     private val schedules=ProjectAgentSchedules(directory)
     private val historyGrants=ProjectAgentHistoryGrants(directory)
-    private val personalHistory=DiscordProjectAgentHistory(current,historyGrants)
-    private fun personalServices(session:ProjectAgentChannel)=ProjectAgentPersonalServices(session,schedules,personalHistory,{store.preferences(session.guild,session.user)}) {
-        check(privateAccess(current() ?: error("Discord 연결이 없습니다."),session).owner) {"개인 기록·예약은 인증된 최고 관리자만 사용할 수 있습니다."}
+    private val personalHistory=DiscordProjectAgentHistory(current,historyGrants) {source->check(authorize(current() ?: error("연결 없음"),source.guild,source.owner).owner) {"정보 제공 서버의 출처 관리자 권한이 철회됐습니다."}}
+    private fun personalServices(session:ProjectAgentChannel)=ProjectAgentPersonalServices(session,schedules,personalHistory,{store.preferences(session.guild,session.user)}) {name->
+        val grant=privateAccess(current() ?: error("Discord 연결이 없습니다."),session)
+        if(name=="schedule_task")check(grant.owner) {"작업 예약은 인증된 최고 관리자만 사용할 수 있습니다."}
     }
     private val engine=ProjectAgentEngine(store,{session->ProjectAgentTools(directory.resolve("project-agent-logs"),DiscordProjectAgentFiles({current()?.getTextChannelById(session.channel) ?: error("채널이 없습니다.")},{privateAccess(current() ?: error("연결 없음"),session)}),session.channel,personalServices(session)) {name,path->store.register(session.guild,session.user,name,path)}})
     private val scheduleDispatcher=ProjectAgentScheduleDispatcher(schedules,{current()!=null && config().enabled},jobs::isBusy,{task->worker.submit {task()}},{claimed->
@@ -75,8 +76,10 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
                     OptionData(OptionType.INTEGER,"window","실행 창 (16K는 메모리 압력 증가)",false).addChoice("8K · 기본",8192L).addChoice("16K · 메모리 주의",16384L),
                     OptionData(OptionType.INTEGER,"output","출력 예약 토큰",false).setRequiredRange(512,4096)),
                 SubcommandData("history","모델이 조회할 채널·포럼을 직접 허용·철회").addOptions(
-                    OptionData(OptionType.STRING,"action","기록 권한",true).addChoice("허용","allow").addChoice("철회","remove").addChoice("목록","list"),
-                    OptionData(OptionType.CHANNEL,"source","허용할 채널 또는 포럼 (포럼 허용은 게시글 포함)",false).setChannelTypes(net.dv8tion.jda.api.entities.channel.ChannelType.TEXT,net.dv8tion.jda.api.entities.channel.ChannelType.NEWS,net.dv8tion.jda.api.entities.channel.ChannelType.FORUM,net.dv8tion.jda.api.entities.channel.ChannelType.GUILD_PUBLIC_THREAD,net.dv8tion.jda.api.entities.channel.ChannelType.GUILD_PRIVATE_THREAD,net.dv8tion.jda.api.entities.channel.ChannelType.GUILD_NEWS_THREAD)),
+                    OptionData(OptionType.STRING,"action","기록 권한",true).addChoice("허용","allow").addChoice("철회","remove").addChoice("목록","list").addChoice("정보 사용 허용","grant").addChoice("전달 채널 철회","revoke"),
+                    OptionData(OptionType.CHANNEL,"source","허용할 채널 또는 포럼 (포럼 허용은 게시글 포함)",false).setChannelTypes(net.dv8tion.jda.api.entities.channel.ChannelType.TEXT,net.dv8tion.jda.api.entities.channel.ChannelType.NEWS,net.dv8tion.jda.api.entities.channel.ChannelType.FORUM,net.dv8tion.jda.api.entities.channel.ChannelType.GUILD_PUBLIC_THREAD,net.dv8tion.jda.api.entities.channel.ChannelType.GUILD_PRIVATE_THREAD,net.dv8tion.jda.api.entities.channel.ChannelType.GUILD_NEWS_THREAD),
+                    OptionData(OptionType.STRING,"target","정보를 사용할 에이전트 채널 ID 또는 링크 (다른 서버 가능)",false),
+                    OptionData(OptionType.STRING,"users","사용할 Discord 사용자 ID/멘션, 쉼표 구분 (grant 시 필수)",false)),
                 SubcommandData("schedules","내 예약 목록·취소").addOptions(OptionData(OptionType.STRING,"cancel","취소할 예약 ID (생략하면 목록)",false)),
                 SubcommandData("link","관리 웹 소유자 계정 연결").addOption(OptionType.STRING,"code","웹 AI 설정에서 발급한 일회용 코드",true),
                 SubcommandData("stop","이 채널의 작업·명령·대기 승인을 중단"),
@@ -175,16 +178,31 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
                         hook.editOriginalEmbeds(embed.build()).setAllowedMentions(emptyList()).queue({}, {})
                     }
                     "history"->{
-                        check(grant.owner) {"인증된 최고 관리자만 기록 접근을 허용할 수 있습니다."}
+                        check(grant.owner) {"정보 제공 서버의 인증된 최고 관리자만 출처·전달 권한을 설정할 수 있습니다."}
                         val action=event.getOption("action")!!.asString
                         if(action!="list") {
-                            val source=event.getOption("source")?.asChannel ?: error("채널·포럼을 선택하세요.")
+                            val source=event.getOption("source")?.asChannel ?: error("현재 정보 제공 서버의 출처 채널·포럼을 선택하세요.")
                             check(source.guild.id==guild.id)
-                            if(action=="allow")personalHistory.checkMember(source,event.user.id)
-                            historyGrants.set(guild.id,event.user.id,source.id,action=="allow")
+                            when(action) {
+                                "allow"->{personalHistory.checkMember(source,event.user.id);historyGrants.register(guild.id,event.user.id,source.id,source.type.name)}
+                                "remove"->historyGrants.remove(guild.id,event.user.id,source.id)
+                                "grant","revoke"->{
+                                    val raw=event.getOption("target")?.asString ?: error("정보 사용 에이전트 채널 ID/링크가 필요합니다.")
+                                    val targetId=Regex("[0-9]{1,22}").findAll(raw).lastOrNull()?.value ?: error("올바른 대상 채널 ID/링크를 지정하세요.")
+                                    if(action=="revoke"){historyGrants.revokeTarget(guild.id,event.user.id,source.id,targetId)}else {
+                                    val target=store.channel(targetId) ?: error("/agent channel 로 등록한 정보 사용 채널만 지정할 수 있습니다.")
+                                    val targetChannel=event.jda.getTextChannelById(target.channel) ?: error("봇이 정보 사용 서버·채널에 연결되어 있지 않습니다.")
+                                    check(targetChannel.guild.id==target.guild && !targetChannel.guild.publicRole.hasPermission(targetChannel,Permission.VIEW_CHANNEL)) {"정보 사용 채널이 공개되어 있습니다."}
+                                    val users=event.getOption("users")?.asString?.let {Regex("[0-9]{1,22}").findAll(it).map {m->m.value}.toSet()} ?: if(action=="revoke")setOf(target.user)else error("이 출처를 사용할 사용자 ID/멘션을 명시하세요.")
+                                    if(action=="grant")check(target.user in users) {"대상 에이전트 채널 소유자 ${target.user}를 사용 허용 목록에 포함해야 합니다."}
+                                    historyGrants.bind(guild.id,event.user.id,source.id,target.guild,target.channel,users,true)
+                                    }
+                                }
+                                else->error("유효하지 않은 권한 작업입니다.")
+                            }
                         }
-                        val allowed=historyGrants.list(guild.id,event.user.id)
-                        hook.editOriginal("허용한 채널·포럼: "+allowed.joinToString {"<#$it>"}.ifBlank {"없음"}+"\n선택한 포럼은 내부 게시글도 포함합니다. 조회 결과는 모델과 이 에이전트 채널에 전달됩니다. 철회는 다음 조회부터 적용되며 이미 읽은 문맥은 /agent context action:reset 으로 초기화하세요.").setAllowedMentions(emptyList()).queue({}, {})
+                        val entries=historyGrants.provider(guild.id,event.user.id)
+                        hook.editOriginal((entries.joinToString("\n") {source->"출처 <#${source.channel}> → "+source.targets.joinToString {t->"서버 ${t.guild} / 채널 ${t.channel} / 사용자 ${t.users.joinToString()}"}.ifBlank {"정보 사용 대상 없음"}}.ifBlank {"등록한 출처 없음"}+"\nallow로 출처 등록 후 grant로 사용 채널·사용자를 허용하세요. 대상 채널의 열람자도 전달된 답변을 볼 수 있습니다. 철회는 다음 조회부터 적용되며 기존 문맥은 사용 채널에서 초기화해야 합니다.").take(1900)).setAllowedMentions(emptyList()).queue({}, {})
                     }
                     "schedules"->{
                         check(grant.owner)
@@ -223,7 +241,7 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
                             session=store.context(session.channel,session.user,action=="reset",if(action=="configure")event.getOption("limit")?.asLong?.toInt()else null,if(action=="configure")event.getOption("window")?.asLong?.toInt()else null,if(action=="configure")event.getOption("output")?.asLong?.toInt()else null)
                             if(action=="compact"){
                                 val job=jobs.begin(session.channel,session.user)
-                                try {engine.compact(session.channel,session.user,inference(session)){privateAccess(event.jda,session)}}finally{jobs.finish(session.channel,job)}
+                                try {engine.compactWithTimeout(session.channel,session.user,inference(session),qwen.config().requestTimeoutMinutes*60){privateAccess(event.jda,session)}}finally{jobs.finish(session.channel,job)}
                                 session=store.channel(session.channel)!!
                             }
                         }
@@ -348,7 +366,7 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
             finally{memoryApprovals.remove(token,approval);warning.editMessageComponents(emptyList()).queue({}, {})}
         }
         val runStarted=System.nanoTime()
-        try {engine.runWindow(session.channel,session.user,userName,prompt,preferences,inference,ProjectAgentLimits(maxTurns,grant.tier),windowOverride,::active,events::emit);return true}catch(e:Exception){events.emit(ProjectAgentEvent("done",text=if(job.cancelled.get())"작업 중단: 사용자가 중지했습니다." else "작업 중단: ${safe(e)}",seconds=(System.nanoTime()-runStarted)/1e9));return false}
+        try {engine.runWindow(session.channel,session.user,userName,prompt,preferences,inference,ProjectAgentLimits(maxTurns,grant.tier),windowOverride,chosen.requestTimeoutMinutes*60,::active,events::emit);return true}catch(e:Exception){events.emit(ProjectAgentEvent("done",text=if(job.cancelled.get())"작업 중단: 사용자가 중지했습니다." else "작업 중단: ${safe(e)}",seconds=(System.nanoTime()-runStarted)/1e9));return false}
         }finally{jobs.finish(session.channel,job)}
     }
     private fun inference(session:ProjectAgentChannel,override:String?=null,memoryPermission:((String)->Unit)?=null):ProjectAgentInference {
@@ -363,7 +381,7 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
             override fun generate(messages:List<ProjectAgentMessage>,think:Boolean,progress:(QwenProgress)->Unit):String {
                 val pi=PiWire.decode(messages)
                 val main=pi?.path("tools")?.let {it.isArray && it.size()>0} ?: (messages.firstOrNull()?.content?.startsWith("You are 루오노타르")==true)
-                val budget=LocalContextBudget(session.executionWindow,session.outputTokens).let {if(main || pi!=null)it else it.helper()}
+                val budget=LocalContextBudget(session.executionWindow,session.outputTokens,requestTimeoutSeconds=chosen.requestTimeoutMinutes*60).let {if(main || pi!=null)it else it.helper()}
                 val response=try {QwenRequests.conversationWithBudget(model,messages,think,chosen.runnerId,budget,progress).answer}
                     catch(e:Exception){val warning=LlmMemoryGuard.reason(e);if(warning==null || memoryPermission==null)throw e
                         memoryPermission(warning)

@@ -141,7 +141,7 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
                 "keep_alive" to "1m","options" to (mapOf("num_ctx" to budget.window,"num_predict" to budget.output)+if(pi!=null)mapOf("temperature" to pi.path("temperature").asDouble(0.0).coerceIn(0.0,1.0))else if(messages.firstOrNull()?.content?.startsWith("Independent command-risk reviewer")==true)mapOf("temperature" to 0)else emptyMap()))+
                 if(pi!=null)mapOf("tools" to pi.path("tools")) else if(native)mapOf("tools" to ProjectAgentNativeTools.definitions(messages.first().content))else mapOf("format" to ProjectAgentFormats.forMessages(messages)))
             trace?.invoke("request",body)
-            val request=HttpRequest.newBuilder(endpoint.resolve("/api/chat")).timeout(Duration.ofMinutes(if(pi!=null)20 else 3)).header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build()
+            val request=HttpRequest.newBuilder(endpoint.resolve("/api/chat")).timeout(Duration.ofSeconds(budget.requestTimeoutSeconds.toLong())).header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build()
             val start=System.nanoTime();val opened=java.util.concurrent.atomic.AtomicReference<java.io.InputStream?>()
             val cancelled=java.util.concurrent.atomic.AtomicBoolean(false)
             val headers=client.sendAsync(request,HttpResponse.BodyHandlers.ofInputStream())
@@ -170,7 +170,7 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
                     Answer(text,limited,(System.nanoTime()-start)/1e9,tokens,thinking.takeLast(4000).toString(),inputTokens,modelContext(size),if(pi!=null)PiWire.assistant(content.toString(),calls,thinking.toString()) else if(native && calls.size==1)ProjectAgentNativeTools.assistant(content.toString(),calls,thinking.toString())else null,LlmMemory.rate(tokens,duration),memory())
                 }
             }
-            return try {memoryGuard.await(pending,if(pi!=null)1205 else 185)} catch(e:Exception){cancelled.set(true);headers.cancel(true);pending.cancel(true);runCatching {opened.get()?.close()};runCatching {headers.getNow(null)?.body()?.close()};if(e is InterruptedException)Thread.currentThread().interrupt();val failure=generateSequence<Throwable>(e){it.cause}.firstOrNull {it is IllegalStateException && it.message.orEmpty().startsWith("Ollama HTTP ")};throw IllegalStateException(when {LlmMemoryGuard.reason(e)!=null->LlmMemoryGuard.reason(e);e is InterruptedException->"Ollama 생성을 중단했습니다.";failure!=null->failure.message;else->"Ollama 대화 실패 또는 3분 제한 초과입니다."},e)}
+            return try {memoryGuard.await(pending,budget.requestTimeoutSeconds.toLong()+5)} catch(e:Exception){cancelled.set(true);headers.cancel(true);pending.cancel(true);runCatching {opened.get()?.close()};runCatching {headers.getNow(null)?.body()?.close()};if(e is InterruptedException)Thread.currentThread().interrupt();val failure=generateSequence<Throwable>(e){it.cause}.firstOrNull {it is IllegalStateException && it.message.orEmpty().startsWith("Ollama HTTP ")};throw IllegalStateException(when {LlmMemoryGuard.reason(e)!=null->LlmMemoryGuard.reason(e);e is InterruptedException->"Ollama 생성을 중단했습니다.";failure!=null->failure.message;else->"Ollama 대화 실패 또는 설정한 ${budget.requestTimeoutSeconds/60}분 제한 초과입니다."},e)}
         }finally {inference.release()}
     }
 

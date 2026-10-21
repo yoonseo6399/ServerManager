@@ -4,12 +4,12 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import java.nio.file.Path
 import java.time.OffsetDateTime
 
-/** Only authenticated administrator owners get these tools; grants are rechecked at plan and execution. */
+/** History follows provider ACLs for every permitted tier; scheduling requires an administrator owner. */
 internal class ProjectAgentPersonalServices(private val session:ProjectAgentChannel,private val schedules:ProjectAgentSchedules,
-    private val history:DiscordProjectAgentHistory,private val preferences:()->ProjectAgentPreferences,private val authorize:()->Unit) :ProjectAgentServicePort {
+    private val history:DiscordProjectAgentHistory,private val preferences:()->ProjectAgentPreferences,private val authorize:(String)->Unit) :ProjectAgentServicePort {
     private val mapper=jacksonObjectMapper().findAndRegisterModules().disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
     override fun plan(home:Path,call:ProjectAgentTool):ProjectAgentPlan {
-        authorize();val args=call.arguments
+        authorize(call.name);val args=call.arguments
         val readOnly=when(call.name) {
             "list_chat_channels"->true
             "read_chat_history"->{history.check(session,args.path("channel_id").asText());require(args.path("limit").asInt(20) in 1..50);true}
@@ -29,7 +29,7 @@ internal class ProjectAgentPersonalServices(private val session:ProjectAgentChan
         return ProjectAgentPlan(call,home.toRealPath().toString(),description,readOnly,scope=if(readOnly)"INSIDE"else "UNKNOWN",sandboxed=readOnly)
     }
     override fun execute(call:ProjectAgentTool,active:()->Unit):ProjectAgentToolResult {
-        active();authorize();val a=call.arguments
+        active();authorize(call.name);val a=call.arguments
         val result:Any=when(call.name) {
             "list_chat_channels"->mapOf("channels" to history.channels(session))
             "read_chat_history"->history.read(session,a.path("channel_id").asText(),a.path("limit").asInt(20),a.path("before").asText().takeIf {it.isNotBlank()},active)

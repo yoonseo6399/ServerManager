@@ -43,7 +43,7 @@ internal class StrataLlm(private val endpoint:URI=StrataRuntime.endpoint,private
         if(pi!=null)body["tools"]=pi.path("tools")
         else if(native){body["tools"]=ProjectAgentNativeTools.definitions(messages.first().content);body["parallel_tool_calls"]=false}
         else if(!plain){val schema=ProjectAgentFormats.forMessages(messages);body["response_format"]=if(schema is String)mapOf("type" to "json_object")else mapOf("type" to "json_schema","json_schema" to mapOf("name" to "agent_response","strict" to true,"schema" to schema))}
-        val request=HttpRequest.newBuilder(endpoint.resolve("/v1/chat/completions")).timeout(Duration.ofMinutes(20)).header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body))).build()
+        val request=HttpRequest.newBuilder(endpoint.resolve("/v1/chat/completions")).timeout(Duration.ofSeconds(budget.requestTimeoutSeconds.toLong())).header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body))).build()
         val start=System.nanoTime();val opened=java.util.concurrent.atomic.AtomicReference<java.io.InputStream?>();val cancelled=java.util.concurrent.atomic.AtomicBoolean(false)
         val headers=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build().sendAsync(request,HttpResponse.BodyHandlers.ofInputStream())
         headers.whenComplete {r,_->if(cancelled.get())runCatching {r?.body()?.close()}}
@@ -74,11 +74,11 @@ internal class StrataLlm(private val endpoint:URI=StrataRuntime.endpoint,private
             LocalLlm.Answer(if(pi!=null)text.toString() else if(native)ProjectAgentNativeTools.reply(text.toString(),functions)else text.toString(),finish=="length",(System.nanoTime()-start)/1e9,tokens,thinking.takeLast(4000).toString(),input,maximum,
                 if(pi!=null)PiWire.assistant(text.toString(),functions,thinking.toString()) else if(native && functions.size==1)ProjectAgentNativeTools.assistant(text.toString(),functions,thinking.toString())else null,rate,memory())
         }}
-        try {return memoryGuard.await(pending,1205)}catch(e:Exception){
+        try {return memoryGuard.await(pending,budget.requestTimeoutSeconds.toLong()+5)}catch(e:Exception){
             cancelled.set(true);headers.cancel(true);pending.cancel(true);runCatching {opened.get()?.close()};runCatching {headers.getNow(null)?.body()?.close()}
             if(e is InterruptedException)Thread.currentThread().interrupt()
             val message=generateSequence<Throwable>(e){it.cause}.firstOrNull {it is IllegalStateException || it is IllegalArgumentException}?.message
-            throw IllegalStateException(if(e is InterruptedException)"Flash-Next 생성을 중단했습니다."else LlmMemoryGuard.reason(e) ?: message ?: "Flash-Next 대화 실패 또는 20분 제한 초과입니다.",e)
+            throw IllegalStateException(if(e is InterruptedException)"Flash-Next 생성을 중단했습니다."else LlmMemoryGuard.reason(e) ?: message ?: "Flash-Next 대화 실패 또는 설정한 ${budget.requestTimeoutSeconds/60}분 제한 초과입니다.",e)
         }
     }
 }
