@@ -7,14 +7,14 @@ import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel
 internal object DiscordAgentChunks {
     fun split(text:String):List<String> {
         if(text.isEmpty())return listOf("…")
-        val result=mutableListOf<String>();var remaining=text;var fence:String?=null
+        val result=mutableListOf<String>();var remaining=text;var fence:String?=null;var marker="```"
         while(remaining.isNotEmpty()){
-            val prefix=fence?.let {"```$it\n"}.orEmpty()
+            val prefix=fence?.let {"$marker$it\n"}.orEmpty()
             var cut=minOf(1850-prefix.length,remaining.length)
             if(cut<remaining.length){val line=remaining.lastIndexOf('\n',cut-1);if(line>cut/2)cut=line+1;if(cut>0 && Character.isHighSurrogate(remaining[cut-1]))cut--}
             val body=remaining.take(cut)
-            Regex("(?m)^```([^\\r\\n`]*)").findAll(body).forEach {match->fence=if(fence==null)match.groupValues[1].take(40) else null}
-            result.add(prefix+body+(if(fence!=null)"\n```" else ""));remaining=remaining.drop(cut)
+            Regex("(?m)^(`{3,})([^\\r\\n`]*)").findAll(body).forEach {match->if(fence==null){marker=match.groupValues[1];fence=match.groupValues[2].take(40)}else if(match.groupValues[1].length>=marker.length && match.groupValues[2].isBlank())fence=null}
+            result.add(prefix+body+(if(fence!=null)"\n$marker" else ""));remaining=remaining.drop(cut)
         }
         return result
     }

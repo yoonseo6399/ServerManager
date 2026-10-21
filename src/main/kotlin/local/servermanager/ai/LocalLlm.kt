@@ -133,6 +133,7 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
         require(pi!=null || messages.sumOf {ProjectAgentContext.messageTokens(it)}+overhead<=budget.input) {"설정된 입력 예산(${budget.input})보다 문맥이 큽니다. 파일·변경을 작은 구간으로 나눠 요청하세요."}
         check(inference.tryAcquire()) {"다른 로컬 모델 요청이 진행 중입니다."}
         try {
+            val memoryGuard=LlmMemoryGuard(budget.allowCriticalMemory);memoryGuard.check()
             if(LocalModels.get(size).backend=="strata") {unloadQwen();return StrataLlm().conversation(messages,think,budget,progress)}
             StrataRuntime.stop()
             unloadQwen(tag(size))
@@ -169,7 +170,7 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
                     Answer(text,limited,(System.nanoTime()-start)/1e9,tokens,thinking.takeLast(4000).toString(),inputTokens,modelContext(size),if(pi!=null)PiWire.assistant(content.toString(),calls,thinking.toString()) else if(native && calls.size==1)ProjectAgentNativeTools.assistant(content.toString(),calls,thinking.toString())else null,LlmMemory.rate(tokens,duration),memory())
                 }
             }
-            return try {pending.get(if(pi!=null)1205 else 185,TimeUnit.SECONDS)} catch(e:Exception){cancelled.set(true);headers.cancel(true);pending.cancel(true);runCatching {opened.get()?.close()};runCatching {headers.getNow(null)?.body()?.close()};if(e is InterruptedException)Thread.currentThread().interrupt();val failure=generateSequence<Throwable>(e){it.cause}.firstOrNull {it is IllegalStateException && it.message.orEmpty().startsWith("Ollama HTTP ")};throw IllegalStateException(when {e is InterruptedException->"Ollama 생성을 중단했습니다.";failure!=null->failure.message;else->"Ollama 대화 실패 또는 3분 제한 초과입니다."},e)}
+            return try {memoryGuard.await(pending,if(pi!=null)1205 else 185)} catch(e:Exception){cancelled.set(true);headers.cancel(true);pending.cancel(true);runCatching {opened.get()?.close()};runCatching {headers.getNow(null)?.body()?.close()};if(e is InterruptedException)Thread.currentThread().interrupt();val failure=generateSequence<Throwable>(e){it.cause}.firstOrNull {it is IllegalStateException && it.message.orEmpty().startsWith("Ollama HTTP ")};throw IllegalStateException(when {LlmMemoryGuard.reason(e)!=null->LlmMemoryGuard.reason(e);e is InterruptedException->"Ollama 생성을 중단했습니다.";failure!=null->failure.message;else->"Ollama 대화 실패 또는 3분 제한 초과입니다."},e)}
         }finally {inference.release()}
     }
 

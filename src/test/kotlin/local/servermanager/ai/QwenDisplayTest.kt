@@ -53,4 +53,47 @@ class QwenDisplayTest {
         assertTrue(chunks.size>2);assertTrue(chunks.all {it.length<=2000});assertTrue(chunks.all {Regex("(?m)^```").findAll(it).count()%2==0})
         assertTrue(chunks.joinToString("").contains("끝"))
     }
+    @Test fun `completed silent bash keeps command and review and duplicate turn numbers cannot overwrite another call`() {
+        val cards=mutableMapOf<Int,MessageEmbed>();var sent=0
+        fun embed(value:Any?):MessageEmbed=when(value){is Array<*>->value.first() as MessageEmbed;is Collection<*>->value.first() as MessageEmbed;else->value as MessageEmbed}
+        fun message(id:Int):Message {
+            val msg=mock(Message::class.java,RETURNS_DEEP_STUBS)
+            doAnswer {call->cards[id]=embed(call.arguments[0]);val action=mock(MessageEditAction::class.java,RETURNS_SELF);`when`(action.complete()).thenReturn(msg);action}.`when`(msg).editMessageEmbeds(any<MessageEmbed>())
+            return msg
+        }
+        val channel=mock(TextChannel::class.java){call->if(call.method.name=="sendMessageEmbeds") {
+            val id=++sent;cards[id]=embed(call.arguments[0]);val msg=message(id)
+            mock(MessageCreateAction::class.java){action->if(action.method.name=="complete")msg else RETURNS_SELF.answer(action)}
+        }else RETURNS_DEFAULTS.answer(call)}
+        val display=DiscordProjectAgentDisplay(channel,message(0),"request","14b","run",5)
+        val risk=ProjectAgentRisk("ALLOW","LOW","Qwen3.8 27B · 선택한 임시 파일만 제거","INSIDE")
+        fun plan(file:String)=ProjectAgentPlan(ProjectAgentTool("bash",com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().readTree("""{"command":"rm -- $file"}""")),"/fixture","rm -- $file",false,scope="INSIDE")
+        val a=plan("a.txt");val b=plan("b.txt")
+        display.emit(ProjectAgentEvent("tool_start",1,plan=a,risk=risk,callId="call-a"));display.emit(ProjectAgentEvent("tool_start",1,plan=b,risk=risk,callId="call-b"))
+        display.emit(ProjectAgentEvent("tool_end",1,"종료 코드 0 · 출력 없음",a,risk,callId="call-a",exitCode=0));display.emit(ProjectAgentEvent("tool_end",1,"종료 코드 0 · 출력 없음",b,risk,callId="call-b",exitCode=0))
+        assertEquals(2,sent);assertContains(cards[1]!!.description!!,"rm -- a.txt");assertContains(cards[2]!!.description!!,"rm -- b.txt");assertContains(cards[1]!!.description!!,"출력 없음");assertTrue(cards[1]!!.fields.any {it.value.orEmpty().contains("Qwen3.8 27B")})
+    }
+
+    @Test fun `file changes render plain diff and a separate original detail button`() {
+        val texts=CopyOnWriteArrayList<String>();val buttons=CopyOnWriteArrayList<String>()
+        val msg=mock(Message::class.java,RETURNS_DEEP_STUBS)
+        val channel=mock(TextChannel::class.java){call->when(call.method.name) {
+            "sendMessageEmbeds"->mock(MessageCreateAction::class.java){action->when(action.method.name) {
+                "setComponents"->{(action.arguments[0] as Collection<*>).filterIsInstance<net.dv8tion.jda.api.components.actionrow.ActionRow>().forEach {row->row.components.filterIsInstance<net.dv8tion.jda.api.components.buttons.Button>().mapNotNullTo(buttons){it.customId}};action.mock}
+                "complete"->msg
+                else->RETURNS_SELF.answer(action)
+            }}
+            "sendMessage"->{val text=call.arguments[0].toString();mock(MessageCreateAction::class.java){action->when(action.method.name) {
+                "queue"->{texts.add(text);@Suppress("UNCHECKED_CAST") (action.arguments[0] as Consumer<Message>).accept(msg);null}
+                else->RETURNS_SELF.answer(action)
+            }}}
+            else->RETURNS_DEFAULTS.answer(call)
+        }}
+        val display=DiscordProjectAgentDisplay(channel,msg,"request","14b","run",filePreview={"original-token"})
+        val plan=ProjectAgentPlan(ProjectAgentTool("write",com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().createObjectNode()),"/p","파일 쓰기",false)
+        display.emit(ProjectAgentEvent("tool_end",1,"완료",plan,changes=listOf(ProjectAgentFileChange("/p/a.txt","a\n","b\n","--- a.txt\n+++ a.txt\n-a\n+b\n"))))
+        val until=System.nanoTime()+3_000_000_000;while(texts.isEmpty() && System.nanoTime()<until)Thread.sleep(2)
+        assertTrue(buttons.contains("qa:file:original-token"));assertTrue(texts.any {it.startsWith("```diff\n") && it.contains("+b")})
+    }
+
 }

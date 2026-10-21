@@ -1,0 +1,2628 @@
+{
+  "model": "qwen3.8:27b-q4_K_M",
+  "results": [
+    {
+      "name": "warmup",
+      "window": 8192,
+      "wallSeconds": 10.429457499878481,
+      "firstTokenSeconds": 10.349659582832828,
+      "text": "READY",
+      "metrics": {
+        "prompt_eval_count": 16,
+        "prompt_eval_duration": 430327000,
+        "eval_count": 2,
+        "eval_duration": 80100000,
+        "load_duration": 9908920542,
+        "total_duration": 10428901417,
+        "done_reason": "stop"
+      },
+      "before": {
+        "time": 1792600947.348882,
+        "pressure": "1",
+        "swap": "total = 8192.00M  used = 7170.12M  free = 1021.88M  (encrypted)",
+        "loaded": []
+      },
+      "after": {
+        "time": 1792600957.7859058,
+        "pressure": "1",
+        "swap": "total = 8192.00M  used = 7154.12M  free = 1037.88M  (encrypted)",
+        "loaded": [
+          {
+            "name": "qwen3.8:27b-q4_K_M",
+            "model": "qwen3.8:27b-q4_K_M",
+            "size": 16935876033,
+            "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+            "details": {
+              "parent_model": "",
+              "format": "gguf",
+              "family": "qwen35",
+              "families": [
+                "qwen35"
+              ],
+              "parameter_size": "27.3B",
+              "quantization_level": "Q4_K_M"
+            },
+            "expires_at": "2026-10-22T01:45:37.785631+09:00",
+            "size_vram": 16935876033,
+            "context_length": 8192,
+            "runner": "llamacpp"
+          }
+        ]
+      },
+      "tokensPerSecond": 24.96878901373283
+    },
+    {
+      "name": "short1",
+      "window": 8192,
+      "wallSeconds": 12.603210458066314,
+      "firstTokenSeconds": 1.1927046671044081,
+      "text": "```python\ndef centered_stars(n):\n    if not isinstance(n, int) or n <= 0:\n        raise ValueError(\"n must be a positive integer\")\n    return [' ' * (n - i - 1) + '*' * (2 * i + 1) for i in range(n)]\n\nassert centered_stars(1) == ['*']\nassert centered_stars(3) == ['  *', ' ***', '*****']\ntry:\n    centered_stars(0)\n    assert False\nexcept ValueError:\n    pass\n\nif __name__ == '__main__':\n    for row in centered_stars(5):\n        print(row)\n```",
+      "metrics": {
+        "prompt_eval_count": 87,
+        "prompt_eval_duration": 1109467000,
+        "eval_count": 149,
+        "eval_duration": 11412085000,
+        "load_duration": 724083,
+        "total_duration": 12602721500,
+        "done_reason": "stop"
+      },
+      "before": {
+        "time": 1792600957.802924,
+        "pressure": "1",
+        "swap": "total = 8192.00M  used = 7154.12M  free = 1037.88M  (encrypted)",
+        "loaded": [
+          {
+            "name": "qwen3.8:27b-q4_K_M",
+            "model": "qwen3.8:27b-q4_K_M",
+            "size": 16935876033,
+            "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+            "details": {
+              "parent_model": "",
+              "format": "gguf",
+              "family": "qwen35",
+              "families": [
+                "qwen35"
+              ],
+              "parameter_size": "27.3B",
+              "quantization_level": "Q4_K_M"
+            },
+            "expires_at": "2026-10-22T01:45:37.785631+09:00",
+            "size_vram": 16935876033,
+            "context_length": 8192,
+            "runner": "llamacpp"
+          }
+        ]
+      },
+      "after": {
+        "time": 1792600970.415935,
+        "pressure": "1",
+        "swap": "total = 8192.00M  used = 7146.12M  free = 1045.88M  (encrypted)",
+        "loaded": [
+          {
+            "name": "qwen3.8:27b-q4_K_M",
+            "model": "qwen3.8:27b-q4_K_M",
+            "size": 16935876033,
+            "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+            "details": {
+              "parent_model": "",
+              "format": "gguf",
+              "family": "qwen35",
+              "families": [
+                "qwen35"
+              ],
+              "parameter_size": "27.3B",
+              "quantization_level": "Q4_K_M"
+            },
+            "expires_at": "2026-10-22T01:45:50.415682+09:00",
+            "size_vram": 16935876033,
+            "context_length": 8192,
+            "runner": "llamacpp"
+          }
+        ]
+      },
+      "tokensPerSecond": 13.056334578650615
+    },
+    {
+      "name": "warmup",
+      "window": 16384,
+      "wallSeconds": 9.346997125074267,
+      "firstTokenSeconds": 9.269486790988594,
+      "text": "READY",
+      "metrics": {
+        "prompt_eval_count": 16,
+        "prompt_eval_duration": 446095000,
+        "eval_count": 2,
+        "eval_duration": 79116000,
+        "load_duration": 8815406750,
+        "total_duration": 9346551625,
+        "done_reason": "stop"
+      },
+      "before": {
+        "time": 1792600970.4361331,
+        "pressure": "1",
+        "swap": "total = 8192.00M  used = 7146.12M  free = 1045.88M  (encrypted)",
+        "loaded": [
+          {
+            "name": "qwen3.8:27b-q4_K_M",
+            "model": "qwen3.8:27b-q4_K_M",
+            "size": 16935876033,
+            "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+            "details": {
+              "parent_model": "",
+              "format": "gguf",
+              "family": "qwen35",
+              "families": [
+                "qwen35"
+              ],
+              "parameter_size": "27.3B",
+              "quantization_level": "Q4_K_M"
+            },
+            "expires_at": "2026-10-22T01:45:50.415682+09:00",
+            "size_vram": 16935876033,
+            "context_length": 8192,
+            "runner": "llamacpp"
+          }
+        ]
+      },
+      "after": {
+        "time": 1792600979.7940538,
+        "pressure": "1",
+        "swap": "total = 8192.00M  used = 7138.12M  free = 1053.88M  (encrypted)",
+        "loaded": [
+          {
+            "name": "qwen3.8:27b-q4_K_M",
+            "model": "qwen3.8:27b-q4_K_M",
+            "size": 17514700471,
+            "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+            "details": {
+              "parent_model": "",
+              "format": "gguf",
+              "family": "qwen35",
+              "families": [
+                "qwen35"
+              ],
+              "parameter_size": "27.3B",
+              "quantization_level": "Q4_K_M"
+            },
+            "expires_at": "2026-10-22T01:45:59.793908+09:00",
+            "size_vram": 17514700471,
+            "context_length": 16384,
+            "runner": "llamacpp"
+          }
+        ]
+      },
+      "tokensPerSecond": 25.279336670205772
+    },
+    {
+      "name": "short1",
+      "window": 16384,
+      "wallSeconds": 12.622918457956985,
+      "firstTokenSeconds": 1.1817519159521908,
+      "text": "```python\ndef centered_stars(n):\n    if not isinstance(n, int) or n <= 0:\n        raise ValueError(\"n must be a positive integer\")\n    return [' ' * (n - i - 1) + '*' * (2 * i + 1) for i in range(n)]\n\nassert centered_stars(1) == ['*']\nassert centered_stars(3) == ['  *', ' ***', '*****']\ntry:\n    centered_stars(0)\n    assert False\nexcept ValueError:\n    pass\n\nif __name__ == '__main__':\n    for row in centered_stars(5):\n        print(row)\n```",
+      "metrics": {
+        "prompt_eval_count": 87,
+        "prompt_eval_duration": 1109602000,
+        "eval_count": 149,
+        "eval_duration": 11441193000,
+        "load_duration": 534958,
+        "total_duration": 12622425583,
+        "done_reason": "stop"
+      },
+      "before": {
+        "time": 1792600979.804357,
+        "pressure": "1",
+        "swap": "total = 8192.00M  used = 7138.12M  free = 1053.88M  (encrypted)",
+        "loaded": [
+          {
+            "name": "qwen3.8:27b-q4_K_M",
+            "model": "qwen3.8:27b-q4_K_M",
+            "size": 17514700471,
+            "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+            "details": {
+              "parent_model": "",
+              "format": "gguf",
+              "family": "qwen35",
+              "families": [
+                "qwen35"
+              ],
+              "parameter_size": "27.3B",
+              "quantization_level": "Q4_K_M"
+            },
+            "expires_at": "2026-10-22T01:45:59.793908+09:00",
+            "size_vram": 17514700471,
+            "context_length": 16384,
+            "runner": "llamacpp"
+          }
+        ]
+      },
+      "after": {
+        "time": 1792600992.4349928,
+        "pressure": "2",
+        "swap": "total = 8192.00M  used = 7098.12M  free = 1093.88M  (encrypted)",
+        "loaded": [
+          {
+            "name": "qwen3.8:27b-q4_K_M",
+            "model": "qwen3.8:27b-q4_K_M",
+            "size": 17514700471,
+            "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+            "details": {
+              "parent_model": "",
+              "format": "gguf",
+              "family": "qwen35",
+              "families": [
+                "qwen35"
+              ],
+              "parameter_size": "27.3B",
+              "quantization_level": "Q4_K_M"
+            },
+            "expires_at": "2026-10-22T01:46:12.434742+09:00",
+            "size_vram": 17514700471,
+            "context_length": 16384,
+            "runner": "llamacpp"
+          }
+        ]
+      },
+      "tokensPerSecond": 13.02311743189718
+    },
+    {
+      "name": "long16k",
+      "window": 16384,
+      "wallSeconds": 119.97208125004545,
+      "firstTokenSeconds": 116.35784395807423,
+      "text": "```json\n{\n  \"FIRST_LABEL\": \"A17\",\n  \"MIDDLE_LABEL\": \"B29\",\n  \"LAST_LABEL\": \"C43\"\n}\n```",
+      "metrics": {
+        "prompt_eval_count": 10861,
+        "prompt_eval_duration": 116138094000,
+        "eval_count": 43,
+        "eval_duration": 3620396000,
+        "load_duration": 5479333,
+        "total_duration": 119971309750,
+        "done_reason": "stop"
+      },
+      "before": {
+        "time": 1792600992.45964,
+        "pressure": "2",
+        "swap": "total = 8192.00M  used = 7098.12M  free = 1093.88M  (encrypted)",
+        "loaded": [
+          {
+            "name": "qwen3.8:27b-q4_K_M",
+            "model": "qwen3.8:27b-q4_K_M",
+            "size": 17514700471,
+            "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+            "details": {
+              "parent_model": "",
+              "format": "gguf",
+              "family": "qwen35",
+              "families": [
+                "qwen35"
+              ],
+              "parameter_size": "27.3B",
+              "quantization_level": "Q4_K_M"
+            },
+            "expires_at": "2026-10-22T01:46:12.434742+09:00",
+            "size_vram": 17514700471,
+            "context_length": 16384,
+            "runner": "llamacpp"
+          }
+        ]
+      },
+      "after": {
+        "time": 1792601112.425791,
+        "pressure": "2",
+        "swap": "total = 8192.00M  used = 7320.31M  free = 871.69M  (encrypted)",
+        "loaded": [
+          {
+            "name": "qwen3.8:27b-q4_K_M",
+            "model": "qwen3.8:27b-q4_K_M",
+            "size": 17514700471,
+            "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+            "details": {
+              "parent_model": "",
+              "format": "gguf",
+              "family": "qwen35",
+              "families": [
+                "qwen35"
+              ],
+              "parameter_size": "27.3B",
+              "quantization_level": "Q4_K_M"
+            },
+            "expires_at": "2026-10-22T01:48:12.426275+09:00",
+            "size_vram": 17514700471,
+            "context_length": 16384,
+            "runner": "llamacpp"
+          }
+        ]
+      },
+      "tokensPerSecond": 11.877153769919092,
+      "recallPassed": true
+    }
+  ],
+  "samples": [
+    {
+      "time": 1792600947.335926,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7170.12M  free = 1021.88M  (encrypted)",
+      "loaded": []
+    },
+    {
+      "time": 1792600947.348882,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7170.12M  free = 1021.88M  (encrypted)",
+      "loaded": []
+    },
+    {
+      "time": 1792600949.360251,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7154.12M  free = 1037.88M  (encrypted)",
+      "loaded": []
+    },
+    {
+      "time": 1792600951.377832,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7154.12M  free = 1037.88M  (encrypted)",
+      "loaded": []
+    },
+    {
+      "time": 1792600953.4143739,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7154.12M  free = 1037.88M  (encrypted)",
+      "loaded": []
+    },
+    {
+      "time": 1792600955.439184,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7154.12M  free = 1037.88M  (encrypted)",
+      "loaded": []
+    },
+    {
+      "time": 1792600957.470888,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7154.12M  free = 1037.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 16935876033,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:45:37.48906+09:00",
+          "size_vram": 16935876033,
+          "context_length": 8192,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600957.7859058,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7154.12M  free = 1037.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 16935876033,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:45:37.785631+09:00",
+          "size_vram": 16935876033,
+          "context_length": 8192,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600957.802924,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7154.12M  free = 1037.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 16935876033,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:45:37.785631+09:00",
+          "size_vram": 16935876033,
+          "context_length": 8192,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600959.499608,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7154.12M  free = 1037.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 16935876033,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:45:37.785631+09:00",
+          "size_vram": 16935876033,
+          "context_length": 8192,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600961.5276139,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7154.12M  free = 1037.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 16935876033,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:45:37.785631+09:00",
+          "size_vram": 16935876033,
+          "context_length": 8192,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600963.547821,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7154.12M  free = 1037.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 16935876033,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:45:37.785631+09:00",
+          "size_vram": 16935876033,
+          "context_length": 8192,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600965.5702028,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7146.12M  free = 1045.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 16935876033,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:45:37.785631+09:00",
+          "size_vram": 16935876033,
+          "context_length": 8192,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600967.591944,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7146.12M  free = 1045.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 16935876033,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:45:37.785631+09:00",
+          "size_vram": 16935876033,
+          "context_length": 8192,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600969.618603,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7146.12M  free = 1045.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 16935876033,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:45:37.785631+09:00",
+          "size_vram": 16935876033,
+          "context_length": 8192,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600970.415935,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7146.12M  free = 1045.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 16935876033,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:45:50.415682+09:00",
+          "size_vram": 16935876033,
+          "context_length": 8192,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600970.4361331,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7146.12M  free = 1045.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 16935876033,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:45:50.415682+09:00",
+          "size_vram": 16935876033,
+          "context_length": 8192,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600971.6409118,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7146.12M  free = 1045.88M  (encrypted)",
+      "loaded": []
+    },
+    {
+      "time": 1792600973.664128,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7146.12M  free = 1045.88M  (encrypted)",
+      "loaded": []
+    },
+    {
+      "time": 1792600975.703171,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7138.12M  free = 1053.88M  (encrypted)",
+      "loaded": []
+    },
+    {
+      "time": 1792600977.739757,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7138.12M  free = 1053.88M  (encrypted)",
+      "loaded": []
+    },
+    {
+      "time": 1792600979.767748,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7138.12M  free = 1053.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:45:59.793908+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600979.7940538,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7138.12M  free = 1053.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:45:59.793908+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600979.804357,
+      "pressure": "1",
+      "swap": "total = 8192.00M  used = 7138.12M  free = 1053.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:45:59.793908+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600981.809545,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7130.12M  free = 1061.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:45:59.793908+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600983.825563,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7130.12M  free = 1061.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:45:59.793908+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600985.842863,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7130.12M  free = 1061.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:45:59.793908+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600987.8692338,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7130.12M  free = 1061.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:45:59.793908+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600989.892694,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7130.12M  free = 1061.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:45:59.793908+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600991.919403,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7098.12M  free = 1093.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:45:59.793908+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600992.4349928,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7098.12M  free = 1093.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600992.45964,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7098.12M  free = 1093.88M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600993.936068,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7138.00M  free = 1054.00M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600995.9590242,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7138.00M  free = 1054.00M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792600997.9854872,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7138.00M  free = 1054.00M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601000.012002,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7138.00M  free = 1054.00M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601002.037521,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7162.56M  free = 1029.44M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601004.058288,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7209.56M  free = 982.44M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601006.0854669,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7245.69M  free = 946.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601008.110784,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7245.69M  free = 946.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601010.136905,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7245.69M  free = 946.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601012.155759,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7245.69M  free = 946.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601014.180384,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7245.69M  free = 946.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601016.205019,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7245.69M  free = 946.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601018.231929,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7245.69M  free = 946.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601020.258464,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7245.69M  free = 946.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601022.281564,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7245.69M  free = 946.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601024.30772,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7245.69M  free = 946.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601026.332614,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7245.69M  free = 946.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601028.351894,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7245.69M  free = 946.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601030.37695,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7245.69M  free = 946.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601032.400028,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7245.69M  free = 946.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601034.423611,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7245.69M  free = 946.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601036.441584,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7237.69M  free = 954.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601038.467084,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7237.69M  free = 954.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601040.4915578,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7237.69M  free = 954.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601042.513951,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7237.69M  free = 954.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601044.539265,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7237.69M  free = 954.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601046.563914,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7237.69M  free = 954.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601048.583393,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7237.69M  free = 954.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601050.6091251,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7229.69M  free = 962.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601052.636993,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7229.69M  free = 962.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601054.662194,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7229.69M  free = 962.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601056.687218,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7221.69M  free = 970.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601058.714865,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7221.69M  free = 970.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601060.7386088,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7221.69M  free = 970.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601062.763804,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7221.69M  free = 970.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601064.7899761,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7221.69M  free = 970.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601066.8150651,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7221.69M  free = 970.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601068.840292,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7213.69M  free = 978.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601070.868783,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7213.69M  free = 978.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601072.8924658,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7213.69M  free = 978.31M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601074.918368,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7206.75M  free = 985.25M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601076.942525,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7249.31M  free = 942.69M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601078.9717062,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7255.94M  free = 936.06M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601080.994807,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7263.62M  free = 928.38M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601083.0183392,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7263.62M  free = 928.38M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601085.038507,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7181.44M  free = 1010.56M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601087.055077,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7163.81M  free = 1028.19M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601089.08536,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7163.81M  free = 1028.19M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601091.1020339,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7163.81M  free = 1028.19M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601093.122564,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7163.81M  free = 1028.19M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601095.141027,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7216.25M  free = 975.75M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601097.1533031,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7203.56M  free = 988.44M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601099.17121,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7208.38M  free = 983.62M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601101.187339,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7196.88M  free = 995.12M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601103.213835,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7276.31M  free = 915.69M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601105.23958,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7268.31M  free = 923.69M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601107.262851,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7268.31M  free = 923.69M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601109.2901142,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7320.31M  free = 871.69M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601111.315398,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7320.31M  free = 871.69M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:46:12.434742+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601112.425791,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7320.31M  free = 871.69M  (encrypted)",
+      "loaded": [
+        {
+          "name": "qwen3.8:27b-q4_K_M",
+          "model": "qwen3.8:27b-q4_K_M",
+          "size": 17514700471,
+          "digest": "25b843619e944cd0ae6069f94ff4e5e26a16e109ccbc0a66a0f05979ed70098e",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "27.3B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-22T01:48:12.426275+09:00",
+          "size_vram": 17514700471,
+          "context_length": 16384,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    {
+      "time": 1792601112.4529002,
+      "pressure": "2",
+      "swap": "total = 8192.00M  used = 7320.31M  free = 871.69M  (encrypted)",
+      "loaded": []
+    }
+  ],
+  "final": {
+    "time": 1792601112.4529002,
+    "pressure": "2",
+    "swap": "total = 8192.00M  used = 7320.31M  free = 871.69M  (encrypted)",
+    "loaded": []
+  }
+}

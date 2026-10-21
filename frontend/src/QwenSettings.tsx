@@ -26,6 +26,7 @@ export function QwenSettings(){
  useEffect(()=>{if(!probe||!ready)return;let active=true,inFlight=false;const timer=setInterval(()=>{if(inFlight)return;inFlight=true;api<Probe>('/admin/qwen/probe','POST',{runnerId}).then(p=>{if(active)setProbe(p);}).catch(()=>{}).finally(()=>{inFlight=false;});},10000);return()=>{active=false;clearInterval(timer);};},[!!probe,ready,runnerId]);
  async function unload(){const result=await run(()=>api<Probe>('/admin/qwen/unload','POST',{runnerId}));if(result){setProbe(result);setNotice('로컬 모델을 메모리에서 내렸습니다.');}}
  return <section className="discord-settings" aria-labelledby="qwen-heading"><h2 id="qwen-heading">로컬 LLM</h2><p>프로젝트 에이전트 엔진: <strong>Pi 1.3.0</strong>. 첫 /agent 요청에서 검증된 런타임을 자동 준비합니다. 관리 앱과 추론 실행기를 함께 업데이트하세요. 일반 로컬 채팅은 도구를 실행하지 않습니다.</p>
+ <p>독립 위험 검토는 선택한 작업 모델의 새 세션을 사용합니다. 27B 선택 시 동일 27B가 대화·도구 없이 Thinking을 끄고 검토합니다. 판정과 짧은 이유를 승인·완료 기록에 표시합니다.</p>
  <p><code>/agent</code>의 추론 컴퓨터와 공통 기본 모델을 고릅니다. 프로젝트 도구·명령은 관리 앱 컴퓨터에서 실행합니다. Thinking 지원 모델은 기본 켜짐이며 Discord 옵션으로 끌 수 있습니다. Coder는 Thinking을 지원하지 않아 자동으로 끕니다. 지원 모델은 하나씩 메모리에 올리며 모델을 바꾸면 이전 모델을 먼저 내립니다. 관리 앱과 추론 실행기를 함께 업데이트하세요. 27B는 검증한 GGUF Q4_K_M을 사용합니다. Flash-Next는 Strata SSD 오프로딩으로 실행하며 아래 버튼으로 설치합니다.</p>
  {error&&<p role="alert" className="alert error-banner">{error}</p>}{notice&&<p role="status" className="notice alert">{notice}</p>}
  <form onSubmit={e=>{e.preventDefault();save();}}><fieldset className="discord-fieldset" disabled={busy||!view}>
@@ -38,7 +39,7 @@ export function QwenSettings(){
  {view?.models?.find(m=>m.id===model)?.supportsThinking===false&&<p className="muted">선택한 모델은 Thinking 미지원 · 자동 꺼짐</p>}
  {runnerId&&!ready&&<p className="muted">{runner?(runner.online?capabilityText[runner.capability]:'실행기가 오프라인입니다.'):'등록된 실행기가 아닙니다.'} 지정한 실행기를 쓸 수 없으면 관리 앱 컴퓨터로 대체하지 않고 요청이 실패합니다.</p>}
  {!runnerId&&<p className="muted">아래 환경 확인·설치·메모리 해제는 관리 앱 컴퓨터에 적용됩니다. 자동 추론이 선택하는 실행기와 다를 수 있으므로 원격 상태를 보려면 실행기를 직접 고르세요.</p>}
- {model==='qwen38-27b'&&<p className="muted">설치 태그: <code>ollama pull qwen3.8:27b-q4_K_M</code> · 모델 약 16.8GB</p>}
+ {model==='qwen38-27b'&&<p className="muted">설치 태그: <code>ollama pull qwen3.8:27b-q4_K_M</code> · 모델 약 16.8GB · 16K는 /agent context에서 실행 창 16384로 선택할 수 있습니다. 메모리 압력·스왑 증가량을 확인하세요.</p>}
  {model==='qwen38-flash-next'&&<p className="muted">Apple Silicon Mac · 약 66.4GB 모델 다운로드·여유 공간 75GB 필요 · 8K 문맥 · SSD 속도에 따라 입력 처리가 오래 걸릴 수 있습니다. 첫 요청에서 자동 시작하고 다른 모델을 고르면 먼저 종료합니다.</p>}
  <div className="actions"><button type="submit">로컬 LLM 설정 저장</button>
  <button type="button" disabled={!ready} onClick={check}>실행 환경 확인</button>

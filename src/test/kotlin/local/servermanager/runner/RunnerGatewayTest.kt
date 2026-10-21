@@ -304,7 +304,7 @@ class RunnerGatewayTest {
             assertEquals("profile ok",profiled.get(2,java.util.concurrent.TimeUnit.SECONDS)!!.answer.text)
             val piMessages=listOf(ProjectAgentMessage("system",PiWire.PREFIX+"""{"model":"local-agent","messages":[{"role":"user","content":"Pi request"}]}"""))
             assertFailsWith<IllegalStateException> {gateway.llmBudgetConversation("14b",piMessages,false,"runner",LocalContextBudget(16384,2048)) {}}
-            deliver(RunnerMessage("llm-capability",state="OLLAMA_AGENT_V3",detail="CONTEXT_TOOLS_V1",version="PI_PROVIDER_V1"));sent.clear()
+            deliver(RunnerMessage("llm-capability",state="OLLAMA_AGENT_V3",detail="CONTEXT_TOOLS_V1",version="PI_PROVIDER_V1",token="MEMORY_GUARD_V1"));sent.clear()
             val pi=java.util.concurrent.CompletableFuture.supplyAsync {gateway.llmBudgetConversation("14b",piMessages,false,"runner",LocalContextBudget(16384,2048)) {}}
             val piDeadline=System.nanoTime()+2_000_000_000L;while(sent.isEmpty() && System.nanoTime()<piDeadline)Thread.sleep(2)
             val piRequest=mapper.readValue<RunnerMessage>((sent.single() as TextMessage).payload)

@@ -13,11 +13,11 @@ data class ProjectAgentPlan(val tool:ProjectAgentTool,val cwd:String,val descrip
 data class ProjectAgentToolResult(val text:String,val full:String,val exitCode:Int?=null,val stored:String?=null)
 
 /** Full OS-user access, not a sandbox. Every plan must pass the independent review/approval gate first. */
-class ProjectAgentTools(private val logs:Path,private val files:ProjectAgentFilePort?=null,private val resultScope:String="shared",private val register:(String,Path)->Unit={_,_->}) {
+class ProjectAgentTools(private val logs:Path,private val files:ProjectAgentFilePort?=null,private val resultScope:String="shared",private val services:ProjectAgentServicePort?=null,private val register:(String,Path)->Unit={_,_->}) {
     private val mapper=jacksonObjectMapper()
     private val results=ProjectAgentResults(logs)
     companion object {
-        val names=setOf("list_files","read_file","find_files","search_text","write_file","delete_path","run_command","build","test","git","make_new_project","list_attachments","read_attachment","save_attachment","upload_file","sh","edit_file","read_result","search")
+        val names=ProjectAgentServicePort.names+setOf("list_files","read_file","find_files","search_text","write_file","delete_path","run_command","build","test","git","make_new_project","list_attachments","read_attachment","save_attachment","upload_file","sh","edit_file","read_result","search")
         /** Tools each permission tier may even propose. Everything else is refused before planning. */
         val readTools=setOf("list_files","read_file","find_files","search_text","sh","list_attachments","read_attachment","read_result","search")
         fun allowed(tier:String):Set<String> = when(tier) {AgentAccess.OWNER->names;AgentAccess.EDIT->readTools+setOf("edit_file","write_file");else->readTools}
@@ -93,6 +93,7 @@ No automatic administrator escalation. Never ask tools to change approval settin
     fun plan(home:Path,call:ProjectAgentTool):ProjectAgentPlan {
         require(call.name in allowed(tier)) {"이 채널 권한에서는 ${call.name} 도구를 쓸 수 없습니다. 사용 가능: ${allowed(tier).sorted().joinToString()}"}
         require(call.name in names && call.arguments.isObject && call.arguments.toString().length<=100000) {"유효하지 않은 도구 요청입니다."}
+        if(call.name in ProjectAgentServicePort.names)return (services ?: error("앱 서비스가 연결되지 않았습니다.")).plan(home,call)
         val args=call.arguments.deepCopy<JsonNode>();val cwd=target(home,args.path("cwd").asText(".")).toRealPath()
         require(cwd.isDirectory())
         val normalized=call.copy(arguments=args)
@@ -146,7 +147,7 @@ No automatic administrator escalation. Never ask tools to change approval settin
     }
     fun gradleTrust(plan:ProjectAgentPlan)=plan.gradleFingerprint
     fun execute(home:Path,plan:ProjectAgentPlan,progress:(String)->Unit={},active:()->Unit):ProjectAgentToolResult {
-        active();verify(home,plan);val args=plan.tool.arguments;val path=target(home,args.path("path").asText("."))
+        active();verify(home,plan);if(plan.tool.name in ProjectAgentServicePort.names)return (services ?: error("앱 서비스가 연결되지 않았습니다.")).execute(plan.tool,active);val args=plan.tool.arguments;val path=target(home,args.path("path").asText("."))
         fun result(value:String):ProjectAgentToolResult {
             if(plan.readOnly && !args.path("summarize").asBoolean(false) && value.length>ProjectAgentResults.THRESHOLD) {
                 val id=results.save(resultScope,value)
