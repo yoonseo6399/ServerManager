@@ -1,4 +1,4 @@
-상태: 구현·관련 기능 검증 완료, Beta16 릴리즈 통합 대기
+상태: Beta16 서명 릴리즈 게시·공개 파일 검증 완료
 # feat/qwen-new-model-metrics
 
 - 기준: remote 확인 후 게시된 v0.7.0-beta.15. 기존 main/stable 변경 없음. 단독 작업.
@@ -19,3 +19,9 @@
 - Playwright 1개 통과: 새 모델 모두 선택/저장, RAM·스왑·wired 표시, 설치 버튼 POST와 설치 후 비활성, 메모리 해제.
 - TypeScript/Vite 빌드·bootJar·runner setup 통과. bootstrap 결과는 릴리즈 기록에 남긴다.
 - 기존 실험의 원문 보존 편집/검색/merge/별 Python 실행 각각 4개는 두 모델 모두 통과한 별도 native API 측정이다. 이번 변경 후 실제 모델 테스트는 위의 읽기 연쇄 및 중지 기능으로 한정했다. Flash 전체 Discord 하네스·새 컴퓨터에서 66.4GB 첫 다운로드·다른 OS 실행·긴 8K/16K 입력은 미실행이다.
+
+## 게시 완료
+
+- v0.7.0-beta.16, source 9daab866371320ef6e22764b1641e3d5d009689f, signed CI 39527609287 success. Full backend suite skipped as requested. Release URL: https://github.com/yoonseo6399/ServerManager/releases/tag/v0.7.0-beta.16
+- 공개 9개 asset digest와 SHA256SUMS 일치, 다운로드한 JAR/manifest 크기·해시·내장 버전·새 Strata/메트릭 클래스·프런트 코드 확인, pinned Ed25519 업데이트 서명 확인. Stable latest v0.6.3 유지. 기존 게시 파일/태그 덮어쓰기 없음.
+- bootstrap 검증도 통과했다. 운영 관리 앱/실행기를 자동 교체하거나 게임을 재시작하지 않았다. 사용자는 관리 앱과 추론 실행기를 함께 Beta16으로 업데이트한 뒤 새 모델을 선택한다.
