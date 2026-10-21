@@ -19,11 +19,12 @@ private data class ProjectAgentMetadata(val limits:Map<String,Int> = emptyMap(),
 class ProjectAgentStore(private val directory:Path) {
     private val mapper=jacksonObjectMapper()
     private val file=directory.resolve("project-agent.json")
+    private val sessionHistory=ProjectAgentSessionHistory(directory)
     private val metadataFile=directory.resolve("project-agent-context.json")
     private val profilesFile=directory.resolve("project-agent-profiles.json")
     private val profiles=if(profilesFile.exists())mapper.readValue<ProjectAgentProfiles>(profilesFile.readText())else ProjectAgentProfiles()
     private val metadata=if(metadataFile.exists())mapper.readValue<ProjectAgentMetadata>(metadataFile.readText())else ProjectAgentMetadata()
-    private var data=(if(file.exists())mapper.readValue<ProjectAgentData>(file.readText()) else ProjectAgentData()).let {loaded->loaded.copy(gradleConsent=metadata.gradleConsent,channels=loaded.channels.mapValues {(id,channel)->channel.copy(contextLimit=(if(profiles.epochs[id]==metadata.epochs[id])profiles.limits[id]else null) ?: metadata.limits[id] ?: 2867,contextEpoch=metadata.epochs[id] ?: 0,executionWindow=profiles.windows[id] ?: 8192,outputTokens=profiles.outputs[id] ?: 4096)})}
+    private var data=(if(file.exists())mapper.readValue<ProjectAgentData>(file.readText()) else ProjectAgentData()).let {loaded->loaded.copy(gradleConsent=metadata.gradleConsent,channels=loaded.channels.mapValues {(id,channel)->channel.copy(contextLimit=(if(profiles.epochs[id]==metadata.epochs[id])profiles.limits[id]else null) ?: metadata.limits[id] ?: 2867,contextEpoch=metadata.epochs[id] ?: 0,executionWindow=profiles.windows[id] ?: 8192,outputTokens=profiles.outputs[id] ?: 4096,history=sessionHistory.restore(id,metadata.epochs[id] ?: 0,channel.history))})}
     private fun key(guild:String,user:String)="$guild:$user"
     private val plansFile=directory.resolve("project-agent-plans.json")
     private var plans:Map<String,ProjectAgentTaskPlan> = if(plansFile.exists())mapper.readValue<Map<String,ProjectAgentTaskPlan>>(plansFile.readText()).filterKeys {profiles.epochs[it]==metadata.epochs[it]}else emptyMap()
@@ -53,6 +54,7 @@ class ProjectAgentStore(private val directory:Path) {
         primary.remove("gradleConsent");primary.path("channels").elements().forEach {node->(node as com.fasterxml.jackson.databind.node.ObjectNode).remove(listOf("contextLimit","contextEpoch","executionWindow","outputTokens"))}
         val writer=GeminiKeyPoolStore(directory)
         writer.writePrivate(file,mapper.writeValueAsString(primary))
+        sessionHistory.save(next.channels)
         writer.writePrivate(metadataFile,mapper.writeValueAsString(ProjectAgentMetadata(next.channels.mapValues {it.value.contextLimit.coerceAtMost(3584)},next.channels.mapValues {it.value.contextEpoch},next.gradleConsent)))
         writer.writePrivate(profilesFile,mapper.writeValueAsString(ProjectAgentProfiles(next.channels.mapValues {it.value.executionWindow},next.channels.mapValues {it.value.outputTokens},next.channels.mapValues {it.value.contextLimit},next.channels.mapValues {it.value.contextEpoch})))
         data=next
@@ -83,6 +85,10 @@ class ProjectAgentStore(private val directory:Path) {
         check(epoch==null || previous.contextEpoch==epoch) {"문맥 설정이 변경되어 이전 작업을 중단했습니다."}
         require(messages.size<=256 && messages.sumOf {it.content.length}<=262144) {"문맥 저장 한도입니다. 압축 또는 초기화하세요."}
         persist(data.copy(channels=data.channels+(channel to previous.copy(history=messages.toList()))))
+    }
+    @Synchronized fun archiveHistory(channel:String,messages:List<ProjectAgentMessage>,epoch:Long) {
+        check(data.channels[channel]?.contextEpoch==epoch) {"문맥이 변경되어 이전 대화 보관을 중단했습니다."}
+        sessionHistory.archive(channel,epoch,messages)
     }
     @Synchronized fun context(channel:String,user:String,reset:Boolean=false,limit:Int?=null,window:Int?=null,output:Int?=null):ProjectAgentChannel {
         val previous=data.channels[channel] ?: error("에이전트 채널이 아닙니다.");check(previous.user==user)

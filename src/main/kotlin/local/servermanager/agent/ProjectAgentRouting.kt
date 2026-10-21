@@ -13,15 +13,22 @@ enum class AgentAddressee { AGENT,HUMAN,UNCERTAIN }
 /** Recent private-channel participants, separate from model memory; identities never grant execution permission. */
 class ProjectAgentRouting(private val directory:Path,private val clock:()->Long={Instant.now().toEpochMilli()}) {
     private val mapper=jacksonObjectMapper();private val file=directory.resolve("project-agent-audience.json")
+    private val finalized=linkedSetOf<String>()
     private var channels:Map<String,List<AgentConversationMessage>> = if(file.exists())mapper.readValue(file.readText())else emptyMap()
     @Synchronized fun audience(channel:String):AgentAudience {
         val recent=channels[channel].orEmpty().filter {clock()-it.at in 0..900_000}
         return AgentAudience(recent,recent.filter {!it.bot}.map {it.author}.toSet())
     }
     @Synchronized fun record(channel:String,value:AgentConversationMessage){
+        if(value.bot && "$channel:${value.id}" in finalized)return
         if(value.bot && value.text.isBlank())return // status-only embeds are not conversational turns
         val recent=(audience(channel).messages.filter {it.id!=value.id}+value.copy(name=value.name.take(100),text=value.text.take(300),at=value.at.coerceAtMost(clock()))).sortedBy {it.at}.filter {clock()-it.at in 0..900_000}.takeLast(64)
         channels=(channels.filterValues {rows->rows.any {clock()-it.at in 0..900_000}}+(channel to recent)).entries.toList().takeLast(200).associate {it.toPair()};persist()
+    }
+    @Synchronized fun rendered(channel:String,value:AgentConversationMessage) {
+        require(value.bot)
+        val key="$channel:${value.id}";finalized.remove(key);record(channel,value);finalized.add(key)
+        while(finalized.size>4096)finalized.remove(finalized.first())
     }
     @Synchronized fun clear(channel:String){channels=channels-channel;persist()}
     private fun persist(){GeminiKeyPoolStore(directory).writePrivate(file,mapper.writeValueAsString(channels))}

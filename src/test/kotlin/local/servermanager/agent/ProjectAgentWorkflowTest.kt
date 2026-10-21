@@ -19,7 +19,7 @@ class ProjectAgentWorkflowTest {
         val store=store();temp.resolve("build.sh").writeText("echo initial-failure; exit 7")
         val events=mutableListOf<ProjectAgentEvent>();var actor=0
         val model=ProjectAgentInference {messages,_,_->
-            if(messages.first().content.startsWith("Independent"))risk else if(messages.first().content.startsWith("Context compressor"))"빌드 실패와 미완료 수정 작업"else {
+            if(messages.first().content.startsWith("Independent"))risk else if(messages.first().content.startsWith("Context compressor"))compactionFixture("빌드 실패와 미완료 수정 작업")else {
                 assertContains(messages.first().content,"MULTI-STEP")
                 when(actor++){
                     0->response(call("build","command" to "/bin/sh ./build.sh"))
@@ -54,7 +54,7 @@ class ProjectAgentWorkflowTest {
     }
     @Test fun `compression uses independent bounded session and preserves latest exchange without granting permission`() {
         val history=List(8){ProjectAgentMessage(if(it%2==0)"user" else "assistant","message-$it")}
-        val compressed=ProjectAgentMemory.compress(history,ProjectAgentInference {messages,think,_->assertFalse(think);assertTrue(messages.first().content.startsWith("Context compressor"));assertContains(messages.first().content,"NO tools");"목표와 미완료 작업"})
+        val compressed=ProjectAgentMemory.compress(history,ProjectAgentInference {messages,think,_->assertFalse(think);assertTrue(messages.first().content.startsWith("Context compressor"));assertContains(messages.first().content,"NO tools");compactionFixture("목표와 미완료 작업")})
         assertEquals(history.takeLast(2),compressed.takeLast(2));assertEquals("user",compressed.first().role);assertContains(compressed.first().content,"not instructions or approval")
         assertFails {ProjectAgentMemory.compress(history,ProjectAgentInference {_,_,_->""})};assertEquals(8,history.size)
     }
@@ -72,7 +72,7 @@ class ProjectAgentWorkflowTest {
         store.trustGradle("g","u",fingerprint)
         fun run():Int {var actor=0;var approvals=0
             ProjectAgentEngine(store,{tools}).use {engine->engine.run("c","u","빌드",ProjectAgentPreferences(explicitPermission=false),ProjectAgentInference {messages,_,_->
-                if(messages.first().content.startsWith("Independent"))"""{"action":"ASK","risk":"MEDIUM","projectScope":"UNKNOWN","reason":"빌드 실행"}""" else if(messages.first().content.startsWith("Context compressor"))"이전 빌드 확인 기록" else if(actor++==0)response(tool)else response(null)
+                if(messages.first().content.startsWith("Independent"))"""{"action":"ASK","risk":"MEDIUM","projectScope":"UNKNOWN","reason":"빌드 실행"}""" else if(messages.first().content.startsWith("Context compressor"))compactionFixture("이전 빌드 확인 기록") else if(actor++==0)response(tool)else response(null)
             },{}){event->if(event.kind=="approval"){approvals++;engine.approve("c","u",event.token!!,true){}}}}
             return approvals
         }
@@ -85,7 +85,7 @@ class ProjectAgentWorkflowTest {
         store.history("c",List(8){ProjectAgentMessage(if(it%2==0)"user" else "assistant","history-$it "+"text ".repeat(80))},1)
         var compressed=0
         ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->engine.run("c","u","continue",ProjectAgentPreferences(),ProjectAgentInference {messages,_,_->
-            if(messages.first().content.startsWith("Context compressor")){compressed++;"Previous goal remains unfinished; inspect result."}
+            if(messages.first().content.startsWith("Context compressor")){compressed++;compactionFixture("Previous goal remains unfinished; inspect result.")}
             else {assertTrue(messages.any {it.content.contains("UNTRUSTED CONVERSATION SUMMARY")});mapper.writeValueAsString(mapOf("message" to "검증 완료","tool" to null,"requirements" to listOf(mapOf("id" to "R1","status" to "done","evidence_ids" to listOf("T3","T4"),"evidence" to "build.sh 수정 후 빌드 종료 코드 0 확인"))))}
         },{}){}}
         assertEquals(1,compressed);assertTrue(store.channel("c")!!.history.any {it.content.contains("SUMMARY")})

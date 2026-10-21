@@ -182,7 +182,7 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
                             session=store.context(session.channel,session.user,action=="reset",if(action=="configure")event.getOption("limit")?.asLong?.toInt()else null,if(action=="configure")event.getOption("window")?.asLong?.toInt()else null,if(action=="configure")event.getOption("output")?.asLong?.toInt()else null)
                             if(action=="compact"){
                                 val job=jobs.begin(session.channel,session.user)
-                                try {val compact=ProjectAgentMemory.compress(session.history,inference(session));privateAccess(event.jda,session);store.history(session.channel,compact,session.contextEpoch)}finally{jobs.finish(session.channel,job)}
+                                try {val compact=ProjectAgentMemory.compress(session.history,inference(session));privateAccess(event.jda,session);store.archiveHistory(session.channel,session.history,session.contextEpoch);store.history(session.channel,compact,session.contextEpoch)}finally{jobs.finish(session.channel,job)}
                                 session=store.channel(session.channel)!!
                             }
                         }
@@ -257,7 +257,7 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
         // Audience routing is deterministic and immediate; no coding-model inference before acknowledgement.
         check(!job.cancelled.get() && !Thread.currentThread().isInterrupted) {"작업을 중단했습니다."}
         val main=channel.sendMessageEmbeds(EmbedBuilder().setTitle("${LocalModels.label(model)} · 요청 인식 완료").setDescription(prompt.take(1800)).setFooter("최근 대화 참여자 ${(audience.audience(session.channel).participantIds+session.user).size}명 · 모델 응답 대기").build()).setComponents(ActionRow.of(Button.danger("qa:stop:${job.id}","에이전트 중지"))).setAllowedMentions(emptyList()).complete()
-        val events=DiscordProjectAgentDisplay(channel,main,prompt,model,job.id,maxTurns=maxTurns)
+        val events=DiscordProjectAgentDisplay(channel,main,prompt,model,job.id,maxTurns=maxTurns,rendered={message,text->audience.rendered(session.channel,AgentConversationMessage(message.id,jda.selfUser.id,"루오노타르",true,text,System.currentTimeMillis()))})
         var lastCheck=0L
         fun active() {
             check(!job.cancelled.get() && store.channel(session.channel)?.contextEpoch==session.contextEpoch) {"사용자가 작업을 중단했습니다."}
@@ -305,7 +305,7 @@ internal object ProjectAgentChannels {
 }
 
 /** Plain model messages; embeds contain turn status, permission requests and condensed results only. */
-internal class DiscordProjectAgentDisplay(private val channel:TextChannel,private val main:Message,private val request:String,private val model:String,private val jobId:String,private val editIntervalMillis:Long=750,private val maxTurns:Int=0) {
+internal class DiscordProjectAgentDisplay(private val channel:TextChannel,private val main:Message,private val request:String,private val model:String,private val jobId:String,private val editIntervalMillis:Long=750,private val maxTurns:Int=0,private val rendered:(Message,String)->Unit={_,_->}) {
     private fun tn(turn:Int)=if(maxTurns>0)"$turn/$maxTurns" else "$turn"
     private val turns=mutableMapOf<Int,Message>();private val threads=mutableMapOf<Int,ThreadChannel>()
     private val replies=mutableMapOf<Int,DiscordAgentText>();private val logs=mutableMapOf<Int,Pair<StringBuilder,DiscordAgentText>>()
@@ -316,7 +316,7 @@ internal class DiscordProjectAgentDisplay(private val channel:TextChannel,privat
     },intervalMillis=editIntervalMillis)
     private fun footer()=usage?.let(QwenMetricsText::footer) ?: "입력·출력 토큰 대기"
     private fun render(status:String,done:Boolean=false){edits.offer(EmbedBuilder().setTitle("${LocalModels.label(model)} · $status").setFooter(footer()).build() to done,done)}
-    private fun reply(turn:Int)=replies.getOrPut(turn){DiscordAgentText(channel,editIntervalMillis)}
+    private fun reply(turn:Int)=replies.getOrPut(turn){DiscordAgentText(channel,editIntervalMillis,rendered)}
     @Synchronized fun emit(event:ProjectAgentEvent) {
         if(finished)return
         when(event.kind){
@@ -326,7 +326,7 @@ internal class DiscordProjectAgentDisplay(private val channel:TextChannel,privat
             "steer"->render("턴 ${tn(event.turn)} · 🧭 개입 반영: ${event.text.take(120).replace('\n',' ')}")
             "thinking"->{usage=event.usage;render("턴 ${tn(event.turn)} · 모델 응답 대기")}
             "stream"->{if(event.text.isNotBlank())reply(event.turn).offer(event.text) else if(!event.output.isNullOrBlank())reply(event.turn).offer("‘${event.output.takeLast(1500)}’")}
-            "message"->{reply(event.turn).offer(event.text);render("턴 ${tn(event.turn)} · 모델 응답")}
+            "message"->{reply(event.turn).offer(event.text,record=true);render("턴 ${tn(event.turn)} · 모델 응답")}
             "reviewing"->render("턴 ${tn(event.turn)} · 독립 위험 검토")
             "approval","tool_start","denied"->{
                 val plan=event.plan!!

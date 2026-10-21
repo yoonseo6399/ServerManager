@@ -46,7 +46,7 @@ class ProjectAgentRoutingTest {
         temp.resolve("hello.txt").writeText("ORIGINAL_FILE_MARKER\n"+"source-line\n".repeat(80))
         var actor=0;var summaries=0;val events=mutableListOf<ProjectAgentEvent>()
         val model=ProjectAgentInference {messages,_,_->when {
-            messages.first().content.startsWith("Context compressor")->"이전 목표와 실제 결과를 보존한 테스트 요약"
+            messages.first().content.startsWith("Context compressor")->compactionFixture("이전 목표와 실제 결과를 보존한 테스트 요약")
             messages.first().content.startsWith("Independent")->"""{"action":"ALLOW","risk":"LOW","projectScope":"INSIDE","reason":"read"}"""
             messages.first().content.startsWith("Tool-result")-> {summaries++;error("Read must not be summarized")}
             else->when(actor++){
@@ -63,9 +63,9 @@ class ProjectAgentRoutingTest {
         val store=ProjectAgentStore(temp.resolve("settings"));store.addChannel(ProjectAgentChannel("g","c","u",null,temp.toString()))
         temp.resolve("large.txt").writeText("source-line\n".repeat(100));var actor=0;var summaries=0
         ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {it.run("c","u","파일 확인",ProjectAgentPreferences(explicitPermission=false),ProjectAgentInference {messages,_,_->when {
-            messages.first().content.startsWith("Context compressor")->"이전 목표와 실제 결과를 보존한 테스트 요약"
+            messages.first().content.startsWith("Context compressor")->compactionFixture("이전 목표와 실제 결과를 보존한 테스트 요약")
             messages.first().content.startsWith("Independent")->"""{"action":"ALLOW","risk":"LOW","projectScope":"INSIDE","reason":"read"}"""
-            messages.first().content.startsWith("Tool-result")-> {summaries++;"SUMMARY_MARKER"}
+            messages.first().content.startsWith("Tool-result")-> {summaries++;"""{"summary":"SUMMARY_MARKER"}"""}
             actor++==0->"""{"message":"파일을 읽을게요","tool":{"name":"read_file","arguments":{"path":"large.txt","summarize":true}}}"""
             else->{assertTrue(messages.any {it.content.contains("SUMMARY_MARKER")});"""{"message":"확인했습니다.","tool":null}"""}
         }},{}){}}
@@ -75,7 +75,7 @@ class ProjectAgentRoutingTest {
         val store=ProjectAgentStore(temp.resolve("settings"));store.addChannel(ProjectAgentChannel("g","c","u",null,temp.toString()));val file=temp.resolve("chain.txt");file.writeText("original\n")
         var actor=0;var approvals=0
         ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->engine.run("c","u","파일 끝에 added 추가",ProjectAgentPreferences(),ProjectAgentInference {messages,_,_->when {
-            messages.first().content.startsWith("Context compressor")->"이전 목표와 실제 결과를 보존한 테스트 요약"
+            messages.first().content.startsWith("Context compressor")->compactionFixture("이전 목표와 실제 결과를 보존한 테스트 요약")
             messages.first().content.startsWith("Independent")->"""{"action":"ALLOW","risk":"LOW","projectScope":"INSIDE","reason":"write"}"""
             actor++==0->"""{"message":"읽기","tool":{"name":"read_file","arguments":{"path":"chain.txt"}}}"""
             actor==2->"""{"message":"Appending added","tool_name":"write_file","arguments":{"path":"chain.txt","content":"original\nadded\n"}}"""
@@ -90,7 +90,7 @@ class ProjectAgentRoutingTest {
         val store=ProjectAgentStore(temp.resolve("settings"));store.addChannel(ProjectAgentChannel("g","c","u",null,temp.toString()));val file=temp.resolve("chain.txt");file.writeText("original\n")
         var actor=0;val events=mutableListOf<ProjectAgentEvent>()
         ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->engine.run("c","u","chain.txt에 added를 추가하고 저장 후 다시 읽어서 검증해",ProjectAgentPreferences(),ProjectAgentInference {messages,_,_->when {
-            messages.first().content.startsWith("Context compressor")->"이전 목표와 실제 결과를 보존한 테스트 요약"
+            messages.first().content.startsWith("Context compressor")->compactionFixture("이전 목표와 실제 결과를 보존한 테스트 요약")
             messages.first().content.startsWith("Independent")->"""{"action":"ALLOW","risk":"LOW","projectScope":"INSIDE","reason":"safe"}"""
             else->when(actor++){
                 0->"""{"message":"읽기","tool":{"name":"read_file","arguments":{"path":"chain.txt"}}}"""

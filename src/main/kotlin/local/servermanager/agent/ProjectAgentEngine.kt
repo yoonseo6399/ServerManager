@@ -79,6 +79,7 @@ class ProjectAgentEngine(private val store:ProjectAgentStore,private val toolFac
         require(limits.maxTurns in 1..AgentAccess.MAX_TURNS && limits.tier in setOf(AgentAccess.OWNER,AgentAccess.EDIT,AgentAccess.READ))
         val session=store.channel(channelId) ?: error("/agent channel로 만든 채널에서 실행하세요.")
         check(session.user==user);require(request.isNotBlank() && request.length<=6000)
+        check(!ProjectAgentCompaction.corruptedStored(session.history)) {"저장된 문맥 요약이 도구 JSON으로 손상되어 작업을 중단했습니다. /agent context action:reset 후 원래 요청을 다시 보내주세요. 프로젝트 정보는 유지됩니다."}
         val work=Work();check(busy.putIfAbsent(channelId,work)==null) {"이 채널에서 작업 중입니다. /agent stop으로 중단할 수 있습니다."}
         val displayName=userName.replace(Regex("[\\p{Cntrl}]")," ").take(100).ifBlank {user}
         val sender=mapOf("display_name" to displayName,"discord_user_id" to user)
@@ -86,7 +87,9 @@ class ProjectAgentEngine(private val store:ProjectAgentStore,private val toolFac
         val budget=LocalContextBudget(session.executionWindow,session.outputTokens)
         val progressState=ProjectAgentProgress(Path.of(session.home))
         val previousPlan=store.taskPlan(channelId)
-        var taskPlan=if(previousPlan!=null && Regex("이어서|계속|방금|그거|continue|resume",RegexOption.IGNORE_CASE).containsMatchIn(request))previousPlan.copy(completed=emptyList())else ProjectAgentTaskPlan(request)
+        val continuing=previousPlan!=null && ProjectAgentContinuation.matches(request)
+        var taskPlan=if(continuing)previousPlan!!.copy(completed=emptyList())else ProjectAgentTaskPlan(request)
+        fun executionRequest()=if(continuing)taskPlan.request+"\nLatest human request: "+request else request
         var stagnation=0
         var nativeExtraTools=emptySet<String>()
         var actorNative:String?=null
@@ -110,7 +113,7 @@ class ProjectAgentEngine(private val store:ProjectAgentStore,private val toolFac
         var requester=pinned()
         val start=System.nanoTime();val history=session.history.toMutableList();history.add(ProjectAgentMessage("user",mapper.writeValueAsString(mapOf("sender" to sender,"request" to request))))
         var turn=0;var nudges=0;var executed=0;var continuationRepairs=0
-        val verifyAfterWrite=!ProjectAgentCompletion.conversationOnly(request) && Regex("저장[^\\n]*(?:다시|재)[^\\n]*읽|다시[^\\n]*읽[^\\n]*검증|re-?read|verify after",RegexOption.IGNORE_CASE).containsMatchIn(request)
+        val verifyAfterWrite=!ProjectAgentCompletion.conversationOnly(executionRequest()) && Regex("저장[^\\n]*(?:다시|재)[^\\n]*읽|다시[^\\n]*읽[^\\n]*검증|re-?read|verify after",RegexOption.IGNORE_CASE).containsMatchIn(executionRequest())
         fun active(){authorize();check(store.channel(channelId)?.contextEpoch==session.contextEpoch) {"문맥이 초기화되거나 설정이 변경됐습니다."};check(store.preferences(session.guild,user).revision==preferences.revision) {"사용자가 승인·모델 설정을 바꿨습니다. 새 요청으로 다시 시작하세요."};check(!work.cancelled.get() && !Thread.currentThread().isInterrupted) {"사용자가 작업을 중단했습니다."}}
         fun elapsed()=(System.nanoTime()-start)/1e9
         // Mid-task instructions from the requester are added to the conversation as task data before the next model call.
@@ -164,7 +167,8 @@ Pinned current_request, original_task_request, proposed_work_plan and requiremen
 Read/search results are bounded original text by default; summarize:true explicitly requests a summary. Omitted output is not evidence of absence. Answer conversation-memory questions from the supplied dialogue without filesystem tools. At most ${limits.maxTurns} turns.
 """)else system
             val carried=notesBefore?.open.orEmpty()
-            if(ProjectAgentLedger.worthTracking(request)){active();ledger.load(if(request.trim().length<40)ProjectAgentLedger.split(request)else ProjectAgentLedger.extract(request,model));emit(ProjectAgentEvent("usage",0,usage=model.usage()))}
+            if(continuing && carried.isNotEmpty()){ledger.load(carried);if(ProjectAgentLedger.isAction(request))ledger.add(request)}
+            else if(ProjectAgentLedger.worthTracking(request)){active();ledger.load(if(request.trim().length<40)ProjectAgentLedger.split(request)else ProjectAgentLedger.extract(request,model));emit(ProjectAgentEvent("usage",0,usage=model.usage()))}
             else if(carried.isNotEmpty() && !ProjectAgentCompletion.conversationOnly(request)){ledger.load(carried);ledger.add(request)}
             if(ledger.active){requester=pinned();emit(ProjectAgentEvent("ledger",1,"요구사항 ${ledger.all.size}개를 추적합니다: "+ledger.all.joinToString(" / ") {"${it.id} ${it.text.take(40)}"}))}
             repeat(limits.maxTurns) {
@@ -175,9 +179,8 @@ Read/search results are bounded original text by default; summarize:true explici
                 val estimated=history.sumOf {ProjectAgentContext.messageTokens(it)}+ProjectAgentContext.estimatedTokens(callSystem.content)+ProjectAgentContext.estimatedTokens(requester.content)+overhead
                 if(estimated>=session.contextLimit && history.size>=5){
                     emit(ProjectAgentEvent("status",turn,"문맥 자동 압축 중"))
-                    val compressed=try {ProjectAgentMemory.compress(history,model,budget.input)}catch(e:Exception){active();emit(ProjectAgentEvent("status",turn,"요약 실패 · 원본 기록을 보존하고 필요한 범위를 잘라 전달합니다"));history.toList()};active();emit(ProjectAgentEvent("usage",turn,usage=model.usage()))
-                    history.clear();history.addAll(compressed);store.history(channelId,history,session.contextEpoch)
-                    emit(ProjectAgentEvent("status",turn,"문맥 압축 완료"))
+                    val compressed=try {ProjectAgentMemory.compress(history,model,budget.input).also {store.archiveHistory(channelId,history,session.contextEpoch)}}catch(e:Exception){active();emit(ProjectAgentEvent("status",turn,"요약 실패 · 원본 기록을 보존하고 필요한 범위를 잘라 전달합니다"));null};active();emit(ProjectAgentEvent("usage",turn,usage=model.usage()))
+                    if(compressed!=null){history.clear();history.addAll(compressed);store.history(channelId,history,session.contextEpoch);emit(ProjectAgentEvent("status",turn,"문맥 압축 완료"))}
                 }
                 requester=pinned()
                 val beforeCall=ProjectAgentContext.forModel(callSystem,history,requester,inputBudget-96).sumOf {ProjectAgentContext.messageTokens(it)}+overhead
@@ -216,6 +219,11 @@ Read/search results are bounded original text by default; summarize:true explici
                 }
                 if(response.hasNonNull("tool"))emit(ProjectAgentEvent("message",turn,"Qwen 제안 (도구 실행 전): $message",seconds=(System.nanoTime()-callStart)/1e9))
                 if(!response.hasNonNull("tool")) {
+                    val remaining=progressState.unfinishedDeletions(taskPlan.steps)
+                    if(remaining.isNotEmpty() && response.path("status").asText() !in setOf("blocked","clarify") && continuationRepairs<2 && turn<limits.maxTurns) {
+                        continuationRepairs++;feedback(message,"Runtime: the planned files still exist under the project home. A different directory listing is not evidence of their absence. Remaining data: "+remaining.joinToString("; ")+". Correct the paths and continue through normal approval checks, or honestly report the remaining work.");store.history(channelId,history,session.contextEpoch);emit(ProjectAgentEvent("status",turn,"남은 삭제 대상 ${remaining.size}개 · 경로·완료 근거 확인"));return@repeat
+                    }
+
                     require(message.isNotBlank()) {"Qwen 최종 답변이 비어 있습니다."}
                     // The requester changed direction while this answer was being generated: do not finish, answer the new instruction.
                     if(work.steers.isNotEmpty() && turn<limits.maxTurns) {
@@ -236,12 +244,12 @@ Read/search results are bounded original text by default; summarize:true explici
                         emit(ProjectAgentEvent("status",turn,"예고만 하고 도구를 호출하지 않아 실행을 다시 요청합니다"));return@repeat
                     }
                     val incomplete=ledger.active && ledger.open().isNotEmpty() && response.path("status").asText() !in setOf("blocked","clarify")
-                    val finalMessage=if(incomplete)"작업 중단: 요구사항별 완료 근거가 부족합니다. 완료로 처리하지 않았습니다."+ledger.report() else message+ledger.report()
+                    val finalMessage=if(incomplete)"작업 중단: 요구사항별 완료 근거가 부족합니다. 완료로 처리하지 않았습니다."+ledger.report() else message+ledger.report()+(if(remaining.isEmpty())""else "\n\n계획에서 남은 작업:\n"+remaining.joinToString("\n"))
                     finish(finalMessage);return
                 }
                 val node=response.path("tool");val call=ProjectAgentTool(node.path("name").asText(),node.path("arguments"))
 
-                val plan=try {if(native)require(call.name in ProjectAgentNativeTools.names(callSystem.content)) {"등록되지 않은 함수입니다. select_tools로 필요한 도구를 먼저 선택하세요."};tools.plan(Path.of(session.home),call).also {progressState.before(it,request)?.let {reason->throw IllegalArgumentException(reason)}}}catch(e:IllegalArgumentException){
+                val plan=try {if(native)require(call.name in ProjectAgentNativeTools.names(callSystem.content)) {"등록되지 않은 함수입니다. select_tools로 필요한 도구를 먼저 선택하세요."};tools.plan(Path.of(session.home),call).also {progressState.before(it,executionRequest())?.let {reason->throw IllegalArgumentException(reason)}}}catch(e:IllegalArgumentException){
                     stagnation++;feedback(message,"Runtime tool validation failed, nothing executed: ${e.message.orEmpty().take(500)}. Correct the tool arguments or read the prerequisite yourself; do not bypass validation.");store.history(channelId,history,session.contextEpoch)
                     if(stagnation>=3){finish("작업 중단: 도구 입력 검증이 연속으로 실패했습니다. 검증을 통과하지 못한 동작은 실행하지 않았습니다. 이미 실행한 변경은 유지됩니다."+ledger.report());return}
                     emit(ProjectAgentEvent("message",turn,"도구 입력이 유효하지 않아 실행하지 않고 수정안을 요청합니다."));return@repeat
@@ -251,7 +259,7 @@ Read/search results are bounded original text by default; summarize:true explici
                 history.add(ProjectAgentMessage("assistant",message+"\n[Runtime tool intent: ${call.name}. ${plan.description.take(1000)}. Large arguments omitted; read files for exact current content.]",native=actorNative))
                 store.history(channelId,history,session.contextEpoch)
                 active();emit(ProjectAgentEvent("reviewing",turn,if(plan.sandboxed)"백엔드가 읽기 전용 경로를 검증했습니다"else "독립된 새 Ollama 세션에서 위험 검토 중",plan))
-                val assessment=if(plan.sandboxed)ProjectAgentRisk("ALLOW","LOW","백엔드가 프로젝트 안 읽기 전용 범위를 직접 검증했습니다.","INSIDE") else review(request,sender,session.home,plan,model).also {emit(ProjectAgentEvent("usage",turn,usage=model.usage()))}
+                val assessment=if(plan.sandboxed)ProjectAgentRisk("ALLOW","LOW","백엔드가 프로젝트 안 읽기 전용 범위를 직접 검증했습니다.","INSIDE") else review(executionRequest(),sender,session.home,plan,model).also {emit(ProjectAgentEvent("usage",turn,usage=model.usage()))}
                 active()
                 if(assessment.action=="DENY") {
                     emit(ProjectAgentEvent("denied",turn,assessment.reason,plan,assessment))
@@ -290,7 +298,7 @@ Read/search results are bounded original text by default; summarize:true explici
             }
             finish("${limits.maxTurns}턴 한도에 도달했습니다. 기록은 유지됩니다. 다음 메시지로 이어서 요청하세요."+ledger.report())
         }catch(e:Exception){lastMessage="작업 중단: "+e.message.orEmpty().take(500);throw e}finally {
-            if(turn>0 && store.channel(channelId)?.contextEpoch==session.contextEpoch)runCatching {savePlan();store.saveNotes(channelId,ProjectAgentNotes(request.take(6000),lastMessage.take(400),touched.toList().takeLast(20),ledger.openTexts().take(6),System.currentTimeMillis()))}
+            if(turn>0 && store.channel(channelId)?.contextEpoch==session.contextEpoch)runCatching {savePlan();store.saveNotes(channelId,ProjectAgentNotes(request.take(6000),lastMessage.take(400),touched.toList().takeLast(20),(ledger.openTexts()+progressState.unfinishedDeletions(taskPlan.steps)).distinct().take(12),System.currentTimeMillis()))}
             busy.remove(channelId,work);pending.entries.removeIf {if(it.value.channel==channelId){it.value.result.complete(false);true}else false}}
     }
     private fun review(request:String,sender:Map<String,String>,home:String,plan:ProjectAgentPlan,model:ProjectAgentInference):ProjectAgentRisk {

@@ -21,16 +21,16 @@ internal object DiscordAgentChunks {
 }
 
 /** Only the latest snapshot waits; REST completion drives ordering without blocking inference. */
-internal class DiscordAgentText(private val channel:MessageChannel,intervalMillis:Long=750) {
+internal class DiscordAgentText(private val channel:MessageChannel,intervalMillis:Long=750,private val rendered:(Message,String)->Unit={_,_->}) {
     private val messages=mutableListOf<Message>()
-    private val edits=CoalescedMessageEdits<String>({text,complete->
-        val chunks=DiscordAgentChunks.split(text)
+    private val edits=CoalescedMessageEdits<Pair<String,Boolean>>({snapshot,complete->
+        val chunks=DiscordAgentChunks.split(snapshot.first)
         fun next(index:Int){
             if(index>=chunks.size){complete();return}
-            if(index<messages.size)messages[index].editMessage(chunks[index]).setAllowedMentions(emptyList()).queue({next(index+1)},{complete()})
-            else channel.sendMessage(chunks[index]).setAllowedMentions(emptyList()).queue({messages.add(it);next(index+1)},{complete()})
+            if(index<messages.size)messages[index].editMessage(chunks[index]).setAllowedMentions(emptyList()).queue({message->if(snapshot.second)runCatching {rendered(message,chunks[index])};next(index+1)},{complete()})
+            else channel.sendMessage(chunks[index]).setAllowedMentions(emptyList()).queue({message->messages.add(message);if(snapshot.second)runCatching {rendered(message,chunks[index])};next(index+1)},{complete()})
         }
         next(0)
     },intervalMillis=intervalMillis)
-    fun offer(text:String,finished:Boolean=false)=edits.offer(text,finished)
+    fun offer(text:String,finished:Boolean=false,record:Boolean=finished)=edits.offer(text to record,finished)
 }

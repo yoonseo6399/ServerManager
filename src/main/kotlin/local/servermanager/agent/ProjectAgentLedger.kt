@@ -21,7 +21,7 @@ class ProjectAgentLedger {
         const val MAX_ITEMS=12
         const val ITEM_CHARS=500
         const val MIN_EVIDENCE=8
-        private val actionWords=Regex("(대치|대체|삽입|수정|추가|작성|구현|삭제|생성|실행|빌드|테스트|고쳐|고치|변경|만들|설치|바꿔|리팩터|이동|저장|add|fix|implement|create|delete|remove|run|build|test|write|edit|change|update|rename|replace|insert)",RegexOption.IGNORE_CASE)
+        private val actionWords=Regex("(대치|대체|삽입|수정|추가|작성|구현|삭제|지워|지우|없애|합쳐|합치|생성|실행|빌드|테스트|고쳐|고치|변경|만들|설치|바꿔|리팩터|이동|저장|add|fix|implement|create|delete|remove|run|build|test|write|edit|merge|append|change|update|rename|replace|insert)",RegexOption.IGNORE_CASE)
         private val bullet=Regex("^\\s*(?:\\d+[.)]|[-*•])\\s*")
         private val mapper=jacksonObjectMapper()
 

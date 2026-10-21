@@ -119,7 +119,7 @@ class ProjectAgentReliabilityTest {
         var actor=0;val events=mutableListOf<ProjectAgentEvent>()
         ProjectAgentEngine(store,{ProjectAgentTools(root.resolve("logs"))}).use {engine->
             engine.run("c","u","a.txt 내용을 확인해",ProjectAgentPreferences(),ProjectAgentInference {messages,_,_->
-                if(messages.first().content.startsWith("Context compressor"))"이미 읽은 원문 keep"
+                if(messages.first().content.startsWith("Context compressor"))compactionFixture("이미 읽은 원문 keep")
                 else {actor++;mapper.writeValueAsString(mapOf("message" to "조회","tool" to tool("read_file","path" to "a.txt","lines" to actor*10)))}
             },{}) {events.add(it)}
         }

@@ -16,6 +16,8 @@ internal object ProjectAgentFormats {
                     "tool" to mapOf("anyOf" to listOf(mapOf("type" to "null"),tool)),"plan" to mapOf("type" to "array","items" to string(),"maxItems" to 12),
                     "requirements" to mapOf("type" to "array","items" to requirement,"maxItems" to 16)))
         }
+        if(system.startsWith("Context compressor"))return ProjectAgentCompaction.schema
+        if(system.startsWith("Tool-result summarizer"))return mapOf("type" to "object","required" to listOf("summary"),"additionalProperties" to false,"properties" to mapOf("summary" to mapOf("type" to "string","minLength" to 1,"maxLength" to 1000)))
         if(!system.startsWith("Independent command-risk reviewer"))return "json"
         fun choice(vararg values:String)=mapOf("type" to "string","enum" to values.toList())
         return mapOf("type" to "object","additionalProperties" to false,

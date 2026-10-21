@@ -13,7 +13,7 @@ import kotlin.test.*
 
 class QwenDisplayTest {
     @Test fun `thinking and markdown answers use plain messages while status stays in embeds`() {
-        val cards=CopyOnWriteArrayList<Pair<MessageEmbed,Boolean>>();val texts=CopyOnWriteArrayList<String>()
+        val cards=CopyOnWriteArrayList<Pair<MessageEmbed,Boolean>>();val texts=CopyOnWriteArrayList<String>();val recorded=CopyOnWriteArrayList<String>()
         lateinit var main:Message
         fun edit(card:MessageEmbed?=null,text:String?=null):MessageEditAction {
             var buttons=false
@@ -37,14 +37,15 @@ class QwenDisplayTest {
                 else->RETURNS_DEFAULTS.answer(send)
             }}
         }else RETURNS_DEFAULTS.answer(call)}
-        val display=DiscordProjectAgentDisplay(channel,main,"request","14b","run-id",5)
+        val display=DiscordProjectAgentDisplay(channel,main,"request","14b","run-id",5,rendered={_,text->recorded.add(text)})
         fun await(check:()->Boolean){val until=System.nanoTime()+3_000_000_000;while(!check() && System.nanoTime()<until)Thread.sleep(2);assertTrue(check())}
         display.emit(ProjectAgentEvent("thinking",1));await {cards.isNotEmpty()};assertTrue(cards.last().second)
         display.emit(ProjectAgentEvent("usage",1,usage=QwenUsage(tokensPerSecond=13.5,memory=LlmMemory(totalBytes=24L*1073741824,usedBytes=18L*1073741824))))
         await {cards.last().first.footer?.text?.contains("13.5 tok/s")==true};assertContains(cards.last().first.footer!!.text!!,"18.0/24.0 GiB")
         display.emit(ProjectAgentEvent("stream",1,output="actual thought"));await {texts.contains("‘actual thought’")}
+        assertTrue(recorded.isEmpty())
         display.emit(ProjectAgentEvent("stream",1,text="**answer**"));await {texts.last()=="**answer**"}
-        display.emit(ProjectAgentEvent("done",1,"**final**"));await {texts.last()=="**final**" && !cards.last().second}
+        display.emit(ProjectAgentEvent("done",1,"**final**"));await {texts.last()=="**final**" && !cards.last().second && recorded.lastOrNull()=="**final**"}
         display.emit(ProjectAgentEvent("stream",1,output="late"));Thread.sleep(30);assertEquals("**final**",texts.last())
         assertTrue(cards.all {it.first.description==null})
     }

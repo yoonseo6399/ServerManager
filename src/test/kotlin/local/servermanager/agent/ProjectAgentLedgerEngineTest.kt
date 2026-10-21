@@ -26,7 +26,7 @@ class ProjectAgentLedgerEngineTest {
         ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->
             engine.run("c","u","u",request,prefs,ProjectAgentInference {messages,_,_->when {
                 messages.first().content.startsWith("Requirement extractor")->"""{"items":["a.txt 파일을 만들고 hello를 넣는다","결과를 알려준다"]}"""
-                messages.first().content.startsWith("Context compressor")->"이전 목표와 실제 결과를 보존한 테스트 요약"
+                messages.first().content.startsWith("Context compressor")->compactionFixture("이전 목표와 실제 결과를 보존한 테스트 요약")
             messages.first().content.startsWith("Independent")->allow
                 else->when(actor++) {
                     0->"""{"message":"목록 확인","tool":{"name":"list_files","arguments":{}}}"""
@@ -49,7 +49,7 @@ class ProjectAgentLedgerEngineTest {
         setup();var actor=0;val events=mutableListOf<ProjectAgentEvent>()
         ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->
             engine.run("c","u","u","a.txt 파일을 생성해",prefs,ProjectAgentInference {messages,_,_->when {
-                messages.first().content.startsWith("Context compressor")->"아직 보고하지 못함"
+                messages.first().content.startsWith("Context compressor")->compactionFixture("아직 보고하지 못함")
                 messages.first().content.startsWith("Independent")->allow
                 actor++==0->"""{"message":"저장","tool":{"name":"write_file","arguments":{"path":"a.txt","content":"preserved"}}}"""
                 else->"""{"message":"조회","tool":{"name":"list_files","arguments":{}}}"""
@@ -66,7 +66,7 @@ class ProjectAgentLedgerEngineTest {
         setup();val events=mutableListOf<ProjectAgentEvent>()
         ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->
             engine.run("c","u","u","a.txt 파일을 생성해",prefs,ProjectAgentInference {messages,_,_->
-                if(messages.first().content.startsWith("Context compressor"))"아직 파일 생성 근거 없음"
+                if(messages.first().content.startsWith("Context compressor"))compactionFixture("아직 파일 생성 근거 없음")
                 else """{"message":"모든 파일 생성 완료","status":"completed","tool":null,"requirements":[{"id":"R1","status":"done","evidence_ids":["T999"],"evidence":"파일 생성을 완료했습니다"}]}"""
             },ProjectAgentLimits(8,AgentAccess.OWNER),{}) {events.add(it)}
         }
@@ -94,14 +94,14 @@ class ProjectAgentLedgerEngineTest {
         ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->
             engine.run("c","u","u",request,prefs,ProjectAgentInference {messages,_,_->when {
                 messages.first().content.startsWith("Requirement extractor")->"""{"items":["a.txt 파일을 만든다","결과를 알려준다"]}"""
-                messages.first().content.startsWith("Context compressor")->"이전 목표와 실제 결과를 보존한 테스트 요약"
+                messages.first().content.startsWith("Context compressor")->compactionFixture("이전 목표와 실제 결과를 보존한 테스트 요약")
             messages.first().content.startsWith("Independent")->allow
                 else->"""{"message":"목록 확인","tool":{"name":"list_files","arguments":{}}}"""
             }},ProjectAgentLimits(2,AgentAccess.OWNER),{}) {}
             val notes=store.notes("c")!!
             assertEquals(request.take(300),notes.lastRequest);assertEquals(2,notes.open.size)
             engine.run("c","u","u","이어서 계속해줘",prefs,ProjectAgentInference {messages,_,_->
-                if(messages.first().content.startsWith("Independent"))allow else if(messages.first().content.startsWith("Context compressor"))"테스트 요약" else {seen.add(messages);"""{"message":"계속합니다","status":"clarify","tool":null}"""}
+                if(messages.first().content.startsWith("Independent"))allow else if(messages.first().content.startsWith("Context compressor"))compactionFixture("테스트 요약") else {seen.add(messages);"""{"message":"계속합니다","status":"clarify","tool":null}"""}
             },ProjectAgentLimits(2,AgentAccess.OWNER),{}) {}
         }
         val pinned=seen.first().first {it.content.contains("current_requester")}.content
@@ -114,7 +114,7 @@ class ProjectAgentLedgerEngineTest {
         ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->
             val runner=Thread {engine.run("c","u","u",request,prefs,ProjectAgentInference {messages,_,_->when {
                 messages.first().content.startsWith("Requirement extractor")->"""{"items":["a.txt 파일을 만든다","결과를 알려준다"]}"""
-                messages.first().content.startsWith("Context compressor")->"이전 목표와 실제 결과를 보존한 테스트 요약"
+                messages.first().content.startsWith("Context compressor")->compactionFixture("이전 목표와 실제 결과를 보존한 테스트 요약")
             messages.first().content.startsWith("Independent")->allow
                 else->{
                     if(actor++==0){started.countDown();release.await(10,java.util.concurrent.TimeUnit.SECONDS)}

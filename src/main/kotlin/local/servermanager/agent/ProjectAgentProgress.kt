@@ -29,6 +29,10 @@ internal class ProjectAgentProgress(private val home:Path) {
     }
     fun before(plan:ProjectAgentPlan,request:String):String? {
         val name=plan.tool.name
+        if(name=="delete_path")plan.resolvedTargets.firstOrNull { !Files.exists(Path.of(it),java.nio.file.LinkOption.NOFOLLOW_LINKS) }?.let {target->
+            val rootCandidate=home.resolve(Path.of(target).fileName).normalize()
+            return "삭제 대상 경로가 존재하지 않습니다: $target."+(if(rootCandidate.startsWith(home) && Files.exists(rootCandidate,java.nio.file.LinkOption.NOFOLLOW_LINKS))" 같은 이름의 파일이 프로젝트 홈에 있습니다: $rootCandidate. 경로를 다시 확인해 도구를 요청하세요. 자동으로 경로를 바꾸거나 실행하지 않았습니다."else " 존재하는 경로를 조회하고 수정하세요.")
+        }
         if(name in setOf("edit_file","write_file") && plan.beforeFingerprint!=null && plan.scope=="INSIDE") {
             for(target in plan.resolvedTargets) {
                 val path=Path.of(target)
@@ -87,6 +91,9 @@ internal class ProjectAgentProgress(private val home:Path) {
         "make_new_project"->it.targets.all {target->Path.of(target).isDirectory()}
         else->it.fingerprints.isNotEmpty() && it.fingerprints.all {(target,expected)->source(Path.of(target))!=null && hash(Path.of(target))==expected}
     }}
+    fun unfinishedDeletions(steps:List<String>):List<String> = steps.filter {Regex("delete|remove|삭제|지워|지우|없애",RegexOption.IGNORE_CASE).containsMatchIn(it)}.flatMap {step->
+        Regex("[\\p{L}\\p{N}_./-]+\\.[A-Za-z0-9_-]{1,12}").findAll(step).map {it.value.trimEnd('.')}.toList()
+    }.distinct().filter {name->val path=home.resolve(name).normalize();!path.startsWith(home) || Files.exists(path,java.nio.file.LinkOption.NOFOLLOW_LINKS)}.map {"삭제 미완료: $it (프로젝트 홈 기준)"}
     fun proves(text:String,ids:List<String>):Boolean {
         val selected=proofs.filter {it.id in ids && it.verified && (it.exit==null || it.exit==0)}
         val writes=selected.filter {it.tool in setOf("write_file","edit_file","delete_path","make_new_project","save_attachment","run_command","build","test","git")}
@@ -96,7 +103,7 @@ internal class ProjectAgentProgress(private val home:Path) {
         Regex("([A-Za-z0-9_./-]+(?:\\s*(?:와|과|,|및|&)\\s*[A-Za-z0-9_./-]+)*)\\s*파일").findAll(text).forEach {group->
             names.addAll(group.groupValues[1].split(Regex("\\s*(?:와|과|,|및|&)\\s*")).map {it.trim()})
         }
-        val fileChange=Regex("대치|대체|삽입|만들|생성|추가|수정|삭제|교체|변경|create|write|edit|delete|replace|change|insert",RegexOption.IGNORE_CASE).containsMatchIn(text)
+        val fileChange=Regex("대치|대체|삽입|만들|생성|추가|수정|삭제|지워|지우|없애|교체|변경|create|write|edit|delete|replace|change|insert",RegexOption.IGNORE_CASE).containsMatchIn(text)
         if(fileChange && !names.all {name->writes.any {proof->proof.targets.any {target->if('/' in name)Path.of(target).normalize()==home.resolve(name).normalize()else Path.of(target).fileName.toString()==name}}})return false
         return writes.all {proof->(proof.tool!="delete_path" || proof.targets.none {Files.exists(Path.of(it))}) && (proof.tool!="make_new_project" || proof.targets.all {Path.of(it).isDirectory()}) && proof.fingerprints.all {(target,expected)->val path=Path.of(target);path.isRegularFile() && hash(path)==expected}}
     }

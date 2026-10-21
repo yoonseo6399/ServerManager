@@ -1,0 +1,61 @@
+{
+  "native_live": {
+    "model": "qwen3.8:27b-q4_K_M",
+    "window": 8192,
+    "thinking": true,
+    "result": "FAIL",
+    "seconds": 531.077760208,
+    "compactions": 8,
+    "executed_tools": [
+      "list_files",
+      "list_files",
+      "sh"
+    ],
+    "deletion_approvals": 0,
+    "four_target_files_deleted": false,
+    "unrelated_bytes_preserved": true,
+    "false_success_reported": false,
+    "note": "Compression threshold deliberately forced to1024; not a controlled throughput comparison with external engines."
+  },
+  "pi_8k": {
+    "version": "1.3.0",
+    "window_observed": 8192,
+    "thinking_transport_enforced": "none",
+    "temperature": 0,
+    "output_limit": 1024,
+    "cases": [
+      {
+        "name": "edit",
+        "pass": true,
+        "seconds": 34.035,
+        "tools": [
+          "read_file",
+          "edit_file",
+          "read_file"
+        ],
+        "whole_file_equals_expected_bytes": true,
+        "CRLF_preserved": true
+      },
+      {
+        "name": "compact-delete-followup",
+        "pass": true,
+        "seconds": 95.478,
+        "tools": [
+          "list_files",
+          "delete_path",
+          "delete_path",
+          "delete_path",
+          "delete_path",
+          "list_files"
+        ],
+        "four_targets_absent": true,
+        "unrelated_bytes_preserved": true
+      }
+    ],
+    "limitations": [
+      "Custom project-confined test tools; production approval adapter not tested",
+      "Single fixture per case; not a general model ranking",
+      "Original native run had different prompt, dynamic tools, thinking and output limits"
+    ]
+  }
+}

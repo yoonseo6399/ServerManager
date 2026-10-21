@@ -14,7 +14,7 @@ class ProjectAgentEditVerifyTest {
         val file=temp.resolve("chain.txt");file.writeText("original\n")
         var actor=0;val events=mutableListOf<ProjectAgentEvent>()
         ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->engine.run("c","u","chain.txt에 added를 추가하고 저장 후 다시 읽어서 검증해",ProjectAgentPreferences(),ProjectAgentInference {messages,_,_->when {
-            messages.first().content.startsWith("Context compressor")->"이전 목표와 실제 결과를 보존한 테스트 요약"
+            messages.first().content.startsWith("Context compressor")->compactionFixture("이전 목표와 실제 결과를 보존한 테스트 요약")
             messages.first().content.startsWith("Independent")->"""{"action":"ALLOW","risk":"LOW","projectScope":"INSIDE","reason":"safe"}"""
             else->when(actor++) {
                 0->"""{"message":"읽기","tool":{"name":"read_file","arguments":{"path":"chain.txt"}}}"""

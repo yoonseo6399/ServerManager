@@ -25,7 +25,7 @@ class ProjectAgentNativeToolsTest {
             override fun nativeMessage()=nativeReply
             override fun generate(messages:List<ProjectAgentMessage>,think:Boolean,progress:(QwenProgress)->Unit):String {
                 if(messages.first().content.startsWith("Independent")){reviews++;return """{"action":"ALLOW","risk":"LOW","projectScope":"INSIDE","reason":"fixture build"}"""}
-                if(messages.first().content.startsWith("Context compressor"))return "fixture build unfinished"
+                if(messages.first().content.startsWith("Context compressor"))return compactionFixture("fixture build unfinished")
                 val fn=when(actor++) {
                     0->{assertFalse(ProjectAgentNativeTools.names(messages.first().content).contains("build"));call("build","""{"command":"/bin/echo checked"}""")}
                     1->{assertTrue(messages.any {it.content.contains("등록되지 않은 함수")});call("select_tools","""{"names":["build"],"plan":["build","inspect exit","report"]}""")}
