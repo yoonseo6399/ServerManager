@@ -57,5 +57,50 @@
       "Single fixture per case; not a general model ranking",
       "Original native run had different prompt, dynamic tools, thinking and output limits"
     ]
+  },
+  "opencode_8k": {
+    "version": "1.19.3",
+    "thinking_transport_enforced": "none",
+    "temperature": 0,
+    "output_limit": 1024,
+    "cases": [
+      {
+        "name": "edit",
+        "pass": true,
+        "seconds": 36.740964833,
+        "tools": [
+          "read_file",
+          "edit_file",
+          "read_file"
+        ],
+        "unrelated_bytes_preserved": true,
+        "compaction_part_present": false
+      },
+      {
+        "name": "compact-delete-followup",
+        "pass": true,
+        "seconds": 98.10054420899999,
+        "tools": [
+          "list_files",
+          "delete_path",
+          "delete_path",
+          "delete_path",
+          "delete_path",
+          "list_files"
+        ],
+        "unrelated_bytes_preserved": true,
+        "compaction_part_present": true
+      }
+    ],
+    "window_configured": 8192,
+    "window_actual_sampled": false,
+    "note": "Same fixed num_ctx8192 alias as Pi; api/ps sampled8192 during Pi, not independently sampled during OpenCode."
+  },
+  "cleanup": {
+    "temporary_servers_stopped": true,
+    "loaded_models_after": 0,
+    "wired_limit_mb_unchanged": 20480,
+    "pressure_after": 1,
+    "production_models_preserved": true
   }
 }
