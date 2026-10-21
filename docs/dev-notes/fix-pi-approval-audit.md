@@ -29,3 +29,5 @@ Beta17 태그 기준 전용 작업. 운영 앱·실행기·게임호스트는 �
 - 교차 Discord 출처→소비 서버/채널→요청자 ACL. 제공자/봇 권한 재검사. READ/EDIT 사용자도 명시 위임된 기록만 사용. 운영 Discord fetch 미실행.
 - 관리 웹 타임아웃1~240분(기본20), rollback 호환 별도 저장, Pi/undici/Ollama/Strata/원격 예산 일치. 기능60개 최종통과: /private/tmp/sm-pi-final-feature-tests.log. 타임아웃 웹1개 및 frontend build 통과.
 - push는 자동 검토 명시 승인 요구 후 사용자가 푸쉬를 승인하여9d3bbf0부터 올림. 후속 승인에 따라 보완도 push하고 Beta18 출시. 게시 후 재다운로드·해시 대조는 생략.
+
+게시 완료: https://github.com/yoonseo6399/ServerManager/releases/tag/v0.7.0-beta.18 · 릴리즈 커밋d8b01f8 · CI39648514436 성공 · 자산9개 메타데이터 확인 · 게시 후 재다운로드/해시 검사 미실행.
