@@ -35,7 +35,7 @@ class QwenRunnerRequest(val runnerId:String="")
 class QwenSettingsApi(private val manager:ServerManager,private val registry:RunnerRegistry,private val gateway:RunnerGateway) {
     private val settings=QwenSettings(manager.root.resolve("security/agent"))
     private fun runners(user:String)=registry.views(user).filter {it.enabled}.map {QwenRunnerView(it.id,it.name,it.online,gateway.llmCapability(it.id))}
-    private fun view(user:String)=ResponseEntity.ok().header("Cache-Control","no-store").body(mapOf("config" to settings.config(),"runners" to runners(user),"models" to LocalModels.all.map {mapOf("id" to it.id,"label" to it.label,"supportsThinking" to it.supportsThinking)}))
+    private fun view(user:String)=ResponseEntity.ok().header("Cache-Control","no-store").body(mapOf("config" to settings.config(),"runners" to runners(user),"models" to LocalModels.all.map {mapOf("id" to it.id,"label" to it.label,"supportsThinking" to it.supportsThinking,"backend" to it.backend)}))
     private fun target(user:String,id:String):String {
         if(runners(user).none {it.id==id}) throw ResponseStatusException(HttpStatus.NOT_FOUND,"실행기를 찾을 수 없습니다.")
         return id
@@ -56,10 +56,15 @@ class QwenSettingsApi(private val manager:ServerManager,private val registry:Run
         return mapOf("saved" to true,"unloaded" to unloaded)
     }
 
-    @PostMapping("/probe") fun probe(@RequestBody body:QwenRunnerRequest,authentication:Authentication)=remote {gateway.llmAdmin(target(authentication.name,body.runnerId),"probe")}
+    private fun admin(user:String,id:String,op:String):Any = if(id.isBlank())when(op){"probe"->LocalLlm().probe();"unload"->LocalLlm().unloadAll();"install-strata"->StrataRuntime.install();else->error("Unknown LLM operation")}else gateway.llmAdmin(target(user,id),op)
+    @PostMapping("/probe") fun probe(@RequestBody body:QwenRunnerRequest,authentication:Authentication)=remote {admin(authentication.name,body.runnerId,"probe")}
+    @PostMapping("/strata/install") fun installStrata(@RequestBody body:QwenRunnerRequest,request:HttpServletRequest,authentication:Authentication):Any {
+        freshDesktop(request)
+        return remote {admin(authentication.name,body.runnerId,"install-strata")}
+    }
 
     @PostMapping("/unload") fun unload(@RequestBody body:QwenRunnerRequest,request:HttpServletRequest,authentication:Authentication):Any {
         freshDesktop(request)
-        return remote {gateway.llmAdmin(target(authentication.name,body.runnerId),"unload")}
+        return remote {admin(authentication.name,body.runnerId,"unload")}
     }
 }

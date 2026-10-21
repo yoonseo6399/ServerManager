@@ -1,14 +1,16 @@
 # 로컬 모델 선택
 
-관리 웹의 **AI 비서·에이전트 → 로컬 LLM (Ollama)** 또는 Discord `/agent setting default:`에서 선택한다. 기존 사용자 기본 모델은 자동으로 바뀌지 않는다. 일회성 선택은 `/agent run model:`을 사용한다.
+관리 웹의 **AI 비서·에이전트 → 로컬 LLM** 또는 Discord `/agent setting default:`에서 선택한다. 기존 사용자 기본 모델은 자동으로 바뀌지 않는다. 일회성 선택은 `/agent run model:`을 사용한다.
 
-| 선택지 | 저장/실행기 ID | 기본 Ollama 태그 | Thinking |
+| 선택지 | 저장/실행기 ID | 기본 실행 태그 | Thinking |
 |---|---|---|---|
 | Qwen3 14B | `14b` | `qwen3:14b` | 지원 |
 | Qwen3 30B | `30b` | `qwen3:30b` | 지원 |
 | Qwen3-Coder 30B | `qwen3-coder-30b` | `qwen3-coder:30b` | 미지원, 자동 꺼짐 |
 | Gemma 4 12B | `gemma4-12b` | `gemma4:12b` | 지원 |
 | Gemma 4 31B | `gemma4-31b` | `gemma4:31b` | 지원 |
+| Qwen3.8 27B | `qwen38-27b` | `qwen3.8:27b-q4_K_M` (Ollama) | 지원 |
+| Qwen3.8 Flash-Next | `qwen38-flash-next` | `qwen3.8-flash-next-q2_0` (Strata) | 지원 |
 
 관리 앱과 **실제 추론 실행기 모두** 새 버전으로 업데이트해야 한다. 실행기의 `llm-enabled` 동의는 기존대로 필요하다. 해당 실행기 컴퓨터에서 사용할 모델만 설치한다:
 
@@ -29,3 +31,5 @@ Coder는 별도 Thinking 블록을 생성하지 않는다. 기존 개인 Thinkin
 읽기 도구는 원문을 의미 요약하지 않는다. 표시용 줄 번호를 원문에 복사하지 않도록 명시하고, 줄바꿈 형식(LF/CRLF/CR)·끝 줄바꿈 개수·생략된 범위 여부를 별도 메타데이터로 제공한다. 이는 모델에 정보를 제공하는 것이며 원문 보존의 자동 보증은 아니다.
 
 이 Mac의 실제31B 시험은 Ollama가 필요18.0GiB/사용가능15.5GiB로 적재를 거부했다. 다른 컴퓨터에서 선택할 수 있도록 모델은 카탈로그에 포함하되, 이 환경에서의 실행 성공을 주장하지 않는다. 알려진 메모리 부족 오류는 필요한 용량/사용 가능한 용량을 표시하고 임의 서버 응답은 노출하지 않는다.
+
+Qwen3.8 27B·Flash-Next 설치, 두 엔진의 실행 방식, 메모리/생성 속도 표시는 [새 모델 실행 안내](qwen38-models.md)를 참고한다. Flash-Next는 Ollama가 아니라 관리되는 Strata 백엔드로 실행하며 현재 8K 창을 지원한다.

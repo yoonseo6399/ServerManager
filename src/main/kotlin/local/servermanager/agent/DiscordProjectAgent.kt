@@ -280,7 +280,7 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
                 val response=QwenRequests.conversationWithBudget(model,messages,think,chosen.runnerId,budget,progress).answer
                 nativeReply=response.nativeMessage
                 if(!main){helperInput+=response.inputTokens ?: 0;helperOutput+=response.tokens;helperCalls++}
-                last=if(main)QwenUsage(response.inputTokens,response.tokens,messages.sumOf {ProjectAgentContext.messageTokens(it)}+(if(main && ProjectAgentNativeTools.active(messages))ProjectAgentNativeTools.overhead(messages.first().content)else 0),response.modelContext,helperInput=helperInput,helperOutput=helperOutput,helperCalls=helperCalls,executionWindow=budget.window,inputBudget=budget.input,outputReserved=budget.output)
+                last=if(main)QwenUsage(response.inputTokens,response.tokens,messages.sumOf {ProjectAgentContext.messageTokens(it)}+(if(main && ProjectAgentNativeTools.active(messages))ProjectAgentNativeTools.overhead(messages.first().content)else 0),response.modelContext,helperInput=helperInput,helperOutput=helperOutput,helperCalls=helperCalls,executionWindow=budget.window,inputBudget=budget.input,outputReserved=budget.output,tokensPerSecond=response.tokensPerSecond,memory=response.memory)
                     else (last ?: QwenUsage(executionWindow=budget.window,inputBudget=budget.input,outputReserved=session.outputTokens)).copy(helperInput=helperInput,helperOutput=helperOutput,helperCalls=helperCalls)
                 check(!response.limited) {"로컬 모델 출력 한도에 도달했습니다. 문맥을 압축하거나 요청을 나눠주세요."};return response.text
             }
@@ -314,7 +314,7 @@ internal class DiscordProjectAgentDisplay(private val channel:TextChannel,privat
         val buttons=if(snapshot.second)emptyList() else listOf(ActionRow.of(Button.danger("qa:stop:$jobId","에이전트 중지")))
         main.editMessageEmbeds(snapshot.first).setComponents(buttons).setAllowedMentions(emptyList()).queue({complete()},{complete()})
     },intervalMillis=editIntervalMillis)
-    private fun footer()=usage?.let {"문맥 약 ${it.estimatedContext}/${it.executionWindow} · 입력 예산 ${it.inputBudget} · 출력 예약 ${it.outputReserved} · 입력 ${it.input ?: "미수신"} · 출력 ${it.output ?: "미수신"} · 모델 최대 ${it.modelContext ?: "확인 불가"} · 보조 수신 ${it.helperCalls}회 입력 ${it.helperInput}/출력 ${it.helperOutput}"} ?: "입력·출력 토큰 대기"
+    private fun footer()=usage?.let(QwenMetricsText::footer) ?: "입력·출력 토큰 대기"
     private fun render(status:String,done:Boolean=false){edits.offer(EmbedBuilder().setTitle("${LocalModels.label(model)} · $status").setFooter(footer()).build() to done,done)}
     private fun reply(turn:Int)=replies.getOrPut(turn){DiscordAgentText(channel,editIntervalMillis)}
     @Synchronized fun emit(event:ProjectAgentEvent) {
