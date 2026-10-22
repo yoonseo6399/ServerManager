@@ -84,6 +84,7 @@ class RuntimeState {
     var exitError:DiscordErrorSummary?=null
     var exitErrorCaptured=false
     var crashesBefore:Map<String,String> = emptyMap()
+    var remoteConsoleWriteFailed=false
     fun event(kind: String, text: String) = synchronized(this) {
         events.addLast(Event(++seq, Instant.now().toString(), kind, text))
         while(events.size > 10000) events.removeFirst()
@@ -639,7 +640,20 @@ class ServerManager {
         if(instance(id).runnerId!=runnerId || LogNoise.dropped(line))return
         val r=runtime(id)
         playerActivity(r,line)
-        synchronized(r) { r.event(if(kind in setOf("error","warn","output")) kind else "output",line.take(4096)) }
+        synchronized(r) {
+            val text=line.take(4096)
+            // The web console reads this raw file even if an earlier installation already created it.
+            // Keeping runner output only in events hides early crashes behind that old installation log.
+            try {
+                Files.writeString(profileDir(id).resolve("console.log"),text+"\n",StandardOpenOption.CREATE,StandardOpenOption.APPEND,LinkOption.NOFOLLOW_LINKS)
+                r.remoteConsoleWriteFailed=false
+            } catch(e:Exception) {
+                // A disk/permission failure must not tear down the runner's shared WebSocket.
+                if(!r.remoteConsoleWriteFailed)org.slf4j.LoggerFactory.getLogger(ServerManager::class.java).warn("Cannot append runner console for {}: {}",id,e.message)
+                r.remoteConsoleWriteFailed=true
+            }
+            r.event(if(kind in setOf("error","warn","output")) kind else "output",text)
+        }
         if(r.discordError.offer(line,kind=="error")) signal(id,"error","원격 서버 로그에서 오류가 감지되었습니다.",error=r.discordError.snapshot())
     }
     fun remoteMetrics(id:String,runnerId:String,pid:Long?,cpu:Double?,rss:Double?,uptime:Long?,playerCount:Int?,names:List<String>?) {
