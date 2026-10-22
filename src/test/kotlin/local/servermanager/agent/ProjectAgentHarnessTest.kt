@@ -89,33 +89,17 @@ class ProjectAgentHarnessTest {
         val store=ProjectAgentStore(temp.resolve("settings"));val session=ProjectAgentChannel("guild","channel","friend","demo",home.toString())
         store.addChannel(session);return Triple(store,session,store.settings("guild","friend","14b",true,true))
     }
-    @Test fun `the turn limit is honoured and read only sandbox turns never call the reviewer or summarizer`() {
-        val (store,_,prefs)=setup();val reviewer=AtomicInteger();val actor=AtomicInteger();val helper=AtomicInteger();val events=mutableListOf<ProjectAgentEvent>()
-        val model=ProjectAgentInference {messages,_,_->
-            val first=messages.first().content
-            when {
-                first.startsWith("Independent") -> {reviewer.incrementAndGet();allow}
-                first.startsWith("You are 루오노타르") -> {actor.incrementAndGet();mapper.writeValueAsString(mapOf("message" to "찾아봅니다","tool" to call("sh",mapOf("command" to "grep -rn fun . && echo checked"))))}
-                else -> {helper.incrementAndGet();"요약"}
-            }
+    @Test fun `Pi READ tool loop stops at actor turn limit without a helper model`() {
+        PiTestFixture(temp,tier=AgentAccess.READ).use {f->f.home.resolve("A.kt").writeText("fun one() = 1\n")
+            val model=f.model {PiTestFixture.call("list_files",emptyMap<String,Any>())}
+            assertFails {f.run(model,turns=3)};assertEquals(3,model.actorCalls);assertTrue(model.reviews.isEmpty());assertEquals(3,f.events.count {it.kind=="tool_end"})
         }
-        ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {e->
-            e.run("channel","friend","friend","함수 찾기",prefs,model,ProjectAgentLimits(3,AgentAccess.READ),{},{events.add(it)})
-        }
-        assertEquals(3,actor.get());assertEquals(0,reviewer.get(),"deterministic read-only tools skip the model review");assertEquals(0,helper.get())
-        assertEquals(1,events.count {it.kind=="tool_end"},"identical unchanged reads must not execute repeatedly");assertTrue(events.last().text.contains("3턴 한도"),events.last().text)
-        assertTrue(events.first {it.kind=="tool_end"}.text.contains("A.kt:1:fun one() = 1"),"the model sees exact lines, not a prose summary")
     }
-    @Test fun `a read tier channel cannot make the model edit even if it asks`() {
-        val (store,_,prefs)=setup();val events=mutableListOf<ProjectAgentEvent>();val actor=AtomicInteger()
-        val model=ProjectAgentInference {messages,_,_->
-            if(messages.first().content.startsWith("You are 루오노타르")) {
-                if(actor.getAndIncrement()==0)mapper.writeValueAsString(mapOf("message" to "고칩니다","tool" to call("write_file",mapOf("path" to "A.kt","content" to "pwned"))))
-                else """{"message":"읽기 전용이라 수정할 수 없습니다","tool":null}"""
-            } else allow
+    @Test fun `Pi READ cannot advertise or execute a native write`() {
+        PiTestFixture(temp,tier=AgentAccess.READ).use {f->val file=f.home.resolve("A.kt");file.writeText("keep");var step=0
+            val model=f.model {q->assertTrue(q.path("tools").none {it.path("function").path("name").asText() in setOf("write","edit","bash")});if(step++==0)PiTestFixture.call("write",mapOf("path" to "A.kt","content" to "pwned"))else PiTestFixture.answer("읽기 전용")}
+            f.run(model);assertEquals("keep",file.readText());assertTrue(f.events.none {it.kind=="tool_start" || it.kind=="approval"})
         }
-        ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {e->e.run("channel","friend","friend","수정해줘",prefs,model,ProjectAgentLimits(5,AgentAccess.READ),{},{events.add(it)})}
-        assertEquals("fun one() = 1\nfun two() = 2\nfun three() = 3\n",home.resolve("A.kt").readText());assertTrue(events.none {it.kind=="approval" || it.kind=="tool_start"})
     }
     @Test fun `limits outside the allowed range are refused`() {
         val (store,_,prefs)=setup()
@@ -125,24 +109,15 @@ class ProjectAgentHarnessTest {
             assertFailsWith<IllegalArgumentException> {e.run("channel","friend","friend","x",prefs,ProjectAgentInference {_,_,_->"{}"},ProjectAgentLimits(5,"ADMIN"),{},{})}
         }
     }
-    @Test fun `announcing an action without a tool call is retried instead of ending the turn`() {
-        for(text in listOf("프로젝트 이름들을 확인해볼게요. 홈 디렉토리에 있는 파일들을 리스트업해보겠습니다.","Let me list the files in the home directory.")) assertTrue(ProjectAgentAnnounce.unfinished(text),text)
-        for(text in listOf("홈 디렉토리에는 src와 README.md가 있습니다.","파일 3개를 확인했습니다. 수정은 필요 없습니다.","읽기 전용이라 수정할 수 없습니다.","")) assertFalse(ProjectAgentAnnounce.unfinished(text),text)
-        val (store,_,prefs)=setup();val events=mutableListOf<ProjectAgentEvent>();val actor=AtomicInteger()
-        val model=ProjectAgentInference {messages,_,_->
-            if(messages.first().content.startsWith("You are 루오노타르")) when(actor.getAndIncrement()) {
-                0 -> """{"message":"홈 디렉토리에 있는 파일들을 리스트업해보겠습니다.","tool":null}"""
-                1 -> mapper.writeValueAsString(mapOf("message" to "목록","tool" to call("sh",mapOf("command" to "ls"))))
-                else -> """{"message":"홈에는 A.kt가 있습니다.","tool":null}"""
-            } else allow
+    @Test fun `Pi announces and then calls a real tool within its native loop`() {
+        PiTestFixture(temp,tier=AgentAccess.READ).use {f->f.home.resolve("A.kt").writeText("fixture");var step=0
+            val model=f.model {q->if(step++==0)PiTestFixture.call("list_files",emptyMap<String,Any>()).also {(it as com.fasterxml.jackson.databind.node.ObjectNode).put("content","목록을 확인할게요")}else {assertContains(q.toString(),"A.kt");PiTestFixture.answer("홈에는 A.kt가 있습니다.")}}
+            f.run(model);assertEquals(2,model.actorCalls);assertEquals(1,f.events.count {it.kind=="tool_end"})
         }
-        ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {e->e.run("channel","friend","friend","파일 보여줘",prefs,model,ProjectAgentLimits(6,AgentAccess.READ),{},{events.add(it)})}
-        assertEquals(3,actor.get());assertTrue(events.any {it.kind=="tool_end"});assertEquals("홈에는 A.kt가 있습니다.",events.last {it.kind=="done"}.text)
     }
-    @Test fun `a model that keeps announcing is nudged at most twice and then accepted`() {
-        val (store,_,prefs)=setup();val actor=AtomicInteger();val events=mutableListOf<ProjectAgentEvent>()
-        val model=ProjectAgentInference {messages,_,_->if(messages.first().content.startsWith("You are 루오노타르")){actor.incrementAndGet();"""{"message":"확인해보겠습니다.","tool":null}"""} else allow}
-        ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {e->e.run("channel","friend","friend","x",prefs,model,ProjectAgentLimits(10,AgentAccess.READ),{},{events.add(it)})}
-        assertEquals(3,actor.get());assertEquals("done",events.last().kind)
+    @Test fun `Pi text-only assistant completion is not reparsed or nudged by custom harness`() {
+        PiTestFixture(temp,tier=AgentAccess.READ).use {f->val model=f.model {PiTestFixture.answer("확인해보겠습니다.")};f.run(model)
+            assertEquals(1,model.actorCalls);assertEquals("확인해보겠습니다.",f.events.last().text);assertTrue(f.events.none {it.kind=="tool_start"})
+        }
     }
 }

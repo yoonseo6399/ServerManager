@@ -5,9 +5,10 @@ import readline from 'node:readline';
 import {Agent,setGlobalDispatcher} from 'undici';
 import {createAgentSession,DefaultResourceLoader,ModelRuntime,SessionManager,SettingsManager} from '@earendil-works/pi-coding-agent';
 const line=readline.createInterface({input:process.stdin});
-let configResolve;const initial=new Promise(r=>configResolve=r);const waiting=new Map();let session;let sequence=0;let ended=false;
+let configResolve;const initial=new Promise(r=>configResolve=r);const waiting=new Map();let session;let sequence=0;let ended=false;const pendingSteers=[];let steering=Promise.resolve();
 const send=v=>process.stdout.write(JSON.stringify(v)+'\n');
-line.on('line',raw=>{try{const q=JSON.parse(raw);if(q.type==='config')configResolve(q);else if(q.type==='reply'){const p=waiting.get(q.id);if(p){waiting.delete(q.id);q.error?p.reject(Error(q.error)):p.resolve(q.value)}}else if(q.type==='abort')session?.abort();else if(q.type==='steer')session?.steer(q.text)}catch(e){send({type:'error',message:'Invalid host protocol'})}});
+line.on('line',raw=>{try{const q=JSON.parse(raw);if(q.type==='config')configResolve(q);else if(q.type==='reply'){const p=waiting.get(q.id);if(p){waiting.delete(q.id);q.error?p.reject(Error(q.error)):p.resolve(q.value)}}else if(q.type==='abort')session?.abort();else if(q.type==='steer'){pendingSteers.push(q.text);drainSteers()}}catch(e){send({type:'error',message:'Invalid host protocol'})}});
+function drainSteers(){steering=steering.then(async()=>{while(session&&pendingSteers.length){const text=pendingSteers.shift();await session.steer(text);send({type:'steer',text})}}).catch(e=>send({type:'error',message:'Steering failed: '+String(e)}));return steering}
 line.on('close',()=>{if(!ended){session?.abort();process.exitCode=1;setTimeout(()=>process.exit(1),500).unref()}});
 async function rpc(kind,payload){const id=String(++sequence);send({type:'rpc',id,kind,...payload});return await new Promise((resolve,reject)=>waiting.set(id,{resolve,reject}))}
 try{
@@ -48,6 +49,7 @@ try{
   if(c.history.length)await session.sendCustomMessage({customType:'previous-conversation',content:JSON.stringify(c.history),display:false},{triggerTurn:false});
   fs.writeFileSync(path.join(agentDir,'imported'),'1',{mode:0o600});
  }
+ await drainSteers();
  let compacted=true;
  if(c.compactOnly){try{await session.compact('Preserve exact identifiers and original-language names, corrected facts, cancelled work and unfinished tasks. Do not revive old requests.')}catch(e){if(!String(e).includes('Nothing to compact')&&!String(e).includes('Already compacted'))throw e;compacted=false}}
  else await session.prompt(JSON.stringify({requester:c.requester,request:c.request}));

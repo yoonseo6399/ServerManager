@@ -20,13 +20,11 @@ class ProjectAgentStopTest {
             jobs.stop("channel","owner",current.get().id);assertTrue(interrupted.await(2,TimeUnit.SECONDS));thread.join(2000);assertFalse(thread.isAlive)
         }finally{jobs.close();thread.interrupt();thread.join(1000)}
     }
-    @Test fun `engine stop interrupts blocked inference before it can propose or execute a tool`() {
-        val home=temporary.resolve("project").createDirectories();val store=ProjectAgentStore(temporary.resolve("settings"));store.addChannel(ProjectAgentChannel("g","c","owner",null,home.toString()))
-        val entered=CountDownLatch(1);val stopped=CountDownLatch(1)
-        ProjectAgentEngine(store,{ProjectAgentTools(temporary.resolve("logs"))}).use {engine->
-            val thread=Thread {try{engine.run("c","owner","request",store.preferences("g","owner"),ProjectAgentInference {_,_,_->entered.countDown();CountDownLatch(1).await();"""{"message":"bad","tool":{"name":"write_file","arguments":{"path":"bad","content":"bad"}}}"""},{},{})}catch(_:Exception){stopped.countDown()}}
-            try {thread.start();assertTrue(entered.await(2,TimeUnit.SECONDS));engine.stop("c","owner");assertTrue(stopped.await(2,TimeUnit.SECONDS));thread.join(2000);assertFalse(home.resolve("bad").exists())}
-            finally{thread.interrupt();thread.join(1000)}
+    @Test fun `Pi stop interrupts blocked inference and no native write can run afterward`() {
+        PiTestFixture(temporary).use {f->val entered=CountDownLatch(1);val stopped=CountDownLatch(1)
+            val model=f.model {entered.countDown();CountDownLatch(1).await();PiTestFixture.call("write",mapOf("path" to "bad","content" to "bad"))}
+            val runner=Thread {try {f.run(model)}catch(_:Exception){stopped.countDown()}}
+            try {runner.start();assertTrue(entered.await(10,TimeUnit.SECONDS));f.engine.stop("c","u");assertTrue(stopped.await(3,TimeUnit.SECONDS));runner.join(3000);assertFalse(runner.isAlive);assertFalse(f.home.resolve("bad").exists());assertTrue(f.events.none {it.kind=="tool_start"})}finally {runner.interrupt();runner.join(3000)}
         }
     }
 }

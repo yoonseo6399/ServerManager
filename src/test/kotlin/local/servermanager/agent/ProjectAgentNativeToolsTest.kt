@@ -15,35 +15,13 @@ class ProjectAgentNativeToolsTest {
     private val mapper=jacksonObjectMapper()
     private fun call(name:String,args:String)=mapper.readTree("""{"function":{"name":"$name","arguments":$args}}""")
 
-    @Test fun `native selection grants no execution and selected build still requires review and human approval`() {
-        val home=temp.resolve("project").createDirectories().toRealPath()
-        val store=ProjectAgentStore(temp.resolve("settings"));store.addChannel(ProjectAgentChannel("g","c","u",null,home.toString()))
-        val prefs=store.settings("g","u","14b",true,true)
-        var actor=0;var nativeReply:String?=null;var reviews=0;var approvals=0;val events=mutableListOf<ProjectAgentEvent>()
-        val inference=object:ProjectAgentInference {
-            override fun nativeTools()=true
-            override fun nativeMessage()=nativeReply
-            override fun generate(messages:List<ProjectAgentMessage>,think:Boolean,progress:(QwenProgress)->Unit):String {
-                if(messages.first().content.startsWith("Independent")){reviews++;return """{"action":"ALLOW","risk":"LOW","projectScope":"INSIDE","reason":"fixture build"}"""}
-                if(messages.first().content.startsWith("Context compressor"))return "fixture build unfinished"
-                val fn=when(actor++) {
-                    0->{assertFalse(ProjectAgentNativeTools.names(messages.first().content).contains("build"));call("build","""{"command":"/bin/echo checked"}""")}
-                    1->{assertTrue(messages.any {it.content.contains("등록되지 않은 함수")});call("select_tools","""{"names":["build"],"plan":["build","inspect exit","report"]}""")}
-                    2->{assertTrue(ProjectAgentNativeTools.names(messages.first().content).contains("build"));call("build","""{"command":"/bin/echo checked"}""")}
-                    else->{assertTrue(ProjectAgentNativeTools.wire(messages).any {it.path("role").asText()=="tool" && it.path("tool_name").asText()=="build"});call("report_task","""{"message":"빌드 종료 코드 0 확인","status":"completed","requirements":[{"id":"R1","status":"done","evidence_ids":["T3"],"evidence":"build returned exit=0 and checked"}]}""")}
-                }
-                nativeReply=ProjectAgentNativeTools.assistant("",listOf(fn));return ProjectAgentNativeTools.reply("",listOf(fn))
-            }
+    @Test fun `Pi advertises native bash directly but execution still requires independent review and owner consent`() {
+        PiTestFixture(temp).use {f->var step=0;var approvals=0
+            val model=f.model {q->val names=q.path("tools").map {it.path("function").path("name").asText()};assertContains(names,"bash");assertFalse("select_tools" in names)
+                if(step++==0)PiTestFixture.call("bash",mapOf("command" to "printf checked"))else {assertContains(q.toString(),"checked");PiTestFixture.answer("빌드 종료 확인")}}
+            f.run(model,onEvent={e->if(e.kind=="approval"){approvals++;assertTrue(f.events.none {it.kind=="tool_start"});f.engine.approve("c","u",e.token!!,true){}}})
+            assertEquals(1,approvals);assertEquals(1,model.reviews.size);assertEquals(1,f.events.count {it.kind=="tool_end"});assertEquals(0,f.events.single {it.kind=="tool_end"}.exitCode)
         }
-        ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->
-            engine.run("c","u","u","빌드",prefs,inference,ProjectAgentLimits(8,AgentAccess.OWNER),{}) {event->
-                events.add(event)
-                if(event.kind=="approval"){assertEquals("build",event.plan!!.tool.name);approvals++;engine.approve("c","u",event.token!!,true){}}
-            }
-        }
-        assertEquals(1,approvals);assertEquals(1,reviews);assertEquals(1,events.count {it.kind=="tool_start"})
-        assertContains(events.last {it.kind=="done"}.text,"✅ R1")
-        assertEquals(listOf("build","inspect exit","report"),store.taskPlan("c")!!.steps)
     }
 
     @Test fun `real HTTP streaming gathers native call chunks and next request sends official tool roles without format`() {

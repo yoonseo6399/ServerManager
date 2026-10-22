@@ -132,7 +132,14 @@ class DirectRelayTest {
         hub.applyPolicy(RelayPolicy(2,emptyMap(),emptyList()))
         await("agent notices revocation"){agent.state==RelayAgentState.REJECTED}
         assertTrue(hub.status().agents.isEmpty())
-        assertTrue(runCatching {live.getOutputStream().write("x".toByteArray());live.getInputStream().read()}.getOrDefault(-1)<0)
+        val marker="AFTER_REVOCATION_${UUID.randomUUID()}"
+        runCatching {live.getOutputStream().write(marker.toByteArray());live.getOutputStream().flush()}
+        live.soTimeout=3000
+        val buffered=ByteArrayOutputStream()
+        try {while(true){val n=live.getInputStream().read();if(n<0)break;buffered.write(n);assertTrue(buffered.size()<65536)}}
+        catch(e:java.net.SocketException) { /* Reset is also a closed tunnel; timeout still fails. */ }
+        assertFalse(buffered.toString(Charsets.UTF_8).contains(marker),"post-revocation data reached the game")
+        live.close()
     }
 
     @Test fun `manager outage keeps the established tunnel and reports an explicit reason for new attempts`() {

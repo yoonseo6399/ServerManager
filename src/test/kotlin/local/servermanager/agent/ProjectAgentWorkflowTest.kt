@@ -15,24 +15,17 @@ class ProjectAgentWorkflowTest {
     private fun response(tool:ProjectAgentTool?)=mapper.writeValueAsString(mapOf("message" to if(tool==null)"검증 완료" else "다음 단계", "tool" to tool))
     private val risk="""{"action":"ALLOW","risk":"LOW","projectScope":"INSIDE","reason":"검토"}"""
     private fun store():ProjectAgentStore=ProjectAgentStore(temp.resolve("settings")).also {it.addChannel(ProjectAgentChannel("g","c","u","project",temp.toRealPath().toString()))}
-    @Test fun `failed build is inspected corrected rerun and reported in a later model turn`() {
-        val store=store();temp.resolve("build.sh").writeText("echo initial-failure; exit 7")
-        val events=mutableListOf<ProjectAgentEvent>();var actor=0
-        val model=ProjectAgentInference {messages,_,_->
-            if(messages.first().content.startsWith("Independent"))risk else if(messages.first().content.startsWith("Context compressor"))"빌드 실패와 미완료 수정 작업"else {
-                assertContains(messages.first().content,"MULTI-STEP")
-                when(actor++){
-                    0->response(call("build","command" to "/bin/sh ./build.sh"))
-                    1->{assertTrue(messages.any {it.content.contains("exit=7")});response(call("read_file","path" to "build.sh"))}
-                    2->response(call("edit_file","path" to "build.sh","find" to "echo initial-failure; exit 7","replace" to "echo checked; exit 0"))
-                    3->response(call("build","command" to "/bin/sh ./build.sh"))
-                    else->{assertTrue(messages.any {it.content.contains("checked") && it.content.contains("exit=0")});mapper.writeValueAsString(mapOf("message" to "검증 완료","tool" to null,"requirements" to listOf(mapOf("id" to "R1","status" to "done","evidence_ids" to listOf("T3","T4"),"evidence" to "build.sh 수정 후 빌드 종료 코드 0 확인"))))}
-                }
-            }
+    @Test fun `Pi failed build is observed corrected rerun and reported through native tools`() {
+        PiTestFixture(temp).use {f->val file=f.home.resolve("build.sh");file.writeText("echo initial-failure; exit 7");var step=0
+            f.run(f.model {q->when(step++){
+                0->PiTestFixture.call("bash",mapOf("command" to "bash build.sh"))
+                1->{assertContains(q.toString(),"initial-failure");assertContains(q.toString(),"7");PiTestFixture.call("read",mapOf("path" to "build.sh"))}
+                2->PiTestFixture.call("edit",mapOf("path" to "build.sh","edits" to listOf(mapOf("oldText" to "exit 7","newText" to "exit 0"))))
+                3->PiTestFixture.call("bash",mapOf("command" to "bash build.sh"))
+                else->PiTestFixture.answer("수정 후 종료 코드 0 확인")
+            }},"빌드 오류 수정 및 재검증")
+            assertEquals(listOf(7,0),f.events.filter {it.kind=="tool_end" && it.plan?.tool?.name=="bash"}.map {it.exitCode});assertContains(file.readText(),"exit 0");assertEquals(4,f.events.count {it.kind=="tool_end"})
         }
-        ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->engine.run("c","u","빌드 오류 수정 및 재검증",ProjectAgentPreferences(),model,{}) {event->events.add(event);if(event.kind=="approval")engine.approve("c","u",event.token!!,true){}}}
-        assertEquals(5,actor);assertEquals(4,events.count {it.kind=="tool_end"});assertTrue(events.last().text.startsWith("검증 완료"))
-        assertTrue(events.any {it.kind=="tool_output" && it.text.contains("initial-failure")})
     }
     @Test fun `process output arrives before process exit`() {
         val first=CountDownLatch(1);val executor=Executors.newSingleThreadExecutor()
@@ -61,34 +54,25 @@ class ProjectAgentWorkflowTest {
     @Test fun `routing sees prior dialogue and aliases bypass a flaky classifier`() {
         val store=store();ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->
             assertTrue(engine.route("루오 다시 해줘",ProjectAgentInference {_,_,_->error("should not classify explicit address")}))
-            assertTrue(engine.route("그거 수정해줘",ProjectAgentInference {messages,_,_->assertContains(messages.last().content,"recent_conversation");assertContains(messages.last().content,"previous-reply");"""{"addressed":true}"""},history=listOf(ProjectAgentMessage("assistant","previous-reply"))))
+            assertTrue(engine.route("그거 수정해줘",ProjectAgentInference {messages,_,_->assertContains(messages.last().content,"history");assertContains(messages.last().content,"previous-reply");"""{"addressed":true}"""},history=listOf(ProjectAgentMessage("assistant","previous-reply"))))
         }
     }
-    @Test fun `human trusted Gradle build runs without repeat approval but changed build logic needs consent`() {
-        val store=store();val wrapper=temp.resolve("gradlew");wrapper.writeText("#!/bin/sh\necho checked\n");wrapper.toFile().setExecutable(true)
-        temp.resolve("build.gradle.kts").writeText("// first")
-        val tools=ProjectAgentTools(temp.resolve("logs"));val tool=call("build","command" to "./gradlew build test --no-daemon")
-        val fingerprint=tools.plan(temp,tool).gradleFingerprint ?: return // A developer's global init scripts intentionally disable auto-trust.
-        store.trustGradle("g","u",fingerprint)
-        fun run():Int {var actor=0;var approvals=0
-            ProjectAgentEngine(store,{tools}).use {engine->engine.run("c","u","빌드",ProjectAgentPreferences(explicitPermission=false),ProjectAgentInference {messages,_,_->
-                if(messages.first().content.startsWith("Independent"))"""{"action":"ASK","risk":"MEDIUM","projectScope":"UNKNOWN","reason":"빌드 실행"}""" else if(messages.first().content.startsWith("Context compressor"))"이전 빌드 확인 기록" else if(actor++==0)response(tool)else response(null)
-            },{}){event->if(event.kind=="approval"){approvals++;engine.approve("c","u",event.token!!,true){}}}}
-            return approvals
+    @Test fun `Pi reviewer ASK cannot be bypassed by a legacy Gradle trust record`() {
+        PiTestFixture(temp,false).use {f->val wrapper=f.home.resolve("gradlew");wrapper.writeText("#!/bin/sh\necho checked\n");wrapper.toFile().setExecutable(true);f.home.resolve("build.gradle.kts").writeText("// fixture")
+            f.store.trustGradle("g","u","arbitrary-old-trust");var step=0;var asks=0
+            val model=f.model("""{"action":"ASK","risk":"MEDIUM","projectScope":"INSIDE","reason":"현재 빌드 동의 확인 필요"}""") {if(step++==0)PiTestFixture.call("bash",mapOf("command" to "./gradlew build test --no-daemon"))else PiTestFixture.answer("검증 완료")}
+            f.run(model,onEvent={e->if(e.kind=="approval"){asks++;f.engine.approve("c","u",e.token!!,true){}}})
+            assertEquals(1,asks);assertEquals(0,f.events.single {it.kind=="tool_end"}.exitCode)
         }
-        assertEquals(0,run());temp.resolve("build.gradle.kts").writeText("// changed");assertEquals(1,run())
-        assertNull(tools.plan(temp,call("build","command" to "./gradlew build; touch escaped")).gradleFingerprint)
-        assertNull(tools.plan(temp,call("build","command" to "./gradlew publish")).gradleFingerprint)
     }
-    @Test fun `threshold triggers automatic independent compression before actor and persists summary`() {
-        val store=store();store.context("c","u",limit=1024)
-        store.history("c",List(8){ProjectAgentMessage(if(it%2==0)"user" else "assistant","history-$it "+"text ".repeat(80))},1)
-        var compressed=0
-        ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {engine->engine.run("c","u","continue",ProjectAgentPreferences(),ProjectAgentInference {messages,_,_->
-            if(messages.first().content.startsWith("Context compressor")){compressed++;"Previous goal remains unfinished; inspect result."}
-            else {assertTrue(messages.any {it.content.contains("UNTRUSTED CONVERSATION SUMMARY")});mapper.writeValueAsString(mapOf("message" to "검증 완료","tool" to null,"requirements" to listOf(mapOf("id" to "R1","status" to "done","evidence_ids" to listOf("T3","T4"),"evidence" to "build.sh 수정 후 빌드 종료 코드 0 확인"))))}
-        },{}){}}
-        assertEquals(1,compressed);assertTrue(store.channel("c")!!.history.any {it.content.contains("SUMMARY")})
+    @Test fun `Pi automatic compaction uses official SDK session and preserves a factual marker`() {
+        PiTestFixture(temp).use {f->f.store.context("c","u",limit=4500)
+            val model=f.model(inputTokens=5000) {q->PiTestFixture.answer(if(q.path("tools").size()==0)"Goal CODE_742 remains unfinished; source bytes preserved."else "CODE_742 "+"conversation ".repeat(500))}
+            f.run(model,"CODE_742를 기억해")
+            assertTrue(model.requests.any {it.path("tools").size()==0});val session=Path.of(f.store.piState(f.store.channel("c")!!).resolve("current-session.txt").readText())
+            assertTrue(session.readLines().any {mapper.readTree(it).path("type").asText()=="compaction"})
+            val follow=f.model {q->assertContains(q.toString(),"CODE_742");PiTestFixture.answer("기억합니다")};f.run(follow,"기억 확인")
+        }
     }
     @Test fun `tool output summarizer failure falls back with exit code and no tool authority`() {
         val result=ProjectAgentToolResult("bounded","error ".repeat(300),42)

@@ -32,7 +32,7 @@ class ProjectAgentEngine(private val store:ProjectAgentStore,private val toolFac
     private val mapper=jacksonObjectMapper()
     private val humanIntent=PiHumanIntent(store.profileDirectory)
     private data class Work(val cancelled:AtomicBoolean=AtomicBoolean(),val thread:Thread=Thread.currentThread(),@Volatile var process:Process?=null,@Volatile var writer:java.io.BufferedWriter?=null,
-        val inferenceThreads:MutableSet<Thread> = ConcurrentHashMap.newKeySet(),val steers:java.util.concurrent.ConcurrentLinkedQueue<String> = java.util.concurrent.ConcurrentLinkedQueue())
+        val inferenceThreads:MutableSet<Thread> = ConcurrentHashMap.newKeySet(),val steerCount:java.util.concurrent.atomic.AtomicInteger=java.util.concurrent.atomic.AtomicInteger(),val steers:java.util.concurrent.ConcurrentLinkedQueue<String> = java.util.concurrent.ConcurrentLinkedQueue())
     private data class Pending(val channel:String,val user:String,val revision:Long,val until:Instant,val result:CompletableFuture<Boolean>)
     private data class Question(val channel:String,val user:String,val revision:Long,val until:Instant,val choices:List<String>,val result:CompletableFuture<String>)
     private val questions=ConcurrentHashMap<String,Question>()
@@ -43,7 +43,7 @@ class ProjectAgentEngine(private val store:ProjectAgentStore,private val toolFac
     fun stop(channel:String,user:String){check(store.channel(channel)?.user==user) {"채널 소유자만 중단할 수 있습니다."};humanIntent.clear(channel);busy[channel]?.let {cancel(it)};pending.values.filter {it.channel==channel}.forEach {it.result.complete(false)};questions.values.filter {it.channel==channel}.forEach {it.result.completeExceptionally(IllegalStateException("사용자가 질문 대기를 중단했습니다."))}}
     private fun cancel(work:Work){work.cancelled.set(true);runCatching {write(work,mapOf("type" to "abort"))};work.inferenceThreads.forEach {it.interrupt()};if(work.thread!==Thread.currentThread())work.thread.interrupt();work.process?.let {p->Thread.startVirtualThread {runCatching {if(!p.waitFor(1500,TimeUnit.MILLISECONDS)){p.descendants().forEach {it.destroyForcibly()};p.destroyForcibly()}}}}}
     fun steer(channel:String,user:String,text:String):Boolean {
-        check(store.channel(channel)?.user==user);val work=busy[channel] ?: return false;check(!work.cancelled.get());require(text.isNotBlank() && text.length<=2000);check(work.steers.size<5)
+        check(store.channel(channel)?.user==user);val work=busy[channel] ?: return false;check(!work.cancelled.get());require(text.isNotBlank() && text.length<=2000);check(work.steerCount.incrementAndGet()<=5) {"한 요청에는 개입 지시를 최대5개 보낼 수 있습니다."}
         store.channel(channel)?.let {humanIntent.append(it,store.preferences(it.guild,user).revision,text)}
         if(work.writer==null)work.steers.add(text)else write(work,mapOf("type" to "steer","text" to text));return true
     }
@@ -79,7 +79,7 @@ class ProjectAgentEngine(private val store:ProjectAgentStore,private val toolFac
     fun compact(channelId:String,user:String,model:ProjectAgentInference,authorize:()->Unit)=compactWithTimeout(channelId,user,model,1200,authorize)
     fun compactWithTimeout(channelId:String,user:String,model:ProjectAgentInference,seconds:Int,authorize:()->Unit){val c=store.channel(channelId) ?: error("채널이 없습니다.");execute(channelId,user,user,"문맥 압축",store.preferences(c.guild,user),model,ProjectAgentLimits(tier=AgentAccess.READ),authorize,{},true,requestTimeoutSeconds=seconds)}
     private fun execute(channelId:String,user:String,userName:String,request:String,preferences:ProjectAgentPreferences,model:ProjectAgentInference,limits:ProjectAgentLimits,authorize:()->Unit,emit:(ProjectAgentEvent)->Unit,compactOnly:Boolean,window:Int?=null,requestTimeoutSeconds:Int=1200) {
-        require(request.isNotBlank() && request.length<=6000 && limits.maxTurns in 1..AgentAccess.MAX_TURNS)
+        require(request.isNotBlank() && request.length<=6000 && limits.maxTurns in 1..AgentAccess.MAX_TURNS && limits.tier in setOf(AgentAccess.OWNER,AgentAccess.EDIT,AgentAccess.READ))
         val session=store.channel(channelId) ?: error("/agent channel로 채널을 만드세요.");check(session.user==user)
         val work=Work();check(busy.putIfAbsent(channelId,work)==null) {"이 채널의 작업이 아직 종료 중입니다."}
         val started=System.nanoTime();val home=Path.of(session.home).toRealPath();val sender=mapOf("display_name" to userName.replace(Regex("[\\p{Cntrl}]")," ").take(100),"discord_user_id" to user)
@@ -189,6 +189,7 @@ class ProjectAgentEngine(private val store:ProjectAgentStore,private val toolFac
                             if(plan!=null){val output=e.path("result").path("content").filter {it.path("type").asText()=="text"}.joinToString("\n"){it.path("text").asText()};if(checked?.native==true && output.isNotEmpty())emit(ProjectAgentEvent("tool_output_snapshot",turn,output,plan,callId=call));emit(ProjectAgentEvent("tool_end",turn,"${if(e.path("isError").asBoolean())"도구 오류"else "도구 실행 완료"} · 종료 코드 ${e.path("result").get("exitCode")?.takeIf {it.isInt}?.asInt()?.toString() ?: "미수신"}\n${if(output.isBlank() || output.trim()=="(no output)")"출력 없음"else output.take(300)}",plan,risk=reviews.remove(call),seconds=(System.nanoTime()-(begun.remove(call) ?: System.nanoTime()))/1e9,callId=call,exitCode=e.path("result").get("exitCode")?.takeIf {it.isInt}?.asInt(),changes=fileChanges.after(snapshots.remove(call))))}
                         }
                     }
+                    "steer"->emit(ProjectAgentEvent("steer",actorTurn.get(),q.path("text").asText().take(2000)))
                     "compaction"->emit(ProjectAgentEvent("status",actorTurn.get(),if(q.path("error").asText().isNotBlank())"Pi 문맥 압축 실패: ${q.path("error").asText().take(300)}"else if(q.path("aborted").asBoolean())"Pi 문맥 압축 중단"else if(q.path("event").asText().endsWith("start"))"Pi 문맥 압축 중"else "Pi 문맥 압축 처리 완료"))
                     "done"->{active();val answer=q.path("text").asText();if(!compactOnly){humanIntent.finish(channelId);store.history(channelId,(session.history+ProjectAgentMessage("user",mapper.writeValueAsString(mapOf("sender" to sender,"request" to request)))+ProjectAgentMessage("assistant",answer)).takeLast(32),session.contextEpoch)};emit(ProjectAgentEvent("done",actorTurn.get(),answer,seconds=(System.nanoTime()-started)/1e9,usage=model.usage()));finished=true}
                     "error"->error(q.path("message").asText().take(1500))
