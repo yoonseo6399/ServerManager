@@ -31,5 +31,6 @@ test('an immediate startup crash follows old install output in live console with
  await expect(page.getByTestId('log-viewport')).toContainText('Caused by: java.lang.ClassNotFoundException: org.lwjgl.Version');
  await expect(page.getByTestId('log-count')).toContainText('4줄');
  expect(reads).toBeGreaterThan(initialReads);
+ await page.getByTestId('log-viewport').scrollIntoViewIfNeeded();
  await page.screenshot({path:'test-results/remote-live-crash.png'});
 });
