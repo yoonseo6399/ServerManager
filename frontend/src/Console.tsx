@@ -1,6 +1,7 @@
 import React,{memo,startTransition,useCallback,useDeferredValue,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {Terminal} from 'lucide-react';
 import {api} from './http';
+import {GroupedConsole} from './GroupedConsole';
 import {useBackClose} from './nav';
 import {type ParsedLog,type RawLog} from './logParser';
 import {useLogParser} from './useLogParser';
@@ -26,9 +27,11 @@ function LogDetail({event,onClose}:{event:ParsedLog;onClose:()=>void}){
 }
 export const ConsolePanel=memo(function ConsolePanel(props:{id:string;enabled:boolean;hint:string}){
  const filters=useLogFilters(props.id);
- const [source,setSource]=useState(''),[files,setFiles]=useState<LogFile[]>([]),[error,setError]=useState(''),[revision,setRevision]=useState(0);
- useEffect(()=>{let active=true;api<LogFile[]>(`/instances/${props.id}/log-files`).then(rows=>{if(active&&Array.isArray(rows)){setFiles(rows);setError('');}}).catch(e=>{if(active)setError(e.message);});return()=>{active=false;};},[props.id,revision]);
- return <><div className="log-source"><label>로그 파일<select aria-label="로그 파일" value={source} onChange={e=>setSource(e.target.value)}><option value="">실시간 콘솔</option>{files.map(file=><option key={file.path} value={file.path}>{file.name} · {(file.size/1024).toFixed(0)} KiB{file.compressed?' · 압축':''}</option>)}</select></label><button onClick={()=>setRevision(v=>v+1)}>로그 다시 불러오기</button><small>원문 파일만 저장 · 파싱 결과는 메모리에서만 처리</small></div>{error&&<div role="alert" className="alert error-banner">{error}</div>}<LogFilterEditor key={props.id} {...filters} onChange={filters.change} onSave={filters.save}/><ConsoleView key={`${props.id}:${source}:${revision}`} {...props} source={source} filters={filters.config}/></>;
+ const [source,setSource]=useState(''),[files,setFiles]=useState<LogFile[]>([]),[error,setError]=useState(''),[revision,setRevision]=useState(0),[grouped,setGrouped]=useState(true);
+ useEffect(()=>{let active=true,timer:ReturnType<typeof setTimeout>;const load=async()=>{try{const rows=await api<LogFile[]>(`/instances/${props.id}/log-files`);if(active&&Array.isArray(rows)){setFiles(rows);setError('');}}catch(e){if(active)setError((e as Error).message);}finally{if(active)timer=setTimeout(load,5000);}};load();return()=>{active=false;clearTimeout(timer);};},[props.id,revision]);
+ const latestCrash=files.find(file=>file.path.startsWith('server/crash-reports/'));
+
+ return <><div className="log-source"><label>로그 파일<select aria-label="로그 파일" value={source} onChange={e=>setSource(e.target.value)}><option value="">실시간 콘솔</option>{files.map(file=><option key={file.path} value={file.path}>{file.name} · {(file.size/1024).toFixed(0)} KiB{file.compressed?' · 압축':''}</option>)}</select></label><button onClick={()=>setRevision(v=>v+1)}>로그 다시 불러오기</button><button onClick={()=>setGrouped(v=>!v)}>{grouped?'원문 줄 보기':'블록·출처별 보기'}</button><small>원문 파일만 저장 · 파싱 결과는 메모리에서만 처리</small></div>{latestCrash&&<div className="notice crash-report-notice" role="status">최신 크래시 리포트: {latestCrash.name.split('/').pop()} <button onClick={()=>{setSource(latestCrash.path);setRevision(v=>v+1);}}>리포트 열기</button> <a href={`/api/instances/${props.id}/download?path=${encodeURIComponent(latestCrash.path.replace(/^server\//,''))}`}>파일 다운로드</a><small>크래시 보고서는 콘솔 출력과 별도로 저장됩니다.</small></div>}{error&&<div role="alert" className="alert error-banner">{error}</div>}<LogFilterEditor key={props.id} {...filters} onChange={filters.change} onSave={filters.save}/>{grouped?<><GroupedConsole key={`${props.id}:${source}:${revision}`} id={props.id} source={source} filters={filters.config}/>{!source&&<Command {...props}/>}</>:<ConsoleView key={`${props.id}:${source}:${revision}`} {...props} source={source} filters={filters.config}/>}</>;
 });
 function ConsoleView({id,enabled,hint,source,filters}:{id:string;enabled:boolean;hint:string;source:string;filters:FilterConfig}){
  const path=source||'console.log',live=!source;
