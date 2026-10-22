@@ -45,4 +45,17 @@ class ProjectAgentSteerTest {
             try {runner.start();assertTrue(entered.await(10,TimeUnit.SECONDS));repeat(5){assertTrue(f.engine.steer("c","u","startup-$it"))};assertFails {f.engine.steer("c","u","sixth")};assertFails {f.engine.steer("c","u","   ")};release.countDown();runner.join(15000);assertFalse(runner.isAlive);failure.get()?.let {throw it};assertContains(model.requests.first().toString(),"startup-0");repeat(5){assertContains(model.requests.joinToString(),"startup-$it")};assertTrue(model.actorCalls in 1..6);assertEquals(5,f.events.count {it.kind=="steer"})}finally {release.countDown();f.engine.stop("c","u");runner.join(3000)}
         }
     }
+    @Test fun `Pi active session also refuses a sixth steering input before execution`() {
+        PiTestFixture(temp,false).use {f->val entered=CountDownLatch(1);val release=CountDownLatch(1);val ended=CountDownLatch(1)
+            val model=f.model {entered.countDown();release.await();PiTestFixture.answer("cancelled")}
+            val runner=Thread {try{f.run(model)}catch(_:Exception){}finally{ended.countDown()}}
+            try {
+                runner.start();assertTrue(entered.await(10,TimeUnit.SECONDS))
+                repeat(5){assertTrue(f.engine.steer("c","u","queued-$it"))}
+                assertFailsWith<IllegalStateException> {f.engine.steer("c","u","sixth")}
+                f.engine.stop("c","u");assertTrue(ended.await(3,TimeUnit.SECONDS));assertTrue(f.events.none {it.kind=="tool_start"})
+            }finally {release.countDown();runner.interrupt();runner.join(3000)}
+        }
+    }
+
 }

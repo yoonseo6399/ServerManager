@@ -22,6 +22,12 @@
 
 첫 이관 검증은 관련 Pi/Agent 및 DirectRelay 클래스만 실행하고 실패를 고친 뒤 마지막에 `./gradlew test --console=plain` 전체를 다시 실행한다. 새 테스트/코드 수정도 실행 전에 커밋한다. exporter --check와 diff --check도 확인한다. 전체/부분 결과와 실패 원문을 완료 후 기록한다.
 
+## 이관 후 관련 검증
+
+커밋a7dfa29 이후 관련 ProjectAgent*Test 및 DirectRelayTest 실행은 모두 통과했다. 통계는 아래 최종 결과에 기록한다. 실패했던39개에 해당하는 동작을 skip/delete하지 않고 현행 Pi SDK의 실행/승인/문맥 계약으로 이관했다. 이전 의미 검증·문장 repair·custom ledger가 없는 점은 한계로 명시한다.
+
+준비 완료 후 실제 native inference 대기 중에도 여섯 번째 개입 지시를 거절하는 회귀를 추가한다. 이 시험과 문서 변경을 선커밋한 후 마지막 전체 Gradle test를 실행한다.
+
 ## 최종 결과
 
 진행 중.
