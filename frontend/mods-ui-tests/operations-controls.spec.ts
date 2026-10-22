@@ -34,7 +34,8 @@ for(const state of ['RUNNING','SYNCING'])test(`runner files and mods remain edit
  const f=await fixture(page,state);await page.getByRole('button',{name:'파일 관리자',exact:true}).click();
  await expect(page.getByRole('button',{name:'파일',exact:true})).toBeEnabled();
  await page.getByRole('button',{name:'config.txt',exact:true}).click();
- await expect(page.locator('.file-editor textarea')).toBeEnabled();
+ await expect(page.getByRole('textbox',{name:'파일 내용',exact:true})).toBeEnabled();
+ await page.getByRole('textbox',{name:'파일 내용',exact:true}).fill('original\nadded\n');await page.getByRole('button',{name:'저장',exact:true}).click();await expect.poll(()=>f.edited()).toBe('original\nadded\n');
  await page.getByRole('button',{name:'모드 · 문제 찾기',exact:true}).click();
  await expect(page.getByRole('switch',{name:'sample.jar 비활성화',exact:true})).toBeEnabled();
  await page.getByRole('switch',{name:'sample.jar 비활성화',exact:true}).click();
