@@ -17,6 +17,10 @@ export function ServiceRestartPanel(){
      if(Date.now()-pending.current.at>120000){pending.current=null;sessionStorage.removeItem(key);setError('재연결 확인 시간이 초과됐습니다. 관리 앱 로그를 확인하세요.');setBusy(false);}
      else {
       const info=await api<{bootId?:string}>('/auth/session');
+      if(closed||!pending.current)return;
+      const check=await api<Status>('/admin/service-restart').catch(()=>null);
+      if(closed||!pending.current)return;
+      if(check?.stage==='FAILED'){pending.current=null;sessionStorage.removeItem(key);setBusy(false);setError(check.message);setStatus(check);return;}
       if(info.bootId&&info.bootId!==pending.current.bootId){pending.current=null;sessionStorage.removeItem(key);setBusy(false);setMessage('관리 앱이 새 프로세스로 다시 연결됐습니다. 로그인이 풀렸다면 패스키로 다시 로그인하세요.');}
       else {setBusy(true);setMessage('관리 앱 재시작·재연결 확인 중…');}
      }
