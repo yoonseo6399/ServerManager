@@ -26,17 +26,17 @@ object TurboQuantRuntime {
     private val mapper=jacksonObjectMapper()
     private val client=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
     val endpoint:URI=URI("http://127.0.0.1:18081")
-    private var process:Process?=null
+    @Volatile private var process:Process?=null
     private var lockChannel:java.nio.channels.FileChannel?=null
     private var lock:java.nio.channels.FileLock?=null
-    private var profile:Triple<Path,Int,String>?=null
+    @Volatile private var profile:Triple<Path,Int,String>?=null
     private var secret:String?=null
     @Volatile private var installing=false
     @Volatile private var message="27B TurboQuant는 실험 기능입니다. 설치는 모델을 로드하지 않습니다."
     data class Status(val supported:Boolean,val ready:Boolean,val installing:Boolean,val running:Boolean,val version:String,val context:Int?,val message:String)
     private fun supported()=System.getProperty("os.name").contains("Mac",true) && System.getProperty("os.arch") in setOf("arm64","aarch64") && System.getProperty("os.version").substringBefore('.').toIntOrNull()?.let {it>=15}==true
     private fun ssl():Path?=if(!release.exists())null else Files.walk(release).use {s->s.filter {it.fileName.toString()=="libssl.3.dylib" && Files.isRegularFile(it)}.findFirst().orElse(null)?.parent}
-    @Synchronized fun status()=Status(supported(),supported() && binary.isExecutable() && release.resolve("verified").exists(),installing,process?.isAlive==true,VERSION,profile?.second,message)
+    fun status()=Status(supported(),supported() && binary.isExecutable() && release.resolve("verified").exists(),installing,process?.isAlive==true,VERSION,profile?.second,message)
     @Synchronized fun authorization():String="Bearer "+(secret ?: error("TurboQuant가 시작되지 않았습니다."))
     private fun privateDir(path:Path){path.createDirectories();Files.setPosixFilePermissions(path,PosixFilePermissions.fromString("rwx------"))}
     private fun acquire(){privateDir(root);val c=java.nio.channels.FileChannel.open(root.resolve("service.lock"),java.nio.file.StandardOpenOption.CREATE,java.nio.file.StandardOpenOption.WRITE);val l=runCatching {c.tryLock()}.getOrNull();if(l==null){c.close();error("다른 관리 앱/실행기가 TurboQuant를 사용 중입니다.")};lockChannel=c;lock=l}
@@ -92,7 +92,7 @@ object TurboQuantRuntime {
             val key=root.resolve("api-key");Files.writeString(key,token);Files.setPosixFilePermissions(key,PosixFilePermissions.fromString("rw-------"))
             val log=root.resolve("server.log");if(log.exists() && log.fileSize()>10_000_000)Files.move(log,root.resolve("server.previous.log"),java.nio.file.StandardCopyOption.REPLACE_EXISTING)
             val p=ProcessBuilder(arguments(binary,model,window,alias,key)).apply {environment()["DYLD_LIBRARY_PATH"]=ssl()?.toString() ?: error("격리 OpenSSL이 없습니다.")}.redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile())).start()
-            process=p
+            process=p;message="TurboQuant ${window/1024}K 시작 중 · 모델 준비 대기"
             repeat(240){
                 if(Thread.currentThread().isInterrupted)throw InterruptedException()
                 check(p.isAlive) {"TurboQuant 시작 실패 · $log 확인"}
