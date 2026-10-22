@@ -49,7 +49,7 @@ class LiveRunnerOperationsTest {
     private fun managerFixture(action:(ServerManager,Instance)->Unit) {
         val manager=ServerManager();val cfg=(manager.create(CreateRequest("snapshot-${UUID.randomUUID()}","0.16.14",java.net.ServerSocket(0).use {it.localPort},512,loader="Fabric"))["config"] as Instance)
         manager.instance(cfg.id).runnerId="runner";manager.runtime(cfg.id).state="STOPPED"
-        val controller=mock(RemoteController::class.java);`when`(controller.supportsLiveFiles(any(Instance::class.java))).thenReturn(true);manager.attachRemoteController(controller)
+        val controller=mock(RemoteController::class.java);`when`(controller.supportsLiveFiles(manager.instance(cfg.id))).thenReturn(true);manager.attachRemoteController(controller)
         try{action(manager,manager.instance(cfg.id))}finally{manager.shutdown();manager.root.resolve(cfg.id).toFile().deleteRecursively()}
     }
     private fun generation(n:Int)="%019d-%s".format(n,UUID.randomUUID())

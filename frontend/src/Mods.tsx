@@ -48,7 +48,7 @@ export function ModsPanel({id,loader,state,canManage,onChanged,onConsole}:{id:st
  if(!['Fabric','Forge','NeoForge'].includes(loader))return <section className="settings-panel"><h2>모드 관리</h2><p>Fabric·Forge·NeoForge 서버에서 사용할 수 있습니다.</p></section>;
  return <section className="mods-panel">
   <div className="mods-heading"><div><h2>모드 관리와 문제 모드 찾기</h2><p>Modrinth에서 확인한 의존성으로 모드를 켜고 끄고, 의심 모드를 골라 문제 원인을 좁혀보세요.</p></div></div>
-  {data?.remote?<p className="notice" role="status">실행기의 실제 mods 폴더를 관리합니다. 실행·전송 중에도 변경할 수 있으며 적용은 다음 서버 시작부터입니다.</p>:running&&<p className="notice" role="status">로컬 서버 실행 중에는 조회만 가능합니다.</p>}
+  {data?.remote?<p className="notice" role="status">실행기의 실제 mods 폴더를 관리합니다. 실행·전송 중에도 변경할 수 있으며 적용은 다음 서버 시작부터입니다.</p>:running&&<p className="notice" role="status">서버가 실행 중이라 모드를 볼 수만 있습니다. 변경하려면 서버를 정지하세요.</p>}
   {error&&<div className="alert error-banner" role="alert">{error}<button onClick={()=>setError('')}>닫기</button></div>}
   {blockedToggle&&<div className="mod-force-notice" role="alert"><span>{blockedToggle.enabled?'활성화':'비활성화'} 불가 · {blockedToggle.reason}</span><button className="mod-force" disabled={locked||blockedToggle.revision!==inv?.revision} onClick={()=>requestPreview(blockedToggle.files,blockedToggle.enabled,true)}>{blockedToggle.enabled?'의존성 무시하고 그냥 켜기':'의존성 무시하고 강제로 끄기'}</button><button onClick={()=>setBlockedToggle(null)}>닫기</button></div>}
   <div className="actions"><button disabled={working||!canManage} onClick={()=>action('/refresh')}>모드 목록 다시 불러오기</button></div>
