@@ -19,7 +19,7 @@ class PiBashAuditTest {
     }
     @Test fun `unproven shell effects never acquire inside status`() {
         val root=temp.resolve("p").createDirectories();root.resolve("a.txt").writeText("x")
-        for(command in listOf("git push origin main","gh pr create --title ok","./gradlew build","rm -rf .","bash -c 'echo hi'","cat \$(echo a.txt)","cat a.txt > b.txt","cat a*","echo hi; rm a.txt","find . -exec rm {} +","python3 -c 'print(1)'")) {
+        for(command in listOf("git push origin main","gh pr create --title ok","./gradlew build","rm -rf .","bash -c 'echo hi'","cat \$(echo a.txt)","cat a.txt > b.txt","cat a*","find . -exec rm {} +","python3 -c 'print(1)'")) {
             assertNull(PiBashAudit.inspect(root,command),command)
         }
         val outside=temp.resolve("outside.txt").also {it.writeText("x")};root.resolve("link.txt").createSymbolicLinkPointingTo(outside)

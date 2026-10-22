@@ -5,7 +5,7 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import java.nio.file.Path
 import kotlin.io.path.*
 
-data class ProjectAgentPreferences(val model:String?=null,val think:Boolean=true,val explicitPermission:Boolean=true,val revision:Long=0)
+data class ProjectAgentPreferences(val model:String?=null,val think:Boolean=true,val explicitPermission:Boolean=true,val revision:Long=0,val toolOutputLimit:Int=PiToolOutput.DEFAULT)
 data class ProjectAgentProject(val name:String,val path:String)
 data class ProjectAgentMessage(val role:String,val content:String,@get:com.fasterxml.jackson.annotation.JsonIgnore val native:String?=null)
 data class ProjectAgentChannel(val guild:String,val channel:String,val user:String,val project:String?,val home:String,val history:List<ProjectAgentMessage> = emptyList(),val contextLimit:Int=4500,val contextEpoch:Long=0,val executionWindow:Int=8192,val outputTokens:Int=2048)
@@ -20,6 +20,8 @@ class ProjectAgentStore(private val directory:Path) {
     private val mapper=jacksonObjectMapper()
     private val file=directory.resolve("project-agent.json")
     private val metadataFile=directory.resolve("project-agent-context.json")
+    private val outputFile=directory.resolve("project-agent-output.json")
+    private var outputLimits:Map<String,Int> = if(outputFile.exists())mapper.readValue(outputFile.readText())else emptyMap()
     private val profilesFile=directory.resolve("project-agent-profiles.json")
     private val profiles=if(profilesFile.exists())mapper.readValue<ProjectAgentProfiles>(profilesFile.readText())else ProjectAgentProfiles()
     private val metadata=if(metadataFile.exists())mapper.readValue<ProjectAgentMetadata>(metadataFile.readText())else ProjectAgentMetadata()
@@ -58,6 +60,7 @@ class ProjectAgentStore(private val directory:Path) {
     private fun persist(next:ProjectAgentData) {
         // Keep the legacy file readable by older beta releases after an application rollback.
         val primary=mapper.valueToTree<com.fasterxml.jackson.databind.node.ObjectNode>(next)
+        primary.path("preferences").elements().forEach {(it as com.fasterxml.jackson.databind.node.ObjectNode).remove("toolOutputLimit")}
         primary.remove("gradleConsent");primary.path("channels").elements().forEach {node->(node as com.fasterxml.jackson.databind.node.ObjectNode).remove(listOf("contextLimit","contextEpoch","executionWindow","outputTokens"))}
         val writer=GeminiKeyPoolStore(directory)
         writer.writePrivate(file,mapper.writeValueAsString(primary))
@@ -65,11 +68,13 @@ class ProjectAgentStore(private val directory:Path) {
         writer.writePrivate(profilesFile,mapper.writeValueAsString(ProjectAgentProfiles(next.channels.mapValues {it.value.executionWindow},next.channels.mapValues {it.value.outputTokens},next.channels.mapValues {it.value.contextLimit},next.channels.mapValues {it.value.contextEpoch})))
         data=next
     }
-    @Synchronized fun preferences(guild:String,user:String)=data.preferences[key(guild,user)] ?: ProjectAgentPreferences()
-    @Synchronized fun settings(guild:String,user:String,model:String?,think:Boolean?,explicit:Boolean?):ProjectAgentPreferences {
+    @Synchronized fun preferences(guild:String,user:String)=(data.preferences[key(guild,user)] ?: ProjectAgentPreferences()).copy(toolOutputLimit=(outputLimits[key(guild,user)] ?: PiToolOutput.DEFAULT).coerceIn(PiToolOutput.MIN,PiToolOutput.MAX))
+    @Synchronized fun settings(guild:String,user:String,model:String?,think:Boolean?,explicit:Boolean?,toolOutputLimit:Int?=null):ProjectAgentPreferences {
         require(model==null || model in LocalLlm.SIZES)
-        val old=preferences(guild,user);val next=old.copy(model=model ?: old.model,think=think ?: old.think,explicitPermission=explicit ?: old.explicitPermission,revision=old.revision+1)
-        persist(data.copy(preferences=data.preferences+(key(guild,user) to next)));return next
+        require(toolOutputLimit==null || toolOutputLimit in PiToolOutput.MIN..PiToolOutput.MAX) {"도구 출력 제한은 ${PiToolOutput.MIN}~${PiToolOutput.MAX}자입니다."}
+        val old=preferences(guild,user);val next=old.copy(model=model ?: old.model,think=think ?: old.think,explicitPermission=explicit ?: old.explicitPermission,revision=old.revision+1,toolOutputLimit=toolOutputLimit ?: old.toolOutputLimit)
+        persist(data.copy(preferences=data.preferences+(key(guild,user) to next)))
+        val outputs=outputLimits+(key(guild,user) to next.toolOutputLimit);GeminiKeyPoolStore(directory).writePrivate(outputFile,mapper.writeValueAsString(outputs));outputLimits=outputs;return next
     }
     @Synchronized fun projects(guild:String,user:String)=data.projects[key(guild,user)].orEmpty()
     @Synchronized fun register(guild:String,user:String,name:String,path:Path):ProjectAgentProject {

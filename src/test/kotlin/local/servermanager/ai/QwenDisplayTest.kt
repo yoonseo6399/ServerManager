@@ -37,6 +37,7 @@ class QwenDisplayTest {
                 else->RETURNS_DEFAULTS.answer(send)
             }}
         }else RETURNS_DEFAULTS.answer(call)}
+        `when`(channel.id).thenReturn("display-test")
         val display=DiscordProjectAgentDisplay(channel,main,"request","14b","run-id",5)
         fun await(check:()->Boolean){val until=System.nanoTime()+3_000_000_000;while(!check() && System.nanoTime()<until)Thread.sleep(2);assertTrue(check())}
         display.emit(ProjectAgentEvent("thinking",1));await {cards.isNotEmpty()};assertTrue(cards.last().second)
@@ -47,6 +48,30 @@ class QwenDisplayTest {
         display.emit(ProjectAgentEvent("done",1,"**final**"));await {texts.last()=="**final**" && !cards.last().second}
         display.emit(ProjectAgentEvent("stream",1,output="late"));Thread.sleep(30);assertEquals("**final**",texts.last())
         assertTrue(cards.all {it.first.description==null})
+    }
+    @Test fun `paging edits the original work card without creating a new embed`() {
+        val edits=CopyOnWriteArrayList<MessageEmbed>();lateinit var original:Message
+        original=mock(Message::class.java){call->if(call.method.name=="editMessageEmbeds") {
+            val a=call.arguments[0];val card=when(a){is Array<*>->a.first() as MessageEmbed;is Collection<*>->a.first() as MessageEmbed;else->a as MessageEmbed}
+            mock(MessageEditAction::class.java){send->when(send.method.name) {
+                "queue"->{edits.add(card);@Suppress("UNCHECKED_CAST") (send.arguments[0] as Consumer<Message>).accept(original);null}
+                else->RETURNS_SELF.answer(send)
+            }}
+        }else RETURNS_DEFAULTS.answer(call)}
+        val channel=mock(TextChannel::class.java);`when`(channel.id).thenReturn("paging-test")
+        val main=mock(Message::class.java,RETURNS_DEEP_STUBS)
+        val id="out-0123456789abcdef"
+        DiscordResultCards.register(channel.id,id,"source",original,net.dv8tion.jda.api.EmbedBuilder().setTitle("원래 Bash 작업").build())
+        val display=DiscordProjectAgentDisplay(channel,main,"request","14b","run")
+        val plan=ProjectAgentPlan(ProjectAgentTool("read_result",com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().createObjectNode().put("id",id)),"/p","원문 이어읽기",true)
+        display.emit(ProjectAgentEvent("tool_start",2,plan=plan,readProgress=ProjectAgentReadProgress(id,1,1,200)))
+        display.emit(ProjectAgentEvent("result_read",2,plan=plan,readProgress=ProjectAgentReadProgress(id,1,40,200)))
+        display.emit(ProjectAgentEvent("tool_start",3,plan=plan,readProgress=ProjectAgentReadProgress(id,41,41,200)))
+        display.emit(ProjectAgentEvent("result_read",3,plan=plan,readProgress=ProjectAgentReadProgress(id,41,80,200)))
+        display.emit(ProjectAgentEvent("tool_end",3,plan=plan))
+        val until=System.nanoTime()+3_000_000_000;while(edits.lastOrNull()?.fields?.lastOrNull()?.value?.contains("80 / 전체 200")!=true && System.nanoTime()<until)Thread.sleep(10)
+        assertEquals("원래 Bash 작업",edits.last().title);assertContains(edits.last().fields.last().name!!,"모델이 결과를 읽는 중");assertContains(edits.last().fields.last().value!!,"80 / 전체 200줄")
+        verify(channel,never()).sendMessageEmbeds(any<MessageEmbed>())
     }
     @Test fun `long markdown fences and unicode fit Discord message limits`() {
         val chunks=DiscordAgentChunks.split("```kotlin\n"+"val 가 = \"😀\"\n".repeat(600)+"```\n끝")
@@ -65,6 +90,7 @@ class QwenDisplayTest {
             val id=++sent;cards[id]=embed(call.arguments[0]);val msg=message(id)
             mock(MessageCreateAction::class.java){action->if(action.method.name=="complete")msg else RETURNS_SELF.answer(action)}
         }else RETURNS_DEFAULTS.answer(call)}
+        `when`(channel.id).thenReturn("display-test")
         val display=DiscordProjectAgentDisplay(channel,message(0),"request","14b","run",5)
         val risk=ProjectAgentRisk("ALLOW","LOW","Qwen3.8 27B · 선택한 임시 파일만 제거","INSIDE")
         fun plan(file:String)=ProjectAgentPlan(ProjectAgentTool("bash",com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().readTree("""{"command":"rm -- $file"}""")),"/fixture","rm -- $file",false,scope="INSIDE")
@@ -89,6 +115,7 @@ class QwenDisplayTest {
             }}}
             else->RETURNS_DEFAULTS.answer(call)
         }}
+        `when`(channel.id).thenReturn("display-test")
         val display=DiscordProjectAgentDisplay(channel,msg,"request","14b","run",filePreview={"original-token"})
         val plan=ProjectAgentPlan(ProjectAgentTool("write",com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().createObjectNode()),"/p","파일 쓰기",false)
         display.emit(ProjectAgentEvent("tool_end",1,"완료",plan,changes=listOf(ProjectAgentFileChange("/p/a.txt","a\n","b\n","--- a.txt\n+++ a.txt\n-a\n+b\n"))))

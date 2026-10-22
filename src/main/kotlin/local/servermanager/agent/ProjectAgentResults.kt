@@ -36,22 +36,26 @@ internal class ProjectAgentResults(private val root:Path,private val now:()->Lon
         directory.resolve("$id.txt").writeText(text.take(MAX_CHARS))
         return id
     }
-    @Synchronized fun read(scope:String,id:String,startLine:Int,lines:Int):String {
+    @Synchronized fun read(scope:String,id:String,startLine:Int,lines:Int,startChar:Int=1):String {
         require(ID.matches(id)) {"결과 ID 형식이 올바르지 않습니다."}
-        require(startLine>=1 && lines in 1..400) {"start_line은 1 이상, lines는 1~400이어야 합니다."}
+        require(startLine>=1 && lines in 1..400 && startChar>=1) {"start_line/start_char는 1 이상, lines는 1~400이어야 합니다."}
         val file=dir(scope).resolve("$id.txt")
         require(file.isRegularFile() && !Files.isSymbolicLink(file)) {"결과를 찾을 수 없습니다. 보관 기간(24시간)이 지났거나 다른 채널의 결과일 수 있습니다."}
-        val all=file.readText().lines()
+        val original=file.readText();val all=original.lines().let {if(original.endsWith("\n") || original.endsWith("\r"))it.dropLast(1)else it}
         val total=all.size
         require(startLine<=total) {"start_line이 총 ${total}줄을 넘었습니다."}
-        val out=StringBuilder();var line=startLine
+        require(startChar<=all[startLine-1].length+1) {"start_char가 해당 줄 길이를 넘었습니다."}
+        val out=StringBuilder();var line=startLine;var offset=startChar;var lastRead=startLine-1
         while(line<=total && line<startLine+lines) {
-            val row="$line: ${all[line-1].take(2000)}\n"
+            val source=all[line-1];val part=source.drop(offset-1).take(2000)
+            val row="$line: $part\n"
             if(out.length+row.length>PAGE_CHARS && out.isNotEmpty())break
-            out.append(row.take(PAGE_CHARS));line++
+            out.append(row);lastRead=line
+            if(offset-1+part.length<source.length){offset+=part.length;out.append("[이 줄 일부 발췌: 다음 문자부터 이어 읽으세요.]\n");break}
+            line++;offset=1
         }
-        val next=if(line<=total)" 이어 읽기: read_result {id:\"$id\",start_line:$line}" else " 끝까지 읽었습니다."
-        return "결과 $id 줄 ${startLine}-${line-1}/$total (줄 번호 접두사는 표시용)\n$out[${next.trim()}]"
+        val next=if(line<=total)" 이어 읽기: read_result {id:\"$id\",start_line:$line,start_char:$offset}" else " 지정한 시작 위치에서 끝까지 읽었습니다."
+        return "결과 $id 줄 ${startLine}-${lastRead}/$total (줄 번호 접두사는 표시용)\n$out[${next.trim()}]"
     }
     private fun prune(directory:Path) {
         val files=Files.list(directory).use {s->s.filter {it.isRegularFile()}.toList()}.sortedBy {it.getLastModifiedTime().toMillis()}

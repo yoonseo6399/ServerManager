@@ -16,6 +16,8 @@ data class ProjectAgentToolResult(val text:String,val full:String,val exitCode:I
 class ProjectAgentTools(private val logs:Path,private val files:ProjectAgentFilePort?=null,private val resultScope:String="shared",private val services:ProjectAgentServicePort?=null,private val register:(String,Path)->Unit={_,_->}) {
     private val mapper=jacksonObjectMapper()
     private val results=ProjectAgentResults(logs)
+    internal fun storePiOutput(text:String)=results.save(resultScope,text)
+    internal fun resultProgress(id:String,start:Int,lines:Int,startChar:Int=1)=ProjectAgentReadProgress.parse(results.read(resultScope,id,start,lines,startChar))
     companion object {
         val names=ProjectAgentServicePort.names+setOf("list_files","read_file","find_files","search_text","write_file","delete_path","run_command","build","test","git","make_new_project","list_attachments","read_attachment","save_attachment","upload_file","sh","edit_file","read_result","search")
         /** Tools each permission tier may even propose. Everything else is refused before planning. */
@@ -34,7 +36,7 @@ edit_file {path,find,replace,replace_all?} OR {path,start_line,end_line,replace}
 write_file {path,content} (new files or explicitly requested complete replacement); delete_path {path}; run_command {command,cwd?,timeout_seconds?} (literal OS shell command);
 build/test {command,cwd?,timeout_seconds?}; git {args:[literal argv],cwd?}; make_new_project {name,path?,repo?}.
 list_attachments {}; read_attachment {message_id,attachment_id,start_line?,lines?}; save_attachment {message_id,attachment_id,path}; upload_file {path}.
-read_result {id,start_line?,lines?}: reads a stored long command output by the id the earlier result named.
+read_result {id,start_line?,lines?,start_char?}: reads a stored long command output by the id the earlier result named.
 search {pattern,path?,glob?,type?,context?,max?,ignore_case?,fixed?} or search {files:true,glob?,path?}: in-process ripgrep-style recursive search (numbered lines, skips build/.git/secrets); prefer it over run_command grep.
 Discord files are restricted to THIS project channel. Read UTF-8 text/code only; no image/PDF interpretation, automatic execution or extraction. Upload is a publication action subject to independent approval; never upload secrets.
 All paths may be absolute or relative to the project home; no fixed allowlist. Read files before overwriting them. Preserve original line endings and final newline unless asked otherwise. read_file line-number prefixes are display metadata, NEVER copy them into write_file content.
@@ -45,7 +47,7 @@ No automatic administrator escalation. Never ask tools to change approval settin
 """+harness
         /** Friends only see the tools their tier can use, in the shorter form that fits a small context window. */
         fun descriptionFor(tier:String):String = if(tier==AgentAccess.OWNER)description else
-            "Tools (one per turn): list_files {path?,limit?}; read_file {path,start_line?,lines?}; find_files {path?,pattern}; search_text {path?,text}; sh {command}; search {pattern,path?,glob?,type?,context?,max?,ignore_case?,fixed?}; read_result {id,start_line?,lines?}; list_attachments {}; read_attachment {message_id,attachment_id,start_line?,lines?}"+
+            "Tools (one per turn): list_files {path?,limit?}; read_file {path,start_line?,lines?}; find_files {path?,pattern}; search_text {path?,text}; sh {command}; search {pattern,path?,glob?,type?,context?,max?,ignore_case?,fixed?}; read_result {id,start_line?,lines?,start_char?}; list_attachments {}; read_attachment {message_id,attachment_id,start_line?,lines?}"+
             (if(tier==AgentAccess.EDIT)"; edit_file {path,find,replace,replace_all?} | {path,start_line,end_line,replace} | {path,insert_after_line,replace}; write_file {path,content} (new small files only). Every edit needs the requester's approval." else ". This channel is READ-ONLY: you cannot change files.")+
             "\nAll paths must stay inside the project home; anything else is refused. Files that may hold secrets (.env, keys, credentials) are never readable.\n"+harness
     }
@@ -103,7 +105,7 @@ No automatic administrator escalation. Never ask tools to change approval settin
             "run_command","build","test"->{val command=args.path("command").asText();require(command.isNotBlank() && command.length<=12000 && !command.contains('\u0000'));"OS 셸 명령: $command"}
             "sh"->{val command=args.path("command").asText();ProjectAgentShell(home).validate(command);"읽기 전용 명령줄: $command"}
             "search"->{searchArgv(args);"프로젝트 검색: ${args.path("pattern").asText().take(200)} (${args.path("path").asText(".")})"}
-            "read_result"->{require(ProjectAgentResults.ID.matches(args.path("id").asText()) && args.path("start_line").asInt(1)>=1 && args.path("lines").asInt(80) in 1..400) {"결과 ID 또는 범위가 올바르지 않습니다."};"보관된 명령 결과 읽기: ${args.path("id").asText()}"}
+            "read_result"->{require(ProjectAgentResults.ID.matches(args.path("id").asText()) && args.path("start_line").asInt(1)>=1 && args.path("lines").asInt(80) in 1..400 && args.path("start_char").asInt(1)>=1) {"결과 ID 또는 범위가 올바르지 않습니다."};"보관된 명령 결과 읽기: ${args.path("id").asText()}"}
             "git"->{require(args.path("args").isArray && args.path("args").size() in 1..40);require(args.path("args").all {it.isTextual && it.asText().length<=2000 && !it.asText().contains('\u0000')});"git 인자(JSON): ${args.path("args")}"}
             "make_new_project"->{
                 val name=args.path("name").asText();require(name.matches(Regex("[\\p{L}\\p{N}_-]{1,60}")))
@@ -158,7 +160,7 @@ No automatic administrator escalation. Never ask tools to change approval settin
         require(plan.tool.name in allowed(tier)) {"이 채널 권한에서는 ${plan.tool.name} 도구를 쓸 수 없습니다."}
         return when(plan.tool.name) {
             "search"->{val r=ProjectAgentShell(home).runArgv(searchArgv(args),active);val text=(if(args.path("files").asBoolean(false))"FILE NAME LIST (not content matches; pattern is ignored in files mode):\n"else "")+r.output.ifBlank {"(일치 없음)"};ProjectAgentToolResult(ProjectAgentContext.summary(text),text,r.status)}
-            "read_result"->{val text=results.read(resultScope,args.path("id").asText(),args.path("start_line").asInt(1),args.path("lines").asInt(80));ProjectAgentToolResult(text,text,0)}
+            "read_result"->{val text=results.read(resultScope,args.path("id").asText(),args.path("start_line").asInt(1),args.path("lines").asInt(80),args.path("start_char").asInt(1));ProjectAgentToolResult(text,text,0)}
             "sh"->{val r=ProjectAgentShell(home).run(args.path("command").asText(),active);val text=r.output.ifBlank {"(출력 없음)"};ProjectAgentToolResult(ProjectAgentContext.summary(text),text,r.status)}
             "edit_file"->{
                 check(!Files.isSymbolicLink(path) && path.isRegularFile() && fingerprint(path)==plan.beforeFingerprint) {"승인 후 파일이 바뀌었습니다. 다시 읽고 요청하세요."}

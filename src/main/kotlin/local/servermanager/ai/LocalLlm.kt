@@ -138,7 +138,7 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
             StrataRuntime.stop()
             unloadQwen(tag(size))
             val body=mapper.writeValueAsString(mapOf("model" to tag(size),"messages" to (if(pi!=null)PiWire.ollamaMessages(pi) else if(native)ProjectAgentNativeTools.wire(messages)else messages),"think" to LocalModels.thinking(size,think),"stream" to true,
-                "keep_alive" to "1m","options" to (mapOf("num_ctx" to budget.window,"num_predict" to budget.output)+if(pi!=null)mapOf("temperature" to pi.path("temperature").asDouble(0.0).coerceIn(0.0,1.0))else if(messages.firstOrNull()?.content?.startsWith("Independent command-risk reviewer")==true)mapOf("temperature" to 0)else emptyMap()))+
+                "keep_alive" to "1m","options" to (mapOf("num_ctx" to budget.window,"num_predict" to budget.output)+if(pi!=null)mapOf("temperature" to pi.path("temperature").asDouble(0.0).coerceIn(0.0,1.0))else if(messages.firstOrNull()?.content?.let {it.startsWith("Independent command-risk reviewer") || it.startsWith("Independent request-aware command-risk reviewer")}==true)mapOf("temperature" to 0)else emptyMap()))+
                 if(pi!=null)mapOf("tools" to pi.path("tools")) else if(native)mapOf("tools" to ProjectAgentNativeTools.definitions(messages.first().content))else mapOf("format" to ProjectAgentFormats.forMessages(messages)))
             trace?.invoke("request",body)
             val request=HttpRequest.newBuilder(endpoint.resolve("/api/chat")).timeout(Duration.ofSeconds(budget.requestTimeoutSeconds.toLong())).header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build()
