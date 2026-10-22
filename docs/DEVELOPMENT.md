@@ -725,3 +725,5 @@ Beta22 태그 기반 feat/turboquant-context ad049a7 통합(solo), 앞선 fix/pi
 실27B65536창/56464입력 표식일치840.32초6.57tok/s, Flash16384창/8607입력 일치1252.95초8.8tok/s. 창 전체·일반코딩품질 검증은 아니며 Flash 긴입력 기본20분 초과 가능. 메모리/첫 중단/실패 원문보존. 로컬655통과29조건부미실행, 관련24·격리설치1·frontend통과. 통합 및 전체 CI/서명/게시 결과는 릴리즈 노트에 기록한다. stable/main/latest·게시태그보존, 운영설치/재시작·자산 재다운로드 해시검사 없음.
 
 Beta23 통합 검증도684보고=655통과/29조건부 미실행/실패0(2m20s). compileKotlin/bootJar 및 npm ci/TS/Vite, Qwen 설정 browser1개 통과. 단일 태그 CI 전체테스트/서명/게시 예정.
+
+Beta23 최초 CI39746909392가683완료/2실패/28스킵으로 게시 전 중단. TCP 연결거부 ConnectException하위타입기대를 SocketException(connect자체, timeout거부)으로 보완. Python AST시험 시작여유15초/실행SIGALRM3초 분리 및 실패출력, 최초원인은미확정. 테스트 실패FULL진단/새실측 UP-TO-DATE캐시금지. 관련20개/전체655통과29스킵/TCP철회3회 통과 후 미게시태그만갱신하여 전체CI재시도.
