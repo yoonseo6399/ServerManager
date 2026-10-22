@@ -109,7 +109,7 @@ No automatic administrator escalation. Never ask tools to change approval settin
             "git"->{require(args.path("args").isArray && args.path("args").size() in 1..40);require(args.path("args").all {it.isTextual && it.asText().length<=2000 && !it.asText().contains('\u0000')});"git 인자(JSON): ${args.path("args")}"}
             "make_new_project"->{
                 val name=args.path("name").asText();require(name.matches(Regex("[\\p{L}\\p{N}_-]{1,60}")))
-                val path=target(home,args.path("path").asText(name));require(!Files.exists(path,LinkOption.NOFOLLOW_LINKS)) {"프로젝트 대상이 이미 존재합니다."}
+                val path=target(home,args.path("path").asText(name));if(Files.exists(path,LinkOption.NOFOLLOW_LINKS))throw PiToolInputException("프로젝트 대상이 이미 존재합니다: $path. 생성/복제는 실행하지 않았습니다. 기존 폴더에서 작업하려면 bash에서 해당 경로로 cd하거나 git -C를 쓰세요. 새 복제는 다른 빈 경로를 지정하세요. 기존 폴더를 임의로 삭제하지 마세요.")
                 val repo=args.path("repo").asText();if(repo.isNotBlank()){val uri=java.net.URI(repo);require(uri.scheme=="https" && uri.host!=null && uri.userInfo==null && uri.rawQuery==null && uri.rawFragment==null) {"인증 정보를 포함하지 않은 HTTPS 저장소 주소를 사용하세요."}}
                 "프로젝트 생성·등록: $name → $path"+(if(repo.isBlank())"" else "\n복제 저장소: $repo")
             }

@@ -26,7 +26,7 @@ internal class PiTestFixture(temp:Path,explicit:Boolean=true,val tier:String=Age
         }
     }
     fun model(risk:String=ALLOW,inputTokens:Int=100,script:(JsonNode)->JsonNode)=Model(risk,inputTokens,script)
-    class Model(private val risk:String,private val tokens:Int,private val script:(JsonNode)->JsonNode):ProjectAgentInference {
+    class Model(var risk:String,private val tokens:Int,private val script:(JsonNode)->JsonNode):ProjectAgentInference {
         val requests=CopyOnWriteArrayList<JsonNode>();val reviews=CopyOnWriteArrayList<List<ProjectAgentMessage>>();var actorCalls=0;private var raw:String?=null
         override fun generate(messages:List<ProjectAgentMessage>,think:Boolean,progress:(QwenProgress)->Unit):String {
             val q=PiWire.decode(messages)

@@ -286,4 +286,34 @@ class PiAgentRuntimeTest {
         assertEquals(1,questions);assertEquals(1,approvals);assertEquals("KEEP",outside.readText())
     }
 
+    @Test fun `existing project input error does not poison a later independently reviewed tool`() {
+        PiTestFixture(temp,false).use {f->val folder=f.home.resolve("Luonotar").createDirectories();folder.resolve("keep.txt").writeText("ORIGINAL");var step=0
+            val model=f.model {q->when(step++){
+                0->PiTestFixture.call("make_new_project",mapOf("name" to "Luonotar","path" to folder.toString()))
+                1->{assertContains(q.toString(),"TOOL_INPUT_ERROR");PiTestFixture.call("bash",mapOf("command" to "test -d Luonotar && printf checked > checked.txt"))}
+                else->PiTestFixture.answer("기존 폴더 확인")
+            }}
+            f.run(model,"기존 Luonotar 폴더 확인")
+            assertEquals("ORIGINAL",folder.resolve("keep.txt").readText());assertEquals("checked",f.home.resolve("checked.txt").readText())
+            assertTrue(f.events.none {it.kind=="denied"});assertEquals(1,model.reviews.size);assertEquals(0,f.events.single {it.kind=="tool_end"}.exitCode)
+        }
+    }
+    @Test fun `fresh authenticated steer permits review again after denial without approving the old operation`() {
+        PiTestFixture(temp,false).use {f->f.home.resolve("note.txt").writeText("SAFE_READ_MARKER");var step=0
+            val entered=java.util.concurrent.CountDownLatch(1);val release=java.util.concurrent.CountDownLatch(1);val accepted=java.util.concurrent.CountDownLatch(1);val failure=java.util.concurrent.atomic.AtomicReference<Throwable>()
+            val model=f.model("""{"action":"DENY","risk":"HIGH","projectScope":"UNKNOWN","reason":"시험 명령 거부"}""") {q->when(step++){
+                0->PiTestFixture.call("bash",mapOf("command" to "touch must-not-exist"))
+                1->{assertContains(q.toString(),"EXECUTION_DENIED");entered.countDown();check(release.await(10,java.util.concurrent.TimeUnit.SECONDS));PiTestFixture.call("read",mapOf("path" to "note.txt"))}
+                else->{assertContains(q.toString(),"SAFE_READ_MARKER");PiTestFixture.answer("새 요청의 읽기만 실행")}
+            }}
+            val runner=Thread {try {f.run(model,onEvent={if(it.kind=="steer")accepted.countDown()})}catch(t:Throwable){failure.set(t)}}
+            try {
+                runner.start();assertTrue(entered.await(10,java.util.concurrent.TimeUnit.SECONDS));assertTrue(f.engine.steer("c","u","앞선 명령은 하지 말고 note.txt만 읽어줘"));assertTrue(accepted.await(3,java.util.concurrent.TimeUnit.SECONDS))
+                model.risk=PiTestFixture.ALLOW;release.countDown();runner.join(15000);assertFalse(runner.isAlive);failure.get()?.let {throw it}
+                assertFalse(f.home.resolve("must-not-exist").exists());assertEquals(listOf("read"),f.events.filter {it.kind=="tool_start"}.map {it.plan!!.tool.name});assertEquals(2,model.reviews.size)
+                assertContains(model.reviews.last().last().content,"note.txt만 읽어줘")
+            }finally {release.countDown();f.engine.stop("c","u");runner.join(3000)}
+        }
+    }
+
 }

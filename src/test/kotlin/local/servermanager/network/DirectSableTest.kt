@@ -14,7 +14,6 @@ import kotlin.test.*
 
 class DirectSableTest {
     private fun await(message:String,check:()->Boolean) {val end=System.nanoTime()+10_000_000_000;while(!check()){assertTrue(System.nanoTime()<end,message);Thread.sleep(20)}}
-    private fun port()=ServerSocket(0).use {it.localPort}
     private fun handshake(host:String):ByteArray {
         fun v(out:ByteArrayOutputStream,n:Int){var x=n;do {val b=x and 127;x=x ushr 7;out.write(b or if(x!=0)128 else 0)}while(x!=0)}
         val b=ByteArrayOutputStream();v(b,0);v(b,767);v(b,host.length);b.write(host.toByteArray());b.write(26);b.write(44);v(b,2)
@@ -34,8 +33,8 @@ class DirectSableTest {
     }
     private fun fixture(conflict:Boolean=false):Fixture {
         val relay=UUID.randomUUID().toString();val agentId=UUID.randomUUID().toString();val secret=DirectRelayCrypto.newSecret();val game=Game()
-        val public=port();var secure=port();while(secure==public)secure=port()
-        val hub=DirectRelayHub(relay,secret);assertTrue(hub.listen(public,secure,"127.0.0.1"))
+        val hub=DirectRelayHub(relay,secret);assertTrue(hub.listen(0,0,"127.0.0.1"),hub.status().toString())
+        val public=hub.gamePort!!;val secure=hub.securePort!!
         hub.applyPolicy(RelayPolicy(1,mapOf(agentId to 1),listOf(RelayRoute("a.example.com",agentId,"a"))))
         if(conflict)DatagramSocket(public).use {hub.sableUdp(true,public,"127.0.0.1");assertEquals("ERROR",hub.status().sableUdp?.state)} else hub.sableUdp(true,public,"127.0.0.1")
         val enabled=AtomicBoolean(true)
