@@ -12,42 +12,82 @@ import java.util.function.Consumer
 import kotlin.test.*
 
 class QwenDisplayTest {
-    @Test fun `thinking and markdown answers use plain messages while status stays in embeds`() {
-        val cards=CopyOnWriteArrayList<Pair<MessageEmbed,Boolean>>();val texts=CopyOnWriteArrayList<String>()
-        lateinit var main:Message
-        fun edit(card:MessageEmbed?=null,text:String?=null):MessageEditAction {
-            var buttons=false
-            return mock(MessageEditAction::class.java){call->when(call.method.name){
-                "setComponents"->{buttons=(call.arguments[0] as Collection<*>).isNotEmpty();call.mock}
-                "setAllowedMentions"->call.mock
-                "queue"->{if(card!=null)cards.add(card to buttons);if(text!=null)texts.add(text);@Suppress("UNCHECKED_CAST") (call.arguments[0] as Consumer<Message>).accept(main);null}
-                else->RETURNS_DEFAULTS.answer(call)
+    private class Screen {
+        data class Row(val id:Int,var card:MessageEmbed?=null,var text:String?=null,var buttons:Boolean=false,var deleted:Boolean=false)
+        val rows=CopyOnWriteArrayList<Row>();val calls=CopyOnWriteArrayList<Pair<Int,String>>()
+        private fun embed(a:Any?):MessageEmbed=when(a){is Array<*>->a.first() as MessageEmbed;is Collection<*>->a.first() as MessageEmbed;else->a as MessageEmbed}
+        fun message(row:Row):Message {
+            lateinit var msg:Message
+            fun edit(card:MessageEmbed?=null,text:String?=null):MessageEditAction {
+                var buttons:Boolean?=null
+                fun apply(){if(card!=null){row.card=card;calls.add(row.id to card.title.orEmpty())};if(text!=null)row.text=text;buttons?.let {row.buttons=it}}
+                return mock(MessageEditAction::class.java){c->when(c.method.name){
+                    "setComponents"->{buttons=when(val a=c.arguments[0]){is Collection<*>->a.isNotEmpty();is Array<*>->a.isNotEmpty();else->a!=null};c.mock}
+                    "queue"->{apply();@Suppress("UNCHECKED_CAST") (c.arguments[0] as Consumer<Message>).accept(msg);null}
+                    "complete"->{apply();msg}
+                    else->RETURNS_SELF.answer(c)
+                }}
+            }
+            msg=mock(Message::class.java){c->when(c.method.name){
+                "editMessageEmbeds"->edit(card=embed(c.arguments[0]))
+                "editMessage"->edit(text=c.arguments[0].toString())
+                "editMessageComponents"->edit().also {it.setComponents(emptyList())}
+                "delete"->mock(net.dv8tion.jda.api.requests.restaction.AuditableRestAction::class.java){q->if(q.method.name=="queue"){row.deleted=true;null}else RETURNS_SELF.answer(q)}
+                else->RETURNS_DEEP_STUBS.answer(c)
             }}
+            return msg
         }
-        main=mock(Message::class.java){call->when(call.method.name){
-            "editMessageEmbeds"->{val a=call.arguments[0];edit(card=when(a){is Array<*>->a.first() as MessageEmbed;is Collection<*>->a.first() as MessageEmbed;else->a as MessageEmbed})}
-            "editMessage"->edit(text=call.arguments[0].toString())
-            else->RETURNS_DEFAULTS.answer(call)
+        val top=Row(0).also {rows.add(it)};val main=message(top)
+        val channel=mock(TextChannel::class.java){c->when(c.method.name){
+            "getId"->"status-fixture"
+            "sendMessageEmbeds","sendMessage"->{
+                val row=Row(rows.size,if(c.method.name=="sendMessageEmbeds")embed(c.arguments[0])else null,if(c.method.name=="sendMessage")c.arguments[0].toString()else null)
+                val msg=message(row)
+                mock(MessageCreateAction::class.java){q->when(q.method.name){
+                    "setComponents"->{row.buttons=when(val a=q.arguments[0]){is Collection<*>->a.isNotEmpty();is Array<*>->a.isNotEmpty();else->a!=null};q.mock}
+                    "complete"->{rows.add(row);msg}
+                    "queue"->{rows.add(row);@Suppress("UNCHECKED_CAST") (q.arguments[0] as Consumer<Message>).accept(msg);null}
+                    else->RETURNS_SELF.answer(q)
+                }}
+            }
+            else->RETURNS_DEEP_STUBS.answer(c)
         }}
-        val channel=mock(TextChannel::class.java){call->if(call.method.name=="sendMessage"){
-            val text=call.arguments[0].toString()
-            mock(MessageCreateAction::class.java){send->when(send.method.name){
-                "setAllowedMentions"->send.mock
-                "queue"->{texts.add(text);@Suppress("UNCHECKED_CAST") (send.arguments[0] as Consumer<Message>).accept(main);null}
-                else->RETURNS_DEFAULTS.answer(send)
-            }}
-        }else RETURNS_DEFAULTS.answer(call)}
-        `when`(channel.id).thenReturn("display-test")
-        val display=DiscordProjectAgentDisplay(channel,main,"request","14b","run-id",5)
-        fun await(check:()->Boolean){val until=System.nanoTime()+3_000_000_000;while(!check() && System.nanoTime()<until)Thread.sleep(2);assertTrue(check())}
-        display.emit(ProjectAgentEvent("thinking",1));await {cards.isNotEmpty()};assertTrue(cards.last().second)
+        fun waitFor(check:()->Boolean){val until=System.nanoTime()+3_000_000_000;while(!check() && System.nanoTime()<until)Thread.sleep(2);assertTrue(check())}
+    }
+    @Test fun `thinking and markdown answers stay plain and live status follows new answer messages`() {
+        val s=Screen();val display=DiscordProjectAgentDisplay(s.channel,s.main,"request","14b","run-id",5)
+        display.emit(ProjectAgentEvent("thinking",1));s.waitFor {s.rows.size==2};assertTrue(s.rows.last().buttons)
         display.emit(ProjectAgentEvent("usage",1,usage=QwenUsage(tokensPerSecond=13.5,memory=LlmMemory(totalBytes=24L*1073741824,usedBytes=18L*1073741824))))
-        await {cards.last().first.footer?.text?.contains("13.5 tok/s")==true};assertContains(cards.last().first.footer!!.text!!,"18.0/24.0 GiB")
-        display.emit(ProjectAgentEvent("stream",1,output="actual thought"));await {texts.contains("‘actual thought’")}
-        display.emit(ProjectAgentEvent("stream",1,text="**answer**"));await {texts.last()=="**answer**"}
-        display.emit(ProjectAgentEvent("done",1,"**final**"));await {texts.last()=="**final**" && !cards.last().second}
-        display.emit(ProjectAgentEvent("stream",1,output="late"));Thread.sleep(30);assertEquals("**final**",texts.last())
-        assertTrue(cards.all {it.first.description==null})
+        s.waitFor {s.top.card?.footer?.text?.contains("13.5 tok/s")==true};assertContains(s.top.card!!.footer!!.text!!,"18.0/24.0 GiB")
+        display.emit(ProjectAgentEvent("stream",1,output="actual thought"));s.waitFor {s.rows.any {it.text=="‘actual thought’"} && s.rows.last().card?.title?.startsWith("상태창")==true}
+        assertTrue(s.rows[1].deleted,"Old live placeholder should move below the new plain message")
+        display.emit(ProjectAgentEvent("stream",1,text="**answer**"));s.waitFor {s.rows.any {it.text=="**answer**"}}
+        display.emit(ProjectAgentEvent("done",1,"**final**"));s.waitFor {s.rows.any {it.text=="**final**"} && !s.rows.last().buttons}
+        display.emit(ProjectAgentEvent("stream",1,output="late"));Thread.sleep(30);assertTrue(s.rows.none {it.text?.contains("late")==true})
+        assertEquals("request",s.top.card!!.description);assertFalse(s.top.buttons)
+    }
+    @Test fun `live status becomes the same tool card and next actor turn gets a new bottom status`() {
+        val s=Screen();val display=DiscordProjectAgentDisplay(s.channel,s.main,"request","14b","run",5)
+        val plan=ProjectAgentPlan(ProjectAgentTool("read",com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().createObjectNode().put("path","a.txt")),"/fixture","read a.txt",true)
+        val risk=ProjectAgentRisk("ALLOW","LOW","요청한 조회","INSIDE")
+        display.emit(ProjectAgentEvent("thinking",1));display.emit(ProjectAgentEvent("usage",1,usage=QwenUsage(tokensPerSecond=13.5)));val slot=s.rows.last();val count=s.rows.size
+        display.emit(ProjectAgentEvent("approval",1,plan=plan,risk=risk,token="t",callId="c"));assertEquals(count,s.rows.size);assertContains(slot.card!!.title!!,"승인 대기")
+        display.emit(ProjectAgentEvent("tool_start",1,plan=plan,risk=risk,callId="c"));assertEquals(count,s.rows.size);assertContains(slot.card!!.title!!,"도구 실행 중")
+        display.emit(ProjectAgentEvent("tool_end",1,"종료 코드 0",plan,risk,callId="c"));s.waitFor {slot.card!!.title!!.contains("초")}
+        val completed=slot.card
+        display.emit(ProjectAgentEvent("thinking",2));assertEquals(count+1,s.rows.size);assertTrue(s.rows.last().card!!.title!!.startsWith("상태창 · 턴 2"))
+        s.waitFor {s.top.card?.footer?.text?.contains("13.5 tok/s")==true};Thread.sleep(40);assertEquals(completed,slot.card,"Delayed status updates must not overwrite the tool card")
+        display.emit(ProjectAgentEvent("done",2,"완료"));s.waitFor {!s.rows.last().buttons}
+    }
+    @Test fun `question card keeps selected answer and requester including full custom text`() {
+        val s=Screen();val display=DiscordProjectAgentDisplay(s.channel,s.main,"request","14b","run",5)
+        val plan=ProjectAgentPlan(ProjectAgentTool("ask_user",com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().readTree("""{"question":"어떤 브랜치?","choices":["beta20","beta21"]}""")),"/fixture","question",true)
+        display.emit(ProjectAgentEvent("question",1,"어떤 브랜치?",plan,token="q"))
+        val row=s.rows.single {it.card?.title=="루오의 질문"}
+        display.emit(ProjectAgentEvent("question_answered",1,"beta21",plan,token="q",requesterId="123"))
+        s.waitFor {row.card?.title?.contains("답변 완료")==true};assertEquals("beta21",row.card!!.fields.single().value);assertContains(row.card!!.footer!!.text!!,"123");assertFalse(row.buttons)
+        val custom="x".repeat(2000);val card=DiscordQuestionAnswer.embed("question",custom,"123")
+        assertEquals(custom,card.fields.joinToString(""){it.value.orEmpty()});assertTrue(card.fields.all {it.value!!.length<=1024})
     }
     @Test fun `paging edits the original work card without creating a new embed`() {
         val edits=CopyOnWriteArrayList<MessageEmbed>();lateinit var original:Message

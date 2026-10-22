@@ -18,7 +18,7 @@ def literal(file, prefix):
 
 def document():
     engine = (SOURCE / 'agent/ProjectAgentEngine.kt').read_text()
-    risk = re.search(r'ProjectAgentMessage\("system","""(Independent command-risk reviewer.*?)"""\)', engine, re.S)
+    risk = re.search(r'ProjectAgentMessage\("system","""(Independent (?:request-aware )?command-risk reviewer.*?)"""\)', engine, re.S)
     bridge = (ROOT / 'src/main/resources/pi/bridge.mjs').read_text()
     compact = re.search(r"session\.compact\('([^']*)'\)", bridge)
     if not risk or not compact:

@@ -117,9 +117,9 @@ class PiAgentRuntimeTest {
         server.start()
         try {
             git(working,"remote","set-url","origin","http://127.0.0.1:${server.address.port}/origin.git")
-            var step=0;val model=Model(risk="""{"action":"ASK","risk":"MEDIUM","projectScope":"INSIDE","userAuthorized":true,"reason":"사용자가 해당 저장소의 원격 최신화를 명시 요청함"}""") {if(step++==0)call("bash",mapOf("command" to "cd repo && git pull --ff-only"))else answer("업데이트 완료")}
+            var step=0;val model=Model(risk="""{"action":"ASK","risk":"MEDIUM","projectScope":"INSIDE","userAuthorized":true,"reason":"사용자가 해당 저장소의 원격 최신화를 명시 요청함"}""") {if(step++==0)call("bash",mapOf("command" to "cd repo && git fetch --all --prune 2>&1 | tail -5; git branch -a | grep main; git pull --ff-only && git checkout -b beta21 && git status -sb"))else answer("업데이트 완료")}
             engine.use {e->e.run("channel","user","repo를 원격 최신 파일로 업데이트해줘",store.settings("guild","user",null,null,false),model,{},{event->assertNotEquals("approval",event.kind)})}
-            assertEquals("AFTER",working.resolve("data.txt").readText());assertEquals(1,model.riskCalls)
+            assertEquals("AFTER",working.resolve("data.txt").readText());assertTrue(working.resolve(".git/refs/heads/beta21").exists());assertEquals(1,model.riskCalls)
             assertEquals(listOf("repo를 원격 최신 파일로 업데이트해줘"),mapper.readTree(model.riskRequests.single().last().content).path("authenticated_human_requests").map {it.asText()})
         } finally {server.stop(0);engine.close()}
     }
@@ -148,12 +148,12 @@ class PiAgentRuntimeTest {
         assertEquals("APPROVED_CONTENT",file.readText())
     }
     @Test fun `question accepts custom text outside the proposed choices and grants no execution permission`() {
-        val (store,engine,limits)=setup();var asked=false
+        val (store,engine,limits)=setup();var asked=false;var received=""
         val model=Model {q->if(q.path("messages").toString().contains("CUSTOM_CHOICE_725"))answer("답변 확인")else call("ask_user",mapOf("question" to "어떤 이름으로 할까요?","choices" to listOf("A","B")))}
         engine.use {e->e.run("channel","user","Tester","질문해줘",store.preferences("guild","user"),model,limits,{},{event->if(event.kind=="question") {
             asked=true;assertTrue(e.answerQuestion("channel","user",null,"CUSTOM_CHOICE_725"){})
-        }})}
-        assertTrue(asked);assertTrue(model.requests.last().toString().contains("execution_approved"))
+        };if(event.kind=="question_answered")received=event.text})}
+        assertTrue(asked);assertEquals("CUSTOM_CHOICE_725",received);assertTrue(model.requests.last().toString().contains("execution_approved"))
     }
     @Test fun `script content is independently reviewed and denial reason returns without executing it`() {
         val (store,engine,limits)=setup();val home=Path.of(store.channel("channel")!!.home);val marker=home.resolve("should-not-exist")
@@ -191,9 +191,9 @@ class PiAgentRuntimeTest {
         assertFails {policy.check("read",mapper.valueToTree(mapOf("path" to temp.resolve("outside.txt").toString())))}
         val before=store.piState(c);val next=store.context("channel","user",window=16384);assertEquals(before,store.piState(next));val reset=store.context("channel","user",reset=true);assertNotEquals(before,store.piState(reset));assertEquals(c.home,reset.home);engine.close()
     }
-    @Test fun `runtime credentials are protected even for owner`() {
+    @Test fun `owner file names do not trigger backend denial before review`() {
         val (store,engine,_)=setup();val c=store.channel("channel")!!;val key=store.profileDirectory.resolve("pi-sessions/token.json");key.parent.createDirectories();key.writeText("not a real key");val policy=PiToolPolicy(store.profileDirectory,Path.of(c.home),ProjectAgentTools(temp.resolve("logs")),AgentAccess.OWNER)
-        assertFails {policy.check("read",mapper.valueToTree(mapOf("path" to key.toString())))};assertFails {policy.check("edit",mapper.valueToTree(mapOf("path" to key.toString(),"edits" to emptyList<Any>())))};engine.close()
+        assertNotNull(policy.check("read",mapper.valueToTree(mapOf("path" to key.toString()))));assertNotNull(policy.check("edit",mapper.valueToTree(mapOf("path" to key.toString(),"edits" to emptyList<Any>()))));engine.close()
     }
     @Test fun `wire preserves multiple tools and text blocks and rejects images`() {
         val raw=mapper.valueToTree<JsonNode>(mapOf("messages" to listOf(mapOf("role" to "user","content" to listOf(mapOf("type" to "text","text" to "원문"))))))
@@ -201,12 +201,12 @@ class PiAgentRuntimeTest {
         assertFails {PiWire.decode(listOf(ProjectAgentMessage("system",PiWire.PREFIX+"""{"messages":[{"role":"user","content":[{"type":"image_url","image_url":{}}]}]}""")))}
         val c=mapper.readTree("""{"function":{"name":"read","arguments":{"path":"a.txt"}}}""");val a=mapper.readTree(PiWire.assistant("",listOf(c,c)));assertEquals(2,a.path("tool_calls").size());assertNotEquals(a.path("tool_calls")[0].path("id").asText(),a.path("tool_calls")[1].path("id").asText())
     }
-    @Test fun `outside change still asks and approval cannot authorize a changed file`() {
+    @Test fun `reviewer outside ask requires approval without backend fingerprint veto`() {
         val (store,engine,limits)=setup();val outside=temp.resolve("outside.txt");outside.writeText("before");var step=0;var asks=0
         val preferences=store.settings("guild","user",null,null,false)
-        val model=Model {when(step++){0->call("write",mapOf("path" to outside.toString(),"content" to "not authorized"));else->answer("경로 상태가 바뀌어 실행하지 않았습니다.")}}
+        val model=Model(risk="""{"action":"ASK","risk":"MEDIUM","projectScope":"OUTSIDE","reason":"외부 변경 확인"}""") {when(step++){0->call("write",mapOf("path" to outside.toString(),"content" to "approved write"));else->answer("승인 후 변경했습니다.")}}
         engine.use {it.run("channel","user","외부 파일 변경",preferences,model,{},{e->if(e.kind=="approval"){asks++;assertFails {it.approve("channel","other",e.token!!,true){}};outside.writeText("external concurrent change");it.approve("channel","user",e.token!!,true){}}})}
-        assertEquals(1,asks);assertEquals("external concurrent change",outside.readText())
+        assertEquals(1,asks);assertEquals("approved write",outside.readText())
     }
     @Test fun `stop kills a live native shell and permits the next request`() {
         val (store,engine,limits)=setup();val started=java.util.concurrent.CountDownLatch(1);var output="";var step=0
@@ -267,20 +267,20 @@ class PiAgentRuntimeTest {
     }
     @Test fun `denied git reaches acting model as not executed and cannot be retried`() {
         val (store,engine,_)=setup();var step=0;var asks=0
-        val model=Model {q->when(step++){0->call("bash",mapOf("command" to "git push origin main"));else->{val results=q.path("messages").filter {it.path("role").asText()=="tool"}.joinToString {it.path("content").asText()};assertContains(results,"EXECUTION_DENIED");assertContains(results,"실행되지 않았습니다");answer("승인이 거절되어 push하지 않았습니다.")}}}
+        val model=Model(risk="""{"action":"ASK","risk":"MEDIUM","projectScope":"INSIDE","reason":"push 명시 승인 필요"}""") {q->when(step++){0->call("bash",mapOf("command" to "git push origin main"));else->{val results=q.path("messages").filter {it.path("role").asText()=="tool"}.joinToString {it.path("content").asText()};assertContains(results,"EXECUTION_DENIED");assertContains(results,"실행되지 않았습니다");answer("승인이 거절되어 push하지 않았습니다.")}}}
         val pref=store.settings("guild","user",null,null,false)
         engine.use {it.run("channel","user","push 해줘",pref,model,{},{event->if(event.kind=="approval"){asks++;it.approve("channel","user",event.token!!,false){}};assertNotEquals("tool_start",event.kind)})}
         assertEquals(1,asks)
     }
-    @Test fun `ordinary outside read may proceed after exact owner approval despite advisory deny`() {
+    @Test fun `model denial stays denied even for ordinary outside read`() {
         val (store,engine,_)=setup();val outside=temp.resolve("outside.txt").also {it.writeText("OUTSIDE_VERIFIED")};var step=0;var asks=0
-        val model=Model(risk="""{"action":"DENY","risk":"HIGH","reason":"외부 경로","projectScope":"OUTSIDE"}""") {q->when(step++){0->call("read",mapOf("path" to outside.toString()));else->{assertContains(q.path("messages").toString(),"OUTSIDE_VERIFIED");answer("승인 후 조회했습니다.")}}}
+        val model=Model(risk="""{"action":"DENY","risk":"HIGH","reason":"외부 경로","projectScope":"OUTSIDE"}""") {q->when(step++){0->call("read",mapOf("path" to outside.toString()));else->{assertContains(q.path("messages").toString(),"EXECUTION_DENIED");answer("거부되어 읽지 않았습니다.")}}}
         val pref=store.settings("guild","user",null,null,false)
-        engine.use {it.run("channel","user","외부 파일 읽기",pref,model,{},{event->if(event.kind=="approval"){asks++;it.approve("channel","user",event.token!!,true){}}})};assertEquals(1,asks)
+        engine.use {it.run("channel","user","외부 파일 읽기",pref,model,{},{event->if(event.kind=="approval"){asks++;it.approve("channel","user",event.token!!,true){}}})};assertEquals(0,asks);assertEquals(2,model.actorCalls)
     }
     @Test fun `choice answer is data only and grants no permission to following outside write`() {
         val (store,engine,_)=setup();val outside=temp.resolve("outside.txt").also {it.writeText("KEEP")};var step=0;var questions=0;var approvals=0
-        val model=Model {q->when(step++){0->call("ask_user",mapOf("question" to "어떤 파일을 변경할까요?","choices" to listOf("외부 파일","프로젝트 파일")));1->{assertContains(q.path("messages").toString(),"execution_approved");call("write",mapOf("path" to outside.toString(),"content" to "must not write"))};else->answer("질문 답변은 받았지만 실행 승인이 없어 변경하지 않았습니다.")}}
+        val model=Model(risk="""{"action":"ASK","risk":"MEDIUM","projectScope":"OUTSIDE","reason":"외부 변경 확인"}""") {q->when(step++){0->call("ask_user",mapOf("question" to "어떤 파일을 변경할까요?","choices" to listOf("외부 파일","프로젝트 파일")));1->{assertContains(q.path("messages").toString(),"execution_approved");call("write",mapOf("path" to outside.toString(),"content" to "must not write"))};else->answer("질문 답변은 받았지만 실행 승인이 없어 변경하지 않았습니다.")}}
         val pref=store.settings("guild","user",null,null,false)
         engine.use {e->e.run("channel","user","파일 선택 후 처리",pref,model,{},{event->if(event.kind=="question"){questions++;assertFails {e.answerQuestion("channel","other",event.token!!,"0") {}};assertTrue(e.answerQuestion("channel","user",event.token!!,"0") {});assertFails {e.answerQuestion("channel","user",event.token!!,"0") {}}};if(event.kind=="approval"){approvals++;e.approve("channel","user",event.token!!,false){}}})}
         assertEquals(1,questions);assertEquals(1,approvals);assertEquals("KEEP",outside.readText())

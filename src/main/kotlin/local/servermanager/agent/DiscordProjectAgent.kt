@@ -322,7 +322,14 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
                 check(approval.channel==session.channel && approval.user==event.user.id && approval.epoch==session.contextEpoch && approval.revision==store.preferences(session.guild,session.user).revision && java.time.Instant.now().isBefore(approval.until)) {"요청·설정이 바뀌었거나 승인이 만료됐습니다."}
                 check(approval.result.complete(parts[1]=="memory")) {"이미 처리했습니다."};hook.editOriginalComponents(emptyList()).queue({}, {});return@submit
             }
-            if(parts[1]=="answer"){check(parts.size==4);engine.answerQuestion(event.channel.id,event.user.id,parts[2],parts[3]){privateAccess(event.jda,session)};hook.editOriginalComponents(emptyList()).queue({}, {});return@submit}
+            if(parts[1]=="answer"){
+                check(parts.size==4)
+                val question=event.message.embeds.firstOrNull() ?: error("질문 메시지를 찾을 수 없습니다.")
+                val selected=event.button.label
+                engine.answerQuestion(event.channel.id,event.user.id,parts[2],parts[3]){privateAccess(event.jda,session)}
+                hook.editOriginalEmbeds(DiscordQuestionAnswer.embed(question.description.orEmpty(),selected,event.user.id)).setComponents(emptyList()).setAllowedMentions(emptyList()).queue({}, {})
+                return@submit
+            }
             check(parts.size==3)
             if(parts[1]=="stop"){jobs.stop(event.channel.id,event.user.id,parts[2]);engine.stop(event.channel.id,event.user.id);hook.sendMessage("생성 중지 요청을 보냈습니다.").setEphemeral(true).queue({}, {});return@submit}
             engine.approve(event.channel.id,event.user.id,parts[2],parts[1]=="allow") {privateAccess(event.jda,session)}
@@ -421,19 +428,49 @@ internal class DiscordProjectAgentDisplay(private val channel:TextChannel,privat
     private val readResults=mutableSetOf<String>();private val cardBases=mutableMapOf<String,net.dv8tion.jda.api.entities.MessageEmbed>();private val turns=mutableMapOf<String,Message>();private val threads=mutableMapOf<String,ThreadChannel>()
     private val replies=mutableMapOf<Int,DiscordAgentText>();private val logs=mutableMapOf<String,Pair<StringBuilder,DiscordAgentText>>()
     private var usage:QwenUsage?=null;private var finished=false
-    private val edits=CoalescedMessageEdits<Pair<net.dv8tion.jda.api.entities.MessageEmbed,Boolean>>({snapshot,complete->
-        val buttons=if(snapshot.second)emptyList() else listOf(ActionRow.of(Button.danger("qa:stop:$jobId","에이전트 중지")))
-        main.editMessageEmbeds(snapshot.first).setComponents(buttons).setAllowedMentions(emptyList()).queue({complete()},{complete()})
+    private class StatusSlot(val message:Message) {var active=true;lateinit var edits:CoalescedMessageEdits<net.dv8tion.jda.api.entities.MessageEmbed>}
+    private var live:StatusSlot?=null
+    private var actorTurn=0
+    private var latestStatus="요청 인식 완료"
+    private fun controls()=listOf(ActionRow.of(Button.danger("qa:stop:$jobId","에이전트 중지")))
+    private val summaryEdits=CoalescedMessageEdits<net.dv8tion.jda.api.entities.MessageEmbed>({card,complete->
+        main.editMessageEmbeds(card).setComponents(emptyList()).setAllowedMentions(emptyList()).queue({complete()},{complete()})
     },intervalMillis=editIntervalMillis)
     private fun footer()=usage?.let(QwenMetricsText::footer) ?: "입력·출력 토큰 대기"
-    private fun render(status:String,done:Boolean=false){edits.offer(EmbedBuilder().setTitle("Pi · ${LocalModels.label(model)} · $status").setFooter(footer()).build() to done,done)}
-    private fun reply(turn:Int)=replies.getOrPut(turn){DiscordAgentText(channel,editIntervalMillis)}
+    private fun summary(status:String,done:Boolean=false){summaryEdits.offer(EmbedBuilder().setTitle("Pi · ${LocalModels.label(model)} · ${if(done)status else "작업 요약"}").setDescription(request.take(1800)).addField("진행",status.take(1024),false).setFooter(footer()).build(),done)}
+    private fun statusCard(status:String)=EmbedBuilder().setTitle("상태창 · 턴 ${tn(actorTurn)} · $status".take(250)).setFooter(footer()).build()
+    private fun statusSlot():StatusSlot {
+        live?.let {return it}
+        val slot=StatusSlot(channel.sendMessageEmbeds(statusCard(latestStatus)).setComponents(controls()).setAllowedMentions(emptyList()).complete())
+        slot.edits=CoalescedMessageEdits({card,complete->synchronized(this){
+            if(!slot.active){complete()}else slot.message.editMessageEmbeds(card).setAllowedMentions(emptyList()).queue({complete()},{complete()})
+        }},intervalMillis=editIntervalMillis)
+        live=slot;return slot
+    }
+    private fun retireStatus():Message? {
+        val slot=live ?: return null
+        slot.active=false;slot.edits.cancel();live=null
+        return slot.message
+    }
+    private fun render(status:String,done:Boolean=false){
+        latestStatus=status;summary(status,done)
+        if(done){retireStatus()?.editMessageEmbeds(statusCard(status))?.setComponents(emptyList())?.setAllowedMentions(emptyList())?.queue({}, {});return}
+        // A status converted to a tool card stays a tool card until the next actor turn.
+        if(live!=null || turns.isEmpty())statusSlot().edits.offer(statusCard(status))
+    }
+    @Synchronized private fun textPosted(){
+        if(finished)return
+        // Discord cannot reorder messages. Replace only the live placeholder after a
+        // new answer chunk, preserving every completed tool card and the top summary.
+        if(live!=null){retireStatus()?.delete()?.queue({}, {});statusSlot()}
+    }
+    private fun reply(turn:Int)=replies.getOrPut(turn){DiscordAgentText(channel,editIntervalMillis,::textPosted)}
     @Synchronized fun emit(event:ProjectAgentEvent) {
         if(finished)return
         val key=event.callId ?: "turn:${event.turn}"
         if(event.plan?.tool?.name=="read_result" && event.kind in setOf("tool_start","result_read","tool_end","denied")) {
             if(event.kind=="denied" || event.kind=="tool_end" && event.text.startsWith("도구 오류"))render("결과 읽기 실패 · ${event.text.take(120)}")
-            event.readProgress?.let {p->readResults.add(p.id);DiscordResultCards.reading(channel.id,p);render("모델이 결과를 읽는 중… ${p.id} · ${p.current}/${p.total}줄")}
+            event.readProgress?.let {p->readResults.add(p.id);DiscordResultCards.reading(channel.id,p);summary("모델이 결과를 읽는 중… ${p.id} · ${p.current}/${p.total}줄");live?.edits?.offer(statusCard("결과 조회 · ${p.current}/${p.total}줄"))}
             return
         }
         when(event.kind){
@@ -441,7 +478,11 @@ internal class DiscordProjectAgentDisplay(private val channel:TextChannel,privat
             "status"->render("턴 ${tn(event.turn)} · ${event.text}")
             "ledger"->render("턴 ${tn(event.turn)} · 📋 ${event.text.take(200)}")
             "steer"->render("턴 ${tn(event.turn)} · 🧭 개입 반영: ${event.text.take(120).replace('\n',' ')}")
-            "thinking"->{usage=event.usage;render("턴 ${tn(event.turn)} · 모델 응답 대기")}
+            "thinking"->{
+                event.usage?.let {usage=it}
+                if(actorTurn!=event.turn){retireStatus()?.delete()?.queue({}, {});actorTurn=event.turn;latestStatus="모델 응답 대기";statusSlot()}
+                render("모델 응답 대기")
+            }
             "stream"->{if(event.text.isNotBlank())reply(event.turn).offer(event.text) else if(!event.output.isNullOrBlank())reply(event.turn).offer("‘${event.output.takeLast(1500)}’")}
             "message"->{reply(event.turn).offer(event.text);render("턴 ${tn(event.turn)} · 모델 응답")}
             "reviewing"->render("턴 ${tn(event.turn)} · 독립 위험 검토")
@@ -450,17 +491,17 @@ internal class DiscordProjectAgentDisplay(private val channel:TextChannel,privat
                 val message=channel.sendMessageEmbeds(EmbedBuilder().setTitle("루오의 질문").setDescription(event.text).setFooter("선택지를 누르거나 이 채널에 직접 답해주세요. 실행 승인은 아닙니다.").build()).setComponents(ActionRow.of(choices)).setAllowedMentions(emptyList()).complete()
                 turns["question:${event.token}"]=message;render("질문 답변 대기")
             }
-            "question_answered"->{turns["question:${event.token}"]?.editMessageEmbeds(EmbedBuilder().setTitle("루오의 질문 · 답변 받음").setDescription("${event.plan!!.tool.arguments.path("question").asText()}\n\n답변: ${event.text.take(2000)}").setFooter("이 답변은 실행 권한을 부여하지 않습니다.").build())?.setComponents(emptyList())?.queue({}, {})}
+            "question_answered"->{turns["question:${event.token}"]?.editMessageEmbeds(DiscordQuestionAnswer.embed(event.plan!!.tool.arguments.path("question").asText(),event.text,event.requesterId.orEmpty()))?.setComponents(emptyList())?.setAllowedMentions(emptyList())?.queue({}, {})}
             "approval","tool_start","denied"->{
                 val plan=event.plan!!
-                val card=EmbedBuilder().setTitle("턴 ${event.turn} : ${plan.tool.name}").setDescription(plan.description.take(2800))
+                val card=EmbedBuilder().setTitle("턴 ${event.turn} : ${plan.tool.name} · ${when(event.kind){"approval"->"승인 대기";"denied"->"실행 거부";else->"도구 실행 중"}}").setDescription(plan.description.take(2800))
                     .addField("실행 폴더",plan.cwd.take(1000),false)
                     .addField("영향 경로",plan.resolvedTargets.joinToString("\n").take(1000),false)
                     .addField("독립 검토",event.risk?.let {"${it.action} · ${it.risk} · ${it.projectScope}\n${it.reason}"}.orEmpty().take(1000),false).setFooter(footer())
-                if(plan.gradleFingerprint!=null)card.addField("Gradle 프로젝트 신뢰","허용하면 현재 빌드 설정의 일반 build·test·check·assemble을 자동 승인 모드에서 재사용합니다. Gradle 캐시·의존성 다운로드를 포함하며 설정 변경 시 다시 확인합니다.",false)
-                val actions=if(event.kind=="approval")listOf(ActionRow.of(Button.success("qa:allow:${event.token}","이 요청 허용"),Button.danger("qa:deny:${event.token}","거절")))else emptyList()
+
+                val actions=if(event.kind=="approval")listOf(ActionRow.of(Button.success("qa:allow:${event.token}","이 요청 허용"),Button.danger("qa:deny:${event.token}","거절"),Button.danger("qa:stop:$jobId","에이전트 중지")))else if(event.kind=="tool_start")controls()else emptyList()
                 cardBases[key]=card.build()
-                val message=turns[key]?.also {it.editMessageEmbeds(card.build()).setComponents(actions).complete()} ?: channel.sendMessageEmbeds(card.build()).setComponents(actions).setAllowedMentions(emptyList()).complete().also {turns[key]=it}
+                val message=turns[key]?.also {it.editMessageEmbeds(card.build()).setComponents(actions).complete()} ?: (retireStatus() ?: channel.sendMessageEmbeds(card.build()).setAllowedMentions(emptyList()).complete()).also {it.editMessageEmbeds(card.build()).setComponents(actions).setAllowedMentions(emptyList()).complete();turns[key]=it}
                 if(event.kind=="tool_start"){
                     if(!plan.readOnly || plan.tool.name=="bash"){val thread=message.createThreadChannel("턴 ${event.turn} : ${plan.tool.name}".take(95)).complete();threads[key]=thread;DiscordAgentText(thread).offer("도구 호출 ${event.callId ?: event.turn}\n실행 폴더: ${plan.cwd}\n${plan.description}\n독립 검토: ${event.risk?.reason.orEmpty()}",true);logs[key]=StringBuilder() to DiscordAgentText(thread)}
                     render("턴 ${tn(event.turn)} · 도구 실행")
@@ -491,4 +532,15 @@ internal class DiscordProjectAgentDisplay(private val channel:TextChannel,privat
             "done"->{if(readResults.isNotEmpty())DiscordResultCards.finishReading(channel.id,readResults);reply(event.turn).offer(event.text,true);finished=true;render("${if(event.text.startsWith("작업 중단"))"중단" else "종료"} · ${"%.1f".format(java.util.Locale.ROOT,event.seconds)}초",true);turns.values.forEach {it.editMessageComponents(emptyList()).queue({}, {})}}
         }
     }
+}
+
+/** Plain answer field, not executable permission. Disable mentions at each send/edit site. */
+internal object DiscordQuestionAnswer {
+    fun embed(question:String,answer:String,user:String)=EmbedBuilder()
+        .setTitle("루오의 질문 · 답변 완료")
+        .setDescription(question.take(1000))
+        .addField("선택한 답변",answer.take(1024),false)
+        .apply {if(answer.length>1024)addField("답변 계속",answer.drop(1024).take(1024),false)}
+        .setFooter(if(user.isBlank())"답변을 기록했습니다. 실행 승인은 아닙니다." else "응답자 ID: $user · 실행 승인은 아닙니다.")
+        .build()
 }

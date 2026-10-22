@@ -15,31 +15,31 @@ class PiIntentOutputTest {
         p.resolve(".git/config").writeText("[core]\nrepositoryformatversion = 0\nbare = false\n[remote \"origin\"]\nurl = https://example.com/test.git\nfetch = +refs/heads/*:refs/remotes/origin/*\n")
         return p
     }
-    @Test fun `finite read loops and pipes are inside while scripts and escapes remain unknown`() {
-        val home=temp.resolve("p").createDirectories().toRealPath();repo(home,"Luonotar");repo(home,"PyProject")
-        val command="""cd "$home" && for d in Luonotar PyProject; do echo "== ${'$'}d =="; git -C "${'$'}d" log -1 --format='%h %ad %s' --date=iso 2>/dev/null; git -C "${'$'}d" status -sb 2>/dev/null | head -5; done"""
-        val result=assertNotNull(PiBashAudit.inspect(home,command));assertEquals("INSIDE",result.scope);assertTrue(result.readOnly)
-        val fetch=assertNotNull(PiBashAudit.inspect(home,"cd Luonotar && git fetch --dry-run 2>&1 | head -5; echo '---'; git log -3 --format='%h %ad %s' --date=iso"))
-        assertTrue(fetch.requiresIntent)
-        home.resolve("PyProject/.git").toFile().deleteRecursively();assertEquals("INSIDE",PiBashAudit.inspect(home,command)?.scope)
-        for(c in listOf("for d in \$(pwd); do cat ${'$'}d; done","for d in Luonotar; do eval ${'$'}d; done","git -C Luonotar push origin main","cat x > /tmp/other","python3 -c 'print(1)'"))assertNull(PiBashAudit.inspect(home,c),c)
-        assertNull(PiBashAudit.inspect(home,"""for d in Luonotar; do echo "; done"; rm /etc/hosts; done"""))
-        home.resolve("Luonotar/.git/hooks/post-merge").writeText("#!/bin/sh\necho hook\n")
-        assertNull(PiBashAudit.inspect(home,"cd Luonotar && git pull --ff-only"))
-    }
-    @Test fun `medium prior consent applies only to verified inside operations and automatic mode`() {
-        val home=temp.resolve("p").createDirectories().toRealPath();repo(home);val profile=temp.resolve("profile").createDirectories()
+    @Test fun `model low verdict stays low for all bash grammar without a backend override`() {
+        val home=temp.resolve("p").createDirectories().toRealPath();val profile=temp.resolve("profile").createDirectories()
         val policy=PiToolPolicy(profile,home,ProjectAgentTools(profile.resolve("logs")),AgentAccess.OWNER)
-        val yes=ProjectAgentRisk("ASK","MEDIUM","사용자가 저장소 최신화를 요청함","INSIDE",true)
-        val checked=policy.check("bash",json.valueToTree(mapOf("command" to "cd repo && git pull --ff-only")))
-        val effective=PiApprovalDecision.effective(checked,yes)
-        assertEquals("ALLOW",effective.action);assertFalse(PiApprovalDecision.human(false,checked.display,effective,false));assertTrue(PiApprovalDecision.human(true,checked.display,effective,false))
-        val no=PiApprovalDecision.effective(checked,yes.copy(userAuthorized=false));assertTrue(PiApprovalDecision.human(false,checked.display,no,false))
-        for(command in listOf("git -C repo push origin main","gh pr create","python3 helper.py")) {
-            val unknown=policy.check("bash",json.valueToTree(mapOf("command" to command)));assertTrue(PiApprovalDecision.human(false,unknown.display,PiApprovalDecision.effective(unknown,yes),false))
+        val low=ProjectAgentRisk("ALLOW","LOW","프로젝트 조회","INSIDE")
+        for(command in listOf("git fetch --all --prune 2>&1 | tail -5; echo '---'; git branch -a | grep -i beta","git checkout -b beta21 && git status -sb","for d in A B; do git -C \"${'$'}d\" status; done","python3 helper.py")) {
+            val checked=policy.check("bash",json.valueToTree(mapOf("command" to command)))
+            val effective=PiApprovalDecision.effective(checked,low)
+            assertEquals(low,effective);assertFalse(PiApprovalDecision.human(false,checked.display,effective,false))
+            assertTrue(PiApprovalDecision.human(true,checked.display,effective,false))
         }
-        assertEquals("DENY",PiApprovalDecision.effective(checked,yes.copy(action="DENY",risk="HIGH")).action)
-        home.resolve("repo/.git/config").appendText("[core]\nhooksPath = /tmp/hooks\n");assertFails {policy.verify(checked)}
+    }
+    @Test fun `medium consent and denial belong to reviewer not backend paths`() {
+        val home=temp.resolve("p").createDirectories().toRealPath();val profile=temp.resolve("profile").createDirectories()
+        val policy=PiToolPolicy(profile,home,ProjectAgentTools(profile.resolve("logs")),AgentAccess.OWNER)
+        val checked=policy.check("bash",json.valueToTree(mapOf("command" to "git fetch --all --prune")))
+        val yes=ProjectAgentRisk("ASK","MEDIUM","사전 요청과 일치","INSIDE",true)
+        val effective=PiApprovalDecision.effective(checked,yes)
+        assertEquals("ALLOW",effective.action);assertEquals("MEDIUM",effective.risk)
+        assertFalse(PiApprovalDecision.human(false,checked.display,effective,false))
+        assertTrue(PiApprovalDecision.human(true,checked.display,effective,false))
+        assertTrue(PiApprovalDecision.human(false,checked.display,yes.copy(userAuthorized=false),true),"Gradle/backend trust cannot bypass the model")
+        val outside=policy.check("write",json.valueToTree(mapOf("path" to temp.resolve("outside.txt").toString(),"content" to "x")))
+        val authorized=PiApprovalDecision.effective(outside,yes.copy(projectScope="OUTSIDE"))
+        assertEquals("ALLOW",authorized.action);assertFalse(PiApprovalDecision.human(false,outside.display,authorized,false))
+        val deny=yes.copy(action="DENY",risk="HIGH");assertEquals(deny,PiApprovalDecision.effective(outside,deny))
     }
     @Test fun `only unfinished authenticated human intent survives resume and never unrelated work`() {
         val store=PiHumanIntent(temp);val c=ProjectAgentChannel("g","c","u",null,temp.toString())

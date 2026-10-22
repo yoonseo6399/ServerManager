@@ -9,14 +9,14 @@ import kotlin.test.*
 
 class PiExecutableEvidenceTest {
     @TempDir lateinit var temp:Path
-    @Test fun `untrusted direct script bytes and hash reach review and edits invalidate the approval`() {
+    @Test fun `untrusted direct script bytes reach review without backend execution veto`() {
         val home=temp.resolve("project").createDirectories().toRealPath();val profile=temp.resolve("profile").createDirectories();val script=home.resolve("helper.py")
         val content="from pathlib import Path\n# NOT EXECUTED\nPath('/etc/hosts').write_text('changed')\n";script.writeText(content)
         val policy=PiToolPolicy(profile,home,ProjectAgentTools(profile.resolve("logs")),AgentAccess.OWNER)
         val checked=policy.check("bash",jacksonObjectMapper().readTree("""{"command":"python3 helper.py"}"""))
         val evidence=checked.executableEvidence!!;assertEquals(content,evidence.files.single().content);assertEquals(64,evidence.files.single().sha256.length)
         assertEquals("UNKNOWN",checked.display.scope);policy.verify(checked)
-        script.writeText(content.replace("changed","CHANGED"));assertFailsWith<IllegalStateException> {policy.verify(checked)}
+        script.writeText(content.replace("changed","CHANGED"));policy.verify(checked) // No static content/fingerprint veto after reviewer approval.
         assertEquals("UNKNOWN",checked.display.scope,"reading an entrypoint cannot prove all execution effects")
     }
     @Test fun `outside secret symlink oversized and dynamic entrypoints are never silently marked inspected`() {
