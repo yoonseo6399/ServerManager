@@ -687,3 +687,10 @@ Common bounded file diff/detail attachments and fenced output, per-run8K/16K, in
 ## 2026-10-22 — 0.7.0-beta.19 Bash 도구 통합
 
 게시된 Beta18 기준 fix/pi-bash-unification 1f455f4 통합. 실제 iMac 로그에서 제한형 sh의 cd 문법 거절이 git 후속 호출까지 요청 내 차단한 것을 확인했다. Pi sh 등록을 제거하고 OWNER native bash로 통일하며 삭제된 도구 이름만 복구 가능한 TOOL_INPUT_ERROR로 분류한다. 실제 위험/권한 거절과 UNKNOWN/외부/push/PR 명시 승인은 유지한다. READ/EDIT 임의 Bash는 금지한다. 실제 SDK25개 focused 테스트 통과, bootJar 통과; 전체/타OS/운영 Discord/실제27B 신규 시험은 미실행. 사용자 직접 시험용 무해한 외부 표식 쓰기 스크립트를 원격 프로젝트에 배치·평범한 이름으로 변경했으며 직접 실행하지 않았다. 기존 서명 CI를 skip_full_tests=true로 사용하고 stable main/latest 보존, 게시 후 자산 재다운로드·해시 검증 생략.
+
+
+## 2026-10-22 — 0.7.0-beta.20
+
+게시된 Beta19 기준 fix/pi-intent-output-budget ef32b51 통합. 실제 사용자 요청 ledger와 fresh request-aware review의 userAuthorized로 검증된 INSIDE 작업의 사전 명시 동의를 위험 등급과 분리한다. 자동 모드 MEDIUM 재확인 반복을 보완하며 명시/외부/미확인/HIGH/DENY/push/PR 경계는 유지한다. 유한 for/파이프/Git 조회 감사와 설정/hook/부모 저장소·내용 변경 확인을 추가했다. Git 시스템/글로벌 config는 격리된 Pi 프로세스에서 자동 로드하지 않는다.
+
+/agent setting tool_output_limit(512..8000,기본2400), 전체 비정밀 도구 원문 보관/첨부+발췌, 정확한 원문/편집 예외, 기존 세션 큰 결과 제한, 원래 카드의 결과 paging 진행, 긴 단일 줄 start_char와 마지막 개행 line count를 보완했다. 관련47개·실제27B 검토3사례 통과, 최초 로딩 취소 실패도 보존. 전체/다른OS/운영 Discord 실기 검증은 생략. 기존 서명 CI를 skip_full_tests=true로 게시하며 stable main/latest와 게시된 태그/파일 보존. 운영 설치·재시작·게시 후 자산 다운로드/해시 비교 없음.
