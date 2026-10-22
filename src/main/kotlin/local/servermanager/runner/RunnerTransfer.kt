@@ -194,7 +194,11 @@ class RunnerTransfer(private val manager:ServerManager,private val registry:Runn
         val parts=TransferBatch.decode(bytes)
         val transfer=pending[transferId] ?: error("먼저 전송을 재개하세요")
         require(transfer.runnerId==runner && transfer.instanceId==id)
-        parts.forEach {part->require(part.path in transfer.changed && part.bytes.isNotEmpty() && transfer.manifest.files.getValue(part.path).size<=TransferBatch.SMALL_FILE)}
+        parts.forEach {part->
+            require(part.path in transfer.changed);FileInventory.safePath(transfer.folder,part.path)
+            val file=transfer.manifest.files.getValue(part.path)
+            synchronized(transfer){require(part.offset==(transfer.progress[part.path] ?: 0L) && part.bytes.isNotEmpty() && part.offset+part.bytes.size==file.size && file.size<=TransferBatch.SMALL_FILE)}
+        }
         parts.forEach {upload(runner,id,transferId,it.path,it.offset,it.bytes)}
     }
     fun batchFiles(id:String,paths:List<String>):ByteArray=shared(id) {
