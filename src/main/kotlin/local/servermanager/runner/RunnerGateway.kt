@@ -67,17 +67,39 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
     private val llmRunners=ConcurrentHashMap.newKeySet<String>()
     private val restartRunners=ConcurrentHashMap.newKeySet<String>()
     private val restartRequests=ConcurrentHashMap<String,java.util.concurrent.CompletableFuture<String?>>()
+    private val restartBoots=ConcurrentHashMap<String,String>()
+    private val restarts=ConcurrentHashMap<String,RunnerRestartStatus>()
+    fun restartStatus(id:String):RunnerRestartStatus?=restarts.computeIfPresent(id){_,s->
+        if(s.stage in setOf("REQUESTED","RESTARTING") && System.currentTimeMillis()-s.requestedAt>120000)s.copy(stage="FAILED",message="재연결 확인 시간이 초과됐습니다. 실행기 로그를 확인하세요") else s
+    }
+    private fun restartCapability(id:String,event:RunnerMessage) {
+        if(event.state !in setOf("RESTART_V1","RESTART_V2") || registry.active(id)==null){restartRunners.remove(id);return}
+        restartRunners.add(id)
+        val boot=event.detail?.takeIf {runCatching {java.util.UUID.fromString(it)}.isSuccess}
+        if(boot!=null)restartBoots[id]=boot else restartBoots.remove(id)
+        restarts.computeIfPresent(id){_,s->when {
+            s.stage !in setOf("REQUESTED","RESTARTING") -> s
+            boot!=null && s.previousBootId!=null && boot!=s.previousBootId -> s.copy(stage="COMPLETE",message="새 실행기 프로세스가 다시 연결됐습니다")
+            event.state=="RESTART_V1" && s.stage=="RESTARTING" -> s.copy(stage="RECONNECTED",message="실행기 연결이 복구됐습니다 · 구형 실행기는 프로세스 교체를 확인할 수 없습니다")
+            else -> s
+        }}
+    }
     fun restartSupported(id:String)=id in restartRunners
     /** Returns null when the runner accepted the restart, otherwise its refusal reason. */
     fun requestRestart(id:String):String? {
         check(connected(id) && registry.active(id)!=null) {"실행기를 온라인으로 연결하세요"}
         check(restartSupported(id)) {"이 실행기는 원격 재시작을 지원하지 않습니다. 먼저 새 버전으로 업데이트하세요"}
+        check(restartStatus(id)?.stage !in setOf("REQUESTED","RESTARTING")) {"재시작 후 재연결을 확인하고 있습니다"}
         val future=java.util.concurrent.CompletableFuture<String?>()
         check(restartRequests.putIfAbsent(id,future)==null) {"이미 재시작을 요청했습니다"}
+        val status=RunnerRestartStatus("REQUESTED","재시작 요청 전달 중",java.util.UUID.randomUUID().toString(),System.currentTimeMillis(),restartBoots[id])
+        restarts[id]=status
         try {
-            check(send(id,RunnerMessage("restart-request"))) {"실행기 연결이 끊겼습니다"}
-            return future.get(10,TimeUnit.SECONDS)
-        } catch(e:java.util.concurrent.TimeoutException){throw IllegalStateException("실행기가 응답하지 않았습니다")}
+            check(send(id,RunnerMessage("restart-request",token=status.requestId))) {"실행기 연결이 끊겼습니다"}
+            val refusal=future.get(10,TimeUnit.SECONDS)
+            restarts.computeIfPresent(id){_,s->if(s.requestId!=status.requestId || s.stage=="COMPLETE")s else s.copy(stage=if(refusal==null)"RESTARTING" else "FAILED",message=if(refusal==null)"실행기 재연결 대기 중" else restartReason(refusal))}
+            return refusal
+        } catch(e:Exception){restarts[id]=status.copy(stage="FAILED",message="실행기가 응답하지 않았거나 연결이 끊겼습니다");throw IllegalStateException("실행기가 응답하지 않았거나 연결이 끊겼습니다",e)}
         finally {restartRequests.remove(id,future)}
     }
     private val agentLlmRunners=ConcurrentHashMap.newKeySet<String>()
@@ -203,8 +225,8 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
         val event=runCatching { mapper.readValue<RunnerMessage>(message.payload) }.getOrNull() ?: return
         if(directRelay?.core?.onRunnerMessage(id,event)==true)return
         when(event.type) {
-            "restart-capability" -> if(event.state=="RESTART_V1" && registry.active(id)!=null)restartRunners.add(id) else restartRunners.remove(id)
-            "restart-result" -> restartRequests[id]?.complete(if(event.state=="ACCEPTED")null else (event.detail ?: "REFUSED").take(60))
+            "restart-capability" -> restartCapability(id,event)
+            "restart-result" -> if(event.token==null && restartBoots[id]==null || event.token==restarts[id]?.requestId)restartRequests[id]?.complete(if(event.state=="ACCEPTED")null else (event.detail ?: "REFUSED").take(60))
             "relay-capability" -> {
                 registry.tcpRelayCapability(id,event.state=="TCP_V1")
                 if(event.state=="TCP_V1")tcpRelays.computeIfAbsent(id) {TcpRelayPeer({send(id,it)},{stream,bytes,count->sendBinary(id,stream,bytes,count)})}

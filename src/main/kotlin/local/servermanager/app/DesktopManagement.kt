@@ -29,12 +29,34 @@ fun validateProfileDirectory(value:String):Path {
     Files.createTempFile(real,".write-check-",".tmp").deleteIfExists();return real
 }
 @Service
-class DesktopLifecycle(private val manager:ServerManager,private val context:ConfigurableApplicationContext,private val registry:RunnerRegistry?=null,private val directRelay:DirectRelayService?=null,private val gateway:RunnerGateway?=null) {
-    val supervised=System.getenv("SERVER_MANAGER_SUPERVISED")=="1"
-    val home:Path=Path.of(System.getenv("SERVER_MANAGER_HOME") ?: System.getProperty("user.home")+"/Library/Application Support/ServerManager")
+class DesktopLifecycle(private val manager:ServerManager,private val context:ConfigurableApplicationContext,private val registry:RunnerRegistry?=null,private val directRelay:DirectRelayService?=null,private val gateway:RunnerGateway?=null,private val runtime:DesktopRuntime=DesktopRuntime()) {
+    val supervised get()=runtime.supervised
+    val home get()=runtime.home
     val gate=ReentrantReadWriteLock()
     @Volatile var stopping=false
     @Volatile private var requested=false
+    private val serviceBootId=ServiceBoot.id
+    @Volatile private var manualRequested=false
+    @Volatile private var manualStage="IDLE"
+    @Volatile private var manualReason:String?=null
+    internal var restartProcess:()->Unit={val code=SpringApplication.exit(context,{75});kotlin.system.exitProcess(code)}
+    private fun manualBlock():String?=when {
+        !supervised -> "UNSUPERVISED"
+        requested || stopping -> "BUSY"
+        home.resolve("updates/pending.txt").exists() || home.resolve("pending-data-location.txt").exists() -> "UPDATE_PENDING"
+        else -> updateDecision().waitReason
+    }
+    fun serviceRestartStatus():ServiceRestartStatus {
+        val block=manualBlock()
+        val reason=block ?: if(manualStage=="FAILED")manualReason else null
+        return ServiceRestartStatus(supervised,serviceBootId,manualStage,block==null,reason,if(manualRequested)"관리웹·봇 연결을 잠시 끊고 관리 앱을 다시 시작합니다" else restartReason(reason))
+    }
+    @Synchronized fun requestServiceRestart():ServiceRestartStatus {
+        val reason=manualBlock()
+        check(reason==null) {restartReason(reason)}
+        manualReason=null;manualStage="REQUESTED";manualRequested=true;requested=true
+        return serviceRestartStatus()
+    }
     fun idle()=manager.list().all { it["pid"]==null && it["diagnosticActive"]!=true && it["modBusy"]!=true && it["state"] in setOf("NEW","STOPPED","FAILED","IMPORT_FAILED") }
     val updates by lazy {UpdateCoordinator(home)}
     val runningVersion:String by lazy {javaClass.getResourceAsStream("/app-version.txt")!!.bufferedReader().use {it.readText().trim()}}
@@ -69,18 +91,26 @@ class DesktopLifecycle(private val manager:ServerManager,private val context:Con
     }
     fun restartWhenIdle() { check(supervised) { "자동 재시작은 설치 앱에서만 지원합니다" };requested=true }
     @Scheduled(fixedDelay=3000) fun restart() {
-        if(!requested||stopping||(!home.resolve("updates/pending.txt").exists()&&!home.resolve("pending-data-location.txt").exists()))return
+        if(!requested||stopping||(!manualRequested&&!home.resolve("updates/pending.txt").exists()&&!home.resolve("pending-data-location.txt").exists()))return
         gate.write {
             val relocation=home.resolve("pending-data-location.txt").exists()
             val target=home.resolve("updates/pending.txt").takeIf {it.exists()}?.readText()?.trim()
+            if(manualRequested && (relocation || target!=null)) {
+                manualReason="UPDATE_PENDING";manualStage="FAILED";manualRequested=false
+                return
+            }
             val props=java.util.Properties()
             if(target!=null)runCatching {home.resolve("updates/$target/update.properties").inputStream().use(props::load)}
             val decision=if(relocation)UpdateDecision(idle(),if(idle())null else "SERVER_PREPARING") else updateDecision(props.getProperty("controller.minHost","1").toIntOrNull() ?: 1,props.getProperty("controller.maxHost","1").toIntOrNull() ?: 1)
-            if(!decision.apply){updates.update(UpdateComponents.MANAGER_APP,runningVersion,target,"WAITING",waitReason=decision.waitReason);return}
-            updates.update(UpdateComponents.MANAGER_APP,runningVersion,target,"APPLYING",message="게임 상주 서비스는 유지하고 관리 앱을 교체합니다")
+            if(!decision.apply){
+                if(manualRequested){manualReason=decision.waitReason;manualStage="FAILED";manualRequested=false;requested=false}
+                else updates.update(UpdateComponents.MANAGER_APP,runningVersion,target,"WAITING",waitReason=decision.waitReason)
+                return
+            }
+            if(manualRequested)manualStage="RESTARTING" else updates.update(UpdateComponents.MANAGER_APP,runningVersion,target,"APPLYING",message="게임 상주 서비스는 유지하고 관리 앱을 교체합니다")
             stopping=true
         }
-        thread(name="desktop-restart",isDaemon=false) { Thread.sleep(700);updates.update(UpdateComponents.MANAGER_APP,runningVersion,updates.current(UpdateComponents.MANAGER_APP)?.target,"RECONNECTING");val code=SpringApplication.exit(context,{75});kotlin.system.exitProcess(code) }
+        thread(name="desktop-restart",isDaemon=false) { Thread.sleep(700);if(!manualRequested)updates.update(UpdateComponents.MANAGER_APP,runningVersion,updates.current(UpdateComponents.MANAGER_APP)?.target,"RECONNECTING");restartProcess() }
     }
 }
 @Component

@@ -25,7 +25,7 @@ import kotlin.io.path.*
 data class RunnerDevice(val id:String,val name:String,val platform:String,val registeredBy:String,val publicKey:String,
     val createdAt:String,var version:String="unknown",var enabled:Boolean=true,var allowedInstanceIds:Set<String> = emptySet())
 data class RunnerView(val id:String,val name:String,val platform:String,val registeredBy:String,val createdAt:String,
-    val version:String,val enabled:Boolean,val allowedInstanceIds:Set<String>,val online:Boolean,val lastSeen:String?,val update:RunnerUpdateStatus?=null,val remoteUpdateSupported:Boolean=false,val registeredByName:String="",val canGrant:Boolean=false,val tcpRelaySupported:Boolean=false,val releaseSelectionSupported:Boolean=false,val rollbackSupported:Boolean=false)
+    val version:String,val enabled:Boolean,val allowedInstanceIds:Set<String>,val online:Boolean,val lastSeen:String?,val update:RunnerUpdateStatus?=null,val remoteUpdateSupported:Boolean=false,val registeredByName:String="",val canGrant:Boolean=false,val tcpRelaySupported:Boolean=false,val releaseSelectionSupported:Boolean=false,val rollbackSupported:Boolean=false,val restartSupported:Boolean=false,val restart:RunnerRestartStatus?=null)
 data class RunnerPairRequest(val code:String,val publicKey:String,val platform:String,val version:String)
 data class RunnerEnrollmentRequest(val name:String)
 private data class PendingRunner(val codeHash:String,val userId:String,val name:String,val expiresAt:Long)
@@ -176,7 +176,7 @@ class RunnerApi(private val registry:RunnerRegistry,private val auth:AuthStore,p
         val verified=req.getSession(false)?.getAttribute("sm.verified") as? Long ?: 0
         if(System.currentTimeMillis()-verified>300000) throw ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED,"패스키로 다시 인증한 뒤 진행하세요")
     }
-    @GetMapping fun list(authentication:Authentication)=registry.views(authentication.name)
+    @GetMapping fun list(authentication:Authentication)=registry.views(authentication.name).map {it.copy(restartSupported=gateway.restartSupported(it.id)&&it.online,restart=gateway.restartStatus(it.id))}
     @GetMapping("/{id}/releases") fun releases(@PathVariable id:String,authentication:Authentication):List<PublishedUpdate> {
         val runner=registry.views(authentication.name).firstOrNull {it.id==id} ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
         return updates.releasesFor(runner.version,runner.rollbackSupported)
@@ -197,7 +197,7 @@ class RunnerApi(private val registry:RunnerRegistry,private val auth:AuthStore,p
             throw ResponseStatusException(HttpStatus.FORBIDDEN,"기기 등록자 또는 소유자만 실행기를 재시작할 수 있습니다")
         val refusal=try {gateway.requestRestart(id)} catch(e:IllegalStateException){throw ResponseStatusException(HttpStatus.CONFLICT,e.message)}
         audit.append(authentication.name,"runner restart requested $id "+(refusal ?: "accepted"),if(refusal==null)200 else 409,"web")
-        if(refusal!=null)throw ResponseStatusException(HttpStatus.CONFLICT,"지금은 재시작할 수 없습니다: $refusal")
+        if(refusal!=null)throw ResponseStatusException(HttpStatus.CONFLICT,restartReason(refusal))
         return mapOf("accepted" to true)
     }
     @PostMapping("/enroll") fun enroll(@RequestBody request:RunnerEnrollmentRequest,authentication:Authentication,req:HttpServletRequest):Map<String,Any> {

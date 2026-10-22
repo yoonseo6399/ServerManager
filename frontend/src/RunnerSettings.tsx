@@ -4,7 +4,7 @@ import {memo,useEffect,useState} from 'react';
 import {api,ApiError} from './http';
 import {useAuth} from './Auth';
 
-type Runner={id:string;name:string;platform:string;registeredBy:string;registeredByName?:string;canGrant?:boolean;createdAt:string;version:string;enabled:boolean;allowedInstanceIds:string[];online:boolean;lastSeen:string|null;remoteUpdateSupported?:boolean;releaseSelectionSupported?:boolean;rollbackSupported?:boolean;update?:{phase:string;latest:string|null;downloadedBytes:number;totalBytes:number}|null};
+type Runner={restartSupported?:boolean;restart?:{stage:string;message:string};id:string;name:string;platform:string;registeredBy:string;registeredByName?:string;canGrant?:boolean;createdAt:string;version:string;enabled:boolean;allowedInstanceIds:string[];online:boolean;lastSeen:string|null;remoteUpdateSupported?:boolean;releaseSelectionSupported?:boolean;rollbackSupported?:boolean;update?:{phase:string;latest:string|null;downloadedBytes:number;totalBytes:number}|null};
 const updateLabels:Record<string,string>={IDLE:'확인 전',REQUESTED:'요청 전달 중',CHECKING:'새 버전 확인 중',VERIFYING:'게시자 서명·파일 무결성 검증 중',DOWNLOADING:'서명 업데이트 다운로드 중',READY:'다운로드·서명 검증 완료',WAITING:'서버 정상 종료 또는 전송 완료 대기',PAUSING:'받은 파일을 보존하고 전송 중지 중',RESTARTING:'실행기 재시작·재연결 중',CURRENT:'최신 버전',FAILED:'업데이트 실패 · 네트워크, 서명 또는 실행기 로그를 확인하세요',UNSUPPORTED:'자동 업데이트 설치판이 필요합니다'};
 function supportsUpdate(version:string){const m=/^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$/.exec(version);if(!m)return false;const p=m.slice(1,4).map(Number);return p[0]>0||p[1]>4||p[1]===4&&(p[2]>4||p[2]===4&&!m[4]);}
 type Instance={config:{id:string;name:string}};
@@ -38,8 +38,10 @@ export const RunnerSettings=memo(function RunnerSettings({instances}:{instances:
  <button disabled={busy||!row.enabled||!row.online||!row.remoteUpdateSupported||['REQUESTED','CHECKING','DOWNLOADING','PAUSING','RESTARTING','UNSUPPORTED'].includes(row.update?.phase||'')} onClick={()=>run(()=>api(`/runners/${row.id}/update`,'POST',{pauseTransfer:false}),'서명 업데이트를 요청했습니다. 게임과 전송을 마치면 적용합니다.')}>원격 업데이트 요청</button>
  <button disabled={busy||!row.enabled||!row.online||!row.remoteUpdateSupported||['REQUESTED','PAUSING','RESTARTING','UNSUPPORTED'].includes(row.update?.phase||'')} onClick={()=>run(()=>api(`/runners/${row.id}/update`,'POST',{pauseTransfer:true}),'업데이트 준비 후 전송을 잠시 멈추고 재연결해 이어받습니다. 실행 중인 게임은 정상 종료까지 기다립니다.')}>전송 잠시 멈추고 업데이트</button>
 
- <button disabled={busy||!row.enabled||!row.online} onClick={()=>{if(window.confirm('실행기 프로그램을 재시작합니다. 실행 중인 게임은 상주 서비스가 유지하지만, 접속·전송·서버 준비 중이면 거부됩니다. 계속할까요?'))run(()=>api(`/runners/${row.id}/restart`,'POST',{}),'재시작을 요청했습니다. 잠시 후 다시 연결됩니다.');}}>실행기 재시작</button>
+ <button disabled={busy||!row.enabled||!row.online||!row.restartSupported||['REQUESTED','RESTARTING'].includes(row.restart?.stage||'')} onClick={()=>{if(window.confirm('실행기 프로그램을 재시작합니다. 실행 중인 게임은 상주 서비스가 유지하지만, 접속·전송·서버 준비 중이면 거부됩니다. 계속할까요?'))run(()=>api(`/runners/${row.id}/restart`,'POST',{}),'재시작을 요청했습니다. 잠시 후 다시 연결됩니다.');}}>실행기 재시작</button>
  </div>}
+ {row.restart&&<p role="status" aria-label={`${row.name} 재시작 상태`}>{row.restart.stage} · {row.restart.message}</p>}
+ {!row.restartSupported&&<p className="muted">재시작 지원 확인 중 · 온라인 상태의 설치판 실행기가 필요합니다.</p>}
  {(row.registeredBy===auth.session.user?.id||auth.session.user?.owner)&&<ReleasePicker endpoint={`/runners/${row.id}/releases`} supported={!!row.releaseSelectionSupported&&row.online&&row.enabled} busy={busy||['REQUESTED','CHECKING','DOWNLOADING','VERIFYING','PAUSING','RESTARTING'].includes(row.update?.phase||'')} unsupportedMessage="먼저 위의 원격 업데이트 요청으로 실행기를 최신 안정판으로 업데이트하세요. 재연결 후 릴리즈 선택이 활성화됩니다." onInstall={(version,allowPrerelease,allowRollback)=>run(()=>api(`/runners/${row.id}/update`,'POST',{pauseTransfer:false,version,allowPrerelease,allowRollback}),`${version} 설치를 요청했습니다. 진행 상태와 로그에서 적용 결과를 확인하세요.`)}/>}
  {!row.rollbackSupported&&<p className="muted">안정판 롤백은 새 실행기 설치판을 한 번 적용해야 지원됩니다. 등록 정보는 유지됩니다.</p>}
  <p className="muted">기기 등록자와 소유자만 요청할 수 있습니다. 서명을 검증하며 게임을 강제로 종료하지 않습니다. 구형 실행기는 기존 자동 업데이트를 기다리거나 최신 설치판을 한 번 적용해야 원격 요청을 받을 수 있습니다.</p>
