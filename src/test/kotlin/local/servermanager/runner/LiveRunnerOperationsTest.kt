@@ -46,6 +46,30 @@ class LiveRunnerOperationsTest {
         assertFalse(base.resolve("mods/sample.jar").exists());assertEquals("jar fixture",base.resolve("mods/sample.jar.disabled").readText())
         assertFails {call("MOD_TOGGLE",data=mapper.writeValueAsString(ModSelection(revision,setOf("sample.jar"),false)))}
     }
+    @Suppress("UNCHECKED_CAST") private fun <T> field(agent:RunnerAgent,name:String)=RunnerAgent::class.java.getDeclaredField(name).also {it.isAccessible=true}.get(agent) as T
+    @Test fun `real runner workspace reads bypass transfer lock and live mod mutations are reported`() {
+        val cfg=config();val home=temp.resolve("agent");val base=home.resolve("instances/${cfg.id}/server").createDirectories()
+        base.resolve("mods").createDirectory().resolve("live.jar").writeText("actual runner mod");base.resolve("live.txt").writeText("actual runner file")
+        val agent=RunnerAgent(home,RunnerIdentity("https://localhost:1","runner","fixture","unused","MAC"))
+        val socket=mock(java.net.http.WebSocket::class.java);val messages=java.util.concurrent.CopyOnWriteArrayList<String>()
+        doAnswer {messages.add(it.arguments[0].toString());CompletableFuture.completedFuture(socket)}.`when`(socket).sendText(any(CharSequence::class.java),anyBoolean())
+        field<java.util.concurrent.atomic.AtomicReference<java.net.http.WebSocket?>>(agent,"connection").set(socket)
+        val process=mock(Process::class.java);`when`(process.isAlive).thenReturn(true);field<MutableMap<String,Process>>(agent,"processes")[cfg.id]=process
+        val lock=Any();field<MutableMap<String,Any>>(agent,"operationLocks")[cfg.id]=lock
+        val entered=CountDownLatch(1);val release=CountDownLatch(1);val pool=Executors.newSingleThreadExecutor()
+        pool.submit {synchronized(lock){entered.countDown();release.await(5,TimeUnit.SECONDS)}}
+        val method=RunnerAgent::class.java.getDeclaredMethod("workspace",String::class.java,String::class.java,String::class.java).also {it.isAccessible=true}
+        fun call(request:WorkspaceRequest):com.fasterxml.jackson.databind.JsonNode {method.invoke(agent,cfg.id,"request",mapper.writeValueAsString(request));return mapper.readTree(messages.last {it.contains("workspace-result")})}
+        try {
+            assertTrue(entered.await(2,TimeUnit.SECONDS));val start=System.nanoTime()
+            val response=call(WorkspaceRequest("STAT",cfg,"live.txt"));assertEquals("OK",response.path("state").asText());assertTrue(System.nanoTime()-start<TimeUnit.SECONDS.toNanos(2))
+            release.countDown()
+            val revision=ModInventory.scan(base.resolve("mods")).revision
+            val result=call(WorkspaceRequest("MOD_TOGGLE",cfg,data=mapper.writeValueAsString(ModSelection(revision,setOf("live.jar"))),mutationToken="approved-write"))
+            assertEquals("OK",result.path("state").asText());assertEquals("actual runner mod",base.resolve("mods/live.jar.disabled").readText())
+            assertEquals("approved-write",home.resolve("instances/${cfg.id}/local-edits.pending").readText())
+        }finally{release.countDown();pool.shutdownNow();field<MutableMap<String,Process>>(agent,"processes").clear();agent.shutdownGracefully()}
+    }
     private fun managerFixture(action:(ServerManager,Instance)->Unit) {
         val manager=ServerManager();val cfg=(manager.create(CreateRequest("snapshot-${UUID.randomUUID()}","0.16.14",java.net.ServerSocket(0).use {it.localPort},512,loader="Fabric"))["config"] as Instance)
         manager.instance(cfg.id).runnerId="runner";manager.runtime(cfg.id).state="STOPPED"
