@@ -45,6 +45,9 @@ class FileSyncTest {
         try {
             manager.setFileSync(i.id,false);manager.install(i.id);assertEquals("INSTALLING",manager.runtime(i.id).state);assertTrue(ticket.isNotEmpty());assertFalse(manager.root.resolve(i.id).resolve("installer.jar").exists())
             manager.remoteInstallResult(i.id,"other",ticket,true,"bad");assertEquals("INSTALLING",manager.runtime(i.id).state)
+            manager.remoteInstallResult(i.id,"runner","expired-ticket",true,"late");assertEquals("INSTALLING",manager.runtime(i.id).state)
+            assertEquals(ticket,manager.root.resolve(i.id).resolve("remote-install.pending").readText())
+            assertFalse(manager.root.resolve(i.id).resolve("installed.ok").exists())
             manager.remoteInstallResult(i.id,"runner",ticket,true,"done");assertEquals("STOPPED",manager.runtime(i.id).state)
             manager.start(i.id);manager.remoteWorkerReady(i.id,"runner");assertEquals("TRANSFERRING",manager.runtime(i.id).state);manager.remoteState(i.id,"runner","RUNNING");manager.remoteState(i.id,"runner","SYNCING","종료 코드 0")
             manager.remoteExited(i.id,"runner",RunnerExitReport(0));manager.remoteWorkerReady(i.id,"runner");assertEquals("STOPPED",manager.runtime(i.id).state);assertFalse(manager.root.resolve(i.id).resolve("remote-lease").exists());assertTrue(manager.runtime(i.id).remoteWorkerReady);assertTrue(manager.runtime(i.id).remoteCloudReady)

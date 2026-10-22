@@ -344,7 +344,12 @@ class ServerManager {
         }
     }
     fun remoteInstallResult(id:String,runner:String,ticket:String,success:Boolean,detail:String?) {
-        val r=runtime(id);synchronized(r){val i=instance(id);if(i.runnerId!=runner || root.resolve(id).resolve("remote-install.pending").takeIf {it.exists()}?.readText()!=ticket)return
+        // Persisted runner results can arrive after deletion or while its runtime lock is held.
+        // Such a late result must not terminate the runner's shared control connection.
+        val i=instances[id] ?: return
+        val r=runtimes[id] ?: return
+        synchronized(r){
+            if(instances[id]!==i || runtimes[id]!==r || r.state=="DELETED" || i.runnerId!=runner || root.resolve(id).resolve("remote-install.pending").takeIf {it.exists()}?.readText()!=ticket)return
             if(success && i.syncEnabled())return
             root.resolve(id).resolve("remote-install.pending").deleteIfExists();folderImportMarker(id).deleteIfExists();root.resolve(id).resolve("remote-lease").deleteIfExists()
             r.state=if(success)"STOPPED" else "FAILED";r.remotePid=null
