@@ -32,6 +32,7 @@ class RunnerServiceRestartTest {
     }
     @Test fun `gateway tracks accepted request and confirms a new boot but not a same process reconnect`() {
         val registry=mock(RunnerRegistry::class.java);`when`(registry.active("runner")).thenReturn(RunnerDevice("runner","fixture","MAC","owner","key","now"))
+        `when`(registry.online("runner")).thenReturn(true)
         val gateway=RunnerGateway(registry,mock(ServerManager::class.java));val mapper=jacksonObjectMapper()
         val session=mock(WebSocketSession::class.java);`when`(session.attributes).thenReturn(mutableMapOf<String,Any>("runnerId" to "runner"));`when`(session.isOpen).thenReturn(true)
         doAnswer {call->val msg=mapper.readValue((call.arguments[0] as TextMessage).payload,RunnerMessage::class.java)
