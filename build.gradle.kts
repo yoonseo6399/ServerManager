@@ -8,6 +8,11 @@ group = "local.servermanager"
 version = file("VERSION").readText().trim()
 repositories {
     mavenCentral()
+    val prepared=file("build/verified-youtube-source-maven")
+    if(prepared.resolve("verified.json").isFile) maven {
+        url=uri(prepared)
+        content {includeVersion("dev.lavalink.youtube","v2","1.18.2");includeVersion("dev.lavalink.youtube","common","1.18.2")}
+    }
     maven(url = "https://maven.lavalink.dev/releases")
 }
 kotlin { jvmToolchain(21) }

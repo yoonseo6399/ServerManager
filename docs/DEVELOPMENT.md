@@ -694,3 +694,5 @@ Common bounded file diff/detail attachments and fenced output, per-run8K/16K, in
 게시된 Beta19 기준 fix/pi-intent-output-budget ef32b51 통합. 실제 사용자 요청 ledger와 fresh request-aware review의 userAuthorized로 검증된 INSIDE 작업의 사전 명시 동의를 위험 등급과 분리한다. 자동 모드 MEDIUM 재확인 반복을 보완하며 명시/외부/미확인/HIGH/DENY/push/PR 경계는 유지한다. 유한 for/파이프/Git 조회 감사와 설정/hook/부모 저장소·내용 변경 확인을 추가했다. Git 시스템/글로벌 config는 격리된 Pi 프로세스에서 자동 로드하지 않는다.
 
 /agent setting tool_output_limit(512..8000,기본2400), 전체 비정밀 도구 원문 보관/첨부+발췌, 정확한 원문/편집 예외, 기존 세션 큰 결과 제한, 원래 카드의 결과 paging 진행, 긴 단일 줄 start_char와 마지막 개행 line count를 보완했다. 관련47개·실제27B 검토3사례 통과, 최초 로딩 취소 실패도 보존. 전체/다른OS/운영 Discord 실기 검증은 생략. 기존 서명 CI를 skip_full_tests=true로 게시하며 stable main/latest와 게시된 태그/파일 보존. 운영 설치·재시작·게시 후 자산 다운로드/해시 비교 없음.
+
+Beta20 게시 전 외부 Maven이 MinIO 디렉터리 HTML을 반환해 CI2회 실패했다. 동일버전 공식 GitHub YouTube v2/common을 SHA256 고정한 빌드 로컬 Maven 준비 스크립트를 추가했다. 내부94클래스/리소스의 바이트 동일, ZIP시간 차이만 확인; 버전/의존성 그래프 불변. 고정 메타데이터와 라이선스 보존, 준비·변조거부·실제 bootJar 검증. ServerManager 게시 자산을 내려받는 검사는 하지 않았다.

@@ -24,6 +24,8 @@ jobs:
         with:
           python-version: '3.12'
       - run: python scripts/test-runner-setup.py
+      - name: Prepare pinned official YouTube dependencies
+        run: python scripts/prepare-youtube-source.py
       - name: Verify file handoff and recovery
         shell: bash
         run: ./gradlew test --tests local.servermanager.DeltaTransferTest --tests local.servermanager.RunnerReceiptRecoveryTest --tests local.servermanager.VerifiedInventoryTest --tests local.servermanager.RunnerIdleStopTest --tests local.servermanager.StartActorTest --tests local.servermanager.PowerSavingTest --tests local.servermanager.RunnerTransferTest --tests local.servermanager.RunnerFoldersTest --tests local.servermanager.TransferMeterTest --tests local.servermanager.TransferTasksTest --tests local.servermanager.TransferWaitTest --tests local.servermanager.TransferBatchTest --tests local.servermanager.RunnerUpdateTest --tests local.servermanager.RunnerWorkspaceTest --tests local.servermanager.RemoteForceStopTest --tests local.servermanager.QueryEndpointTest --tests local.servermanager.SableRelayTest --tests local.servermanager.SableRunnerTest --tests local.servermanager.DatagramOutboxTest --tests local.servermanager.ModSearchTest --tests local.servermanager.ModArtifactsTest --tests local.servermanager.StopWatchdogTest --no-daemon

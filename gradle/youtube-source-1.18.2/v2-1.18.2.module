@@ -1,0 +1,112 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "dev.lavalink.youtube",
+    "module": "v2",
+    "version": "1.18.2",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "8.10"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 8,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api"
+      },
+      "dependencies": [
+        {
+          "group": "dev.lavalink.youtube",
+          "module": "common",
+          "version": {
+            "requires": "1.18.2"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "v2-1.18.2.jar",
+          "url": "v2-1.18.2.jar",
+          "size": 16353,
+          "sha512": "1b9e5c3873fd094707bada29e0a66a7c8d55442d796ed5eacdb3c350795b9be5e53524b543f9f98e7cd6f5615dc363e6ac36a601e50a0df99320f306622fc03c",
+          "sha256": "0f328732150cc2b2ea791b180b32e1eae520944603cccecd4002af9a0c3f39d6",
+          "sha1": "35b98b6ee106feabd7dbb67ae4d8dda078a2f756",
+          "md5": "dcaf73971b5190171d98ebd6b1725cc3"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 8,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "dependencies": [
+        {
+          "group": "org.mozilla",
+          "module": "rhino-engine",
+          "version": {
+            "requires": "1.7.15"
+          }
+        },
+        {
+          "group": "com.grack",
+          "module": "nanojson",
+          "version": {
+            "requires": "1.7"
+          }
+        },
+        {
+          "group": "dev.lavalink.youtube",
+          "module": "common",
+          "version": {
+            "requires": "1.18.2"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "v2-1.18.2.jar",
+          "url": "v2-1.18.2.jar",
+          "size": 16353,
+          "sha512": "1b9e5c3873fd094707bada29e0a66a7c8d55442d796ed5eacdb3c350795b9be5e53524b543f9f98e7cd6f5615dc363e6ac36a601e50a0df99320f306622fc03c",
+          "sha256": "0f328732150cc2b2ea791b180b32e1eae520944603cccecd4002af9a0c3f39d6",
+          "sha1": "35b98b6ee106feabd7dbb67ae4d8dda078a2f756",
+          "md5": "dcaf73971b5190171d98ebd6b1725cc3"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "v2-1.18.2-sources.jar",
+          "url": "v2-1.18.2-sources.jar",
+          "size": 10105,
+          "sha512": "1b4b73c15757766775df517acbb5be9be5e27b99e67b912306069d510e08a9b30c7832d9e38d68e7bcf16e9522be0fe1eb9d5503b33504306f6f5a86b1200110",
+          "sha256": "8fad6266f290aa42e17e7b6111a073d26e9b99aeab43c5cbde98ee6c06146831",
+          "sha1": "a457f9a38ae9e3246becd00e64958e86aab20361",
+          "md5": "377184d493e206163c04aae6ee7abcb4"
+        }
+      ]
+    }
+  ]
+}
