@@ -4,6 +4,7 @@
 
 - 실운영 Let's Create Survival의 실행기 console.log에는 22:41 Sodium NoClassDefFoundError와 exit code 1이 있으나 중앙 console.log는 21:58 설치 성공 로그로 끝났다. 원격 로그는 RuntimeState.events에만 추가됐고 웹 log-window는 기존 console.log를 우선하므로 생긴 문제다.
 - 인증된 해당 실행기의 raw 로그를 중앙 프로필 console.log에도 즉시 append한다. 인메모리 이벤트·Discord 수집은 유지하고 진단 로그는 진단 프로필에 격리한다. 디스크 쓰기 실패는 기록하되 공유 WebSocket을 끊지 않는다. 이전 누락 로그의 소급 복구는 별도 운영 작업이며 자동 수행하지 않는다.
+- 브라우저 tail이 500줄 제한 응답을 받은 뒤 아직 읽지 않은 파일 끝 청크까지 읽었다고 표시하는 버그도 수정한다. 로그가 한꺼번에 몰려도 끝의 크래시를 별도 window로 읽도록 한다. 커밋 뒤 기존 즉시 크래시와 1,200줄 burst 회귀를 함께 실행한다.
 
 ## 커밋 후 검증 계획
 
