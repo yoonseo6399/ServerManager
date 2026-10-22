@@ -64,7 +64,7 @@ class ProjectAgentPersonalServicesTest {
         val denied=schedules.create(session,0,"2026-10-22T00:02:00Z","denied","inspect");now=now.plusSeconds(60);reject=true
         dispatcher.tick();dispatcher.tick();assertEquals(2,count);assertEquals("FAILED",schedules.list("g","u").first {it.id==denied.id}.state)
     }
-    @Test fun `late schedules are marked missed without executing and mutation cannot auto approve`() {
+    @Test fun `late schedules are marked missed and independent ASK for mutation requires approval`() {
         var now=Instant.parse("2026-10-22T00:00:00Z");val schedules=ProjectAgentSchedules(temp){now}
         val session=ProjectAgentChannel("g","c","u",null,temp.toString());val task=schedules.create(session,0,"2026-10-22T00:01:00Z","late","noop")
         now=now.plusSeconds(1000);assertNull(schedules.claim(task.id));assertEquals("MISSED",schedules.list("g","u").single().state)
@@ -72,7 +72,7 @@ class ProjectAgentPersonalServicesTest {
         val tools=ProjectAgentTools(temp.resolve("logs"),services=ProjectAgentPersonalServices(session,schedules,DiscordProjectAgentHistory({null},ProjectAgentHistoryGrants(temp)),{ProjectAgentPreferences()},{ }))
         val policy=PiToolPolicy(temp,temp,tools,AgentAccess.OWNER)
         val checked=policy.check("schedule_task",mapper.readTree("""{"action":"cancel","id":"${task.id}"}"""))
-        val risk=PiApprovalDecision.effective(checked,ProjectAgentRisk("ALLOW","LOW","모델 허용","INSIDE"))
+        val risk=PiApprovalDecision.effective(checked,ProjectAgentRisk("ASK","MEDIUM","예약 변경 동의 필요","INSIDE"))
         assertEquals("ASK",risk.action);assertTrue(PiApprovalDecision.human(false,checked.display,risk,false))
         assertTrue(PiToolPolicy.extras(AgentAccess.READ).none {it["name"]=="schedule_task"});assertTrue(PiToolPolicy.extras(AgentAccess.READ).map {it["name"]}.containsAll(ProjectAgentServicePort.historyNames))
     }

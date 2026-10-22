@@ -25,12 +25,12 @@ class DirectRelayTest {
         val body=ByteArrayOutputStream();varint(body,0);varint(body,767);val name=host.toByteArray();varint(body,name.size);body.write(name);body.write(0x63);body.write(0xdd);varint(body,2)
         val packet=ByteArrayOutputStream();varint(packet,body.size());body.writeTo(packet);packet.write(tail);return packet.toByteArray()
     }
-    /** Fake Minecraft: echoes whatever it receives after the handshake with a prefix, and counts accepted connections. */
+    /** Fake Minecraft: one prefix per connection, then byte-for-byte echo regardless of TCP read boundaries. */
     private class EchoGame:AutoCloseable {
         val server=ServerSocket(0);val accepted=AtomicInteger();val received=java.util.concurrent.CopyOnWriteArrayList<String>()
         init {Thread.ofVirtual().start {while(!server.isClosed){val s=runCatching {server.accept()}.getOrNull() ?: break;accepted.incrementAndGet()
             Thread.ofVirtual().start {runCatching {val b=ByteArray(4096);val i=s.getInputStream();val o=s.getOutputStream()
-                while(true){val n=i.read(b);if(n<0)break;received.add(String(b,0,n));o.write("echo:".toByteArray()+b.copyOf(n));o.flush()}}}}}}
+                var first=true;while(true){val n=i.read(b);if(n<0)break;received.add(String(b,0,n));if(first){o.write("echo:".toByteArray());first=false};o.write(b,0,n);o.flush()}}}}}}
         override fun close(){server.close()}
     }
     private class Setup(val hub:DirectRelayHub,val game:EchoGame,val agent:DirectRelayAgent,val ticketCount:AtomicInteger)
@@ -45,11 +45,18 @@ class DirectRelayTest {
         val s=Socket();s.connect(InetSocketAddress("127.0.0.1",hub.gamePort!!),3000);s.soTimeout=3000
         s.getOutputStream().write(handshake(host,payload.toByteArray()));s.getOutputStream().flush();return s
     }
+    private fun readUntil(s:Socket,marker:String):String {
+        val out=ByteArrayOutputStream();val b=ByteArray(4096)
+        while(!out.toString(Charsets.UTF_8).contains(marker)){
+            val n=s.getInputStream().read(b);assertTrue(n>=0,"EOF before marker $marker");out.write(b,0,n);assertTrue(out.size()<65536,"missing marker $marker")
+        }
+        return out.toString(Charsets.UTF_8)
+    }
     private fun readAll(s:Socket,min:Int):String {val b=ByteArray(4096);var total=ByteArray(0);while(total.size<min){val n=s.getInputStream().read(b);if(n<0)break;total+=b.copyOf(n)};return String(total)}
 
     @Test fun `game bytes flow player to relay to game runner to Minecraft over the encrypted tunnel`() {
         val game=EchoGame().track();val hub=hub();hub.applyPolicy(policy());val agent=agentFor(hub,game);connectedAgent(hub,agent)
-        player(hub).use {assertTrue(readAll(it,"echo:".length+1).startsWith("echo:"));assertTrue(game.received.joinToString("").contains("hello"))}
+        player(hub).use {assertTrue(readUntil(it,"hello").startsWith("echo:"));assertTrue(game.received.joinToString("").contains("hello"))}
         assertTrue(hub.status().agents.single().agentId==agentId)
     }
 
@@ -110,7 +117,7 @@ class DirectRelayTest {
     @Test fun `route switch keeps live streams while new connections use the new agent route`() {
         val oldGame=EchoGame().track();val newGame=EchoGame().track();val hub=hub()
         hub.applyPolicy(policy(1,instance="old"));val agent=agentFor(hub,oldGame,instance="old");connectedAgent(hub,agent)
-        val live=player(hub,payload="before");assertTrue(readAll(live,6).startsWith("echo:"))
+        val live=player(hub,payload="before");assertTrue(readUntil(live,"before").startsWith("echo:"))
         // Same hostname now maps to a different instance served by a second agent.
         val second=UUID.randomUUID().toString();val agent2=DirectRelayAgent({RelayEndpoint("127.0.0.1",hub.securePort!!,DirectRelayCrypto.issue(secret,relayId,second,1,60_000))},{if(it=="new")newGame.server.localPort else null},{it=="new"},backoffMillis=longArrayOf(50)).track();agent2.start()
         hub.applyPolicy(RelayPolicy(2,mapOf(agentId to 1,second to 1),listOf(RelayRoute(host,agentId,"old"))))
@@ -118,9 +125,9 @@ class DirectRelayTest {
         assertTrue(hub.probe(second,"new"));assertFalse(hub.probe(second,"old"),"probe must report not-ready for an instance the agent does not serve")
         hub.applyPolicy(RelayPolicy(3,mapOf(agentId to 1,second to 1),listOf(RelayRoute(host,second,"new"))))
         live.getOutputStream().write("still-alive".toByteArray());live.getOutputStream().flush()
-        assertTrue(readAll(live,16).contains("still-alive"),"existing connection survives the route change")
-        player(hub,payload="after").use {assertTrue(readAll(it,6).startsWith("echo:"))}
-        assertTrue(newGame.received.any {it.contains("after")});assertFalse(oldGame.received.any {it.contains("after")})
+        assertTrue(readUntil(live,"still-alive").contains("still-alive"),"existing connection survives the route change")
+        player(hub,payload="after").use {assertTrue(readUntil(it,"after").startsWith("echo:"))}
+        assertTrue(newGame.received.joinToString("").contains("after"));assertFalse(oldGame.received.joinToString("").contains("after"))
         live.close()
         assertFalse(hub.applyPolicy(RelayPolicy(2,emptyMap(),emptyList())),"older policy generation must be ignored")
         assertTrue(hub.status().rejects.containsKey("STALE_POLICY"))
@@ -132,18 +139,31 @@ class DirectRelayTest {
         hub.applyPolicy(RelayPolicy(2,emptyMap(),emptyList()))
         await("agent notices revocation"){agent.state==RelayAgentState.REJECTED}
         assertTrue(hub.status().agents.isEmpty())
-        assertTrue(runCatching {live.getOutputStream().write("x".toByteArray());live.getInputStream().read()}.getOrDefault(-1)<0)
+        val marker="AFTER_REVOCATION_${UUID.randomUUID()}"
+        runCatching {live.getOutputStream().write(marker.toByteArray());live.getOutputStream().flush()}
+        live.soTimeout=3000
+        val buffered=ByteArrayOutputStream()
+        try {while(true){val n=live.getInputStream().read();if(n<0)break;buffered.write(n);assertTrue(buffered.size()<65536)}}
+        catch(e:java.net.SocketException) { /* Reset is also a closed tunnel; timeout still fails. */ }
+        assertFalse(buffered.toString(Charsets.UTF_8).contains(marker),"post-revocation data reached the game")
+        live.close()
     }
 
     @Test fun `manager outage keeps the established tunnel and reports an explicit reason for new attempts`() {
-        val game=EchoGame().track();val hub=hub();hub.applyPolicy(policy());var managerUp=true
-        val agent=DirectRelayAgent({if(managerUp)RelayEndpoint("127.0.0.1",hub.securePort!!,DirectRelayCrypto.issue(secret,relayId,agentId,1,60_000)) else null},{game.server.localPort},backoffMillis=longArrayOf(50)).track()
-        agent.start();connectedAgent(hub,agent);managerUp=false
-        player(hub).use {assertTrue(readAll(it,6).startsWith("echo:"),"approved traffic continues while the manager is away")}
-        assertEquals(RelayAgentState.CONNECTED,agent.state)
-        hub.close() // relay drops the tunnel; with the manager down the agent must say so rather than quietly reroute
-        await("manager unavailable"){agent.state==RelayAgentState.MANAGER_UNAVAILABLE}
-        assertTrue(agent.reason!!.contains("관리 서버"))
+        // Closing the client and hub concurrently used to race the Kotlin single-item
+        // Collection.toList optimization on ConcurrentHashMap.keys (NoSuchElementException).
+        repeat(20) {
+            val game=EchoGame().track();val hub=hub();hub.applyPolicy(policy());val managerUp=java.util.concurrent.atomic.AtomicBoolean(true)
+            val agent=DirectRelayAgent({if(managerUp.get())RelayEndpoint("127.0.0.1",hub.securePort!!,DirectRelayCrypto.issue(secret,relayId,agentId,1,60_000))else null},{game.server.localPort},backoffMillis=longArrayOf(50)).track()
+            try {
+                agent.start();connectedAgent(hub,agent);managerUp.set(false)
+                player(hub).use {assertTrue(readAll(it,6).startsWith("echo:"),"approved traffic continues while the manager is away")}
+                assertEquals(RelayAgentState.CONNECTED,agent.state)
+                hub.close()
+                await("manager unavailable"){agent.state==RelayAgentState.MANAGER_UNAVAILABLE}
+                assertTrue(agent.reason!!.contains("관리 서버"));assertEquals(0,hub.streamCount())
+            }finally {agent.close();hub.close();game.close()}
+        }
     }
 
     @Test fun `coalesced handshake response and first encrypted frame loses no bytes`() {
@@ -173,7 +193,7 @@ class DirectRelayTest {
         player(hub).use {p->
             // TCP can split handshake and payload into separate echo responses. Drain all pending bytes
             // until the remote EOF; a leaked handed-off socket fails with the bounded socket timeout.
-            val received=p.getInputStream().readBytes().toString(Charsets.UTF_8)
+            val received=readUntil(p,"hello")+p.getInputStream().readBytes().toString(Charsets.UTF_8)
             assertTrue(received.startsWith("echo:"));assertTrue(received.contains("hello"))
             await("timeout cleans stream"){hub.streamCount()==0 && agent.streamCount()==0}
         }

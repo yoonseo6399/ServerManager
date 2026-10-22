@@ -21,81 +21,68 @@ class ProjectAgentTest {
         return Triple(store,session,preferences)
     }
     private fun call(name:String,args:Map<String,Any>)=ProjectAgentTool(name,mapper.valueToTree(args))
-    private fun response(tool:ProjectAgentTool)=mapper.writeValueAsString(mapOf("message" to "작업합니다","tool" to tool))
-    private fun model(tool:ProjectAgentTool,risk:String=allow,observe:(List<ProjectAgentMessage>,Boolean)->Unit={_,_->}):ProjectAgentInference {
-        var actor=0
-        return ProjectAgentInference {messages,think,_->observe(messages,think)
-            val path=temporary.resolve("project").resolve(tool.arguments.path("path").asText("."))
-            val existing=path.isRegularFile() && tool.name in setOf("write_file","edit_file") && !tool.arguments.path("path").asText().startsWith("../")
-            when {
-                messages.first().content.startsWith("Independent")->risk
-                messages.first().content.startsWith("Requirement extractor")->mapper.writeValueAsString(mapOf("items" to listOf(messages.last().content)))
-                actor++==0 && existing->response(call("read_file",mapOf("path" to tool.arguments.path("path").asText())))
-                actor==1 || (existing && actor==2)->response(if(existing && tool.name=="write_file")call("edit_file",mapOf("path" to tool.arguments.path("path").asText(),"find" to path.readText(),"replace" to tool.arguments.path("content").asText()))else tool)
-                else->{
-                    val pinned=messages.firstOrNull {it.content.contains("current_requester") }?.let {mapper.readTree(it.content)}
-                    val receipt=pinned?.path("verified_tool_receipts")?.lastOrNull {it.path("tool").asText() in setOf("write_file","edit_file","run_command","make_new_project")}
-                    mapper.writeValueAsString(mapOf("message" to "완료했습니다","tool" to null,"requirements" to listOf(mapOf("id" to "R1","status" to "done","evidence_ids" to listOfNotNull(receipt?.path("id")?.asText()),"evidence" to "실제 도구 결과로 요청 작업을 확인했습니다"))))
-                }
-            }
-        }
-    }
     private fun engine(store:ProjectAgentStore)=ProjectAgentEngine(store,{s->ProjectAgentTools(temporary.resolve("logs")){name,path->store.register(s.guild,s.user,name,path)}})
-    @Test fun `auto mode edits project file but reviewer sees no actor history`() {
-        val (store,session,prefs)=setup(false);val project=Path.of(session.home);project.resolve("note.txt").writeText("before")
-        val calls=mutableListOf<List<ProjectAgentMessage>>();val events=mutableListOf<ProjectAgentEvent>()
-        engine(store).use {e->e.run("channel","owner","문구 수정",prefs,model(call("write_file",mapOf("path" to "note.txt","content" to "after")),observe={m,t->calls.add(m);if(m.first().content.startsWith("Independent")){assertEquals(2,m.size);assertFalse(t);assertContains(m.last().content,"canonical_targets");assertContains(m.first().content,"symlink")}}),{},events::add)}
-        assertEquals("after",project.resolve("note.txt").readText());assertFalse(events.any {it.kind=="approval"});assertTrue(events.any {it.kind=="tool_end"})
-        assertTrue(calls.count {it.first().content.startsWith("Independent")}==1)
-        assertTrue(ProjectAgentStore(temporary.resolve("settings")).channel("channel")!!.history.any {it.content.contains("문구 수정")})
-    }
-    @Test fun `explicit mode requires approval for even safe writes and tokens cannot be reused`() {
-        val (store,session,prefs)=setup();val file=Path.of(session.home).resolve("note.txt");file.writeText("before")
-        engine(store).use {e->e.run("channel","owner","수정",prefs,model(call("write_file",mapOf("path" to "note.txt","content" to "after"))),{}) {event->
-            if(event.kind=="approval") {assertEquals("before",file.readText());assertFails {e.approve("channel","other",event.token!!,true){}};assertFails {e.approve("other","owner",event.token!!,true){}};e.approve("channel","owner",event.token!!,true){};assertFails {e.approve("channel","owner",event.token,true){}}}
-        }}
-        assertEquals("after",file.readText())
-    }
-    @Test fun `outside project cannot auto execute even if reviewer incorrectly labels it inside low risk`() {
-        val (store,_,prefs)=setup(false);val outside=temporary.resolve("outside.txt");outside.writeText("original")
-        var asked=false
-        engine(store).use {e->e.run("channel","owner","수정",prefs,model(call("write_file",mapOf("path" to "../outside.txt","content" to "wrong"))),{}) {event->
-            if(event.kind=="approval"){asked=true;assertEquals("OUTSIDE",event.plan!!.scope);assertEquals("original",outside.readText());e.approve("channel","owner",event.token!!,false){}}
-        }}
-        assertTrue(asked);assertEquals("original",outside.readText())
-    }
-    @Test fun `shell command stays unknown and needs human even with low risk auto verdict`() {
-        val (store,session,prefs)=setup(false);var asked=false
-        engine(store).use {e->e.run("channel","owner","새 파일 생성",prefs,model(call("run_command",mapOf("command" to "printf hello > created.txt"))),{}) {event->
-            if(event.kind=="approval"){asked=true;assertEquals("UNKNOWN",event.plan!!.scope);assertFalse(Path.of(session.home).resolve("created.txt").exists());e.approve("channel","owner",event.token!!,true){}}
-        }}
-        assertTrue(asked);assertEquals("hello",Path.of(session.home).resolve("created.txt").readText())
-    }
-    @Test fun `review deny and malformed review never run a command`() {
-        for(risk in listOf("not JSON","""{"action":"DENY","risk":"HIGH","reason":"위험","projectScope":"UNKNOWN"}""")) {
-            val (store,session,prefs)=setup(false)
-            engine(store).use {e->e.run("channel","owner","실행",prefs,model(call("run_command",mapOf("command" to "touch denied.txt")),risk),{}){}}
-            assertFalse(Path.of(session.home).resolve("denied.txt").exists())
+    @Test fun `Pi auto edit preserves source and reviewer receives fresh isolated input`() {
+        PiTestFixture(temporary,false).use {f->
+            val file=f.home.resolve("note.txt");file.writeText("before\r\nTAIL\r\n");var step=0
+            val model=f.model {q->when(step++){
+                0->PiTestFixture.call("read",mapOf("path" to "note.txt"))
+                1->PiTestFixture.call("edit",mapOf("path" to "note.txt","edits" to listOf(mapOf("oldText" to "before","newText" to "after"))))
+                else->{assertContains(q.toString(),"before");PiTestFixture.answer("수정 완료")}
+            }}
+            f.run(model,"note.txt 첫 문구만 수정")
+            assertEquals("after\r\nTAIL\r\n",file.readText());assertTrue(f.events.none {it.kind=="approval"})
+            assertEquals(2,model.reviews.size);model.reviews.forEach {m->assertEquals(2,m.size);assertContains(m.last().content,"canonical_targets");assertFalse(m.last().content.contains("tool_results"))}
+            assertTrue(ProjectAgentStore(f.profile).channel("c")!!.history.any {it.content.contains("첫 문구")})
         }
     }
-    @Test fun `expired approval and changed preferences cannot execute pending tool`() {
-        val (store,session,prefs)=setup();var now=Instant.now()
-        ProjectAgentEngine(store,{ProjectAgentTools(temporary.resolve("logs"))},{now},2).use {e->e.run("channel","owner","생성",prefs,model(call("write_file",mapOf("path" to "new.txt","content" to "no"))),{}) {event->
-            if(event.kind=="approval") {now=now.plusSeconds(3);assertFails {e.approve("channel","owner",event.token!!,true){}}}
-        }}
-        assertFalse(Path.of(session.home).resolve("new.txt").exists())
+    @Test fun `Pi explicit write checks owner channel and single use approval`() {
+        PiTestFixture(temporary).use {f->
+            val file=f.home.resolve("note.txt");file.writeText("before");var step=0;var approvals=0
+            val model=f.model {if(step++==0)PiTestFixture.call("write",mapOf("path" to "note.txt","content" to "after"))else PiTestFixture.answer("완료")}
+            f.run(model,onEvent={e->if(e.kind=="approval"){
+                approvals++;assertEquals("before",file.readText());assertFails {f.engine.approve("c","other",e.token!!,true){}};assertFails {f.engine.approve("other","u",e.token!!,true){}}
+                f.engine.approve("c","u",e.token!!,true){};assertFails {f.engine.approve("c","u",e.token,true){}}
+            }})
+            assertEquals("after",file.readText());assertEquals(1,approvals)
+        }
     }
-    @Test fun `policy revision cancels pending authorization`() {
-        val (store,session,prefs)=setup()
-        assertFails {engine(store).use {e->e.run("channel","owner","생성",prefs,model(call("write_file",mapOf("path" to "new.txt","content" to "no"))),{}) {event->
-            if(event.kind=="approval") {store.settings("guild","owner",null,null,false);assertFails {e.approve("channel","owner",event.token!!,true){}};e.stop("channel","owner")}
-        }}}
-        assertFalse(Path.of(session.home).resolve("new.txt").exists())
+    @Test fun `Pi owner execution follows independent LOW rather than a backend scope override`() {
+        PiTestFixture(temporary,false).use {f->
+            val file=f.root.resolve("outside.txt");file.writeText("before");var step=0
+            val model=f.model {if(step++==0)PiTestFixture.call("write",mapOf("path" to file.toString(),"content" to "after"))else PiTestFixture.answer("완료")}
+            f.run(model,"시험 폴더의 파일 수정");assertEquals("after",file.readText());assertTrue(f.events.none {it.kind=="approval"})
+            assertEquals("OUTSIDE",f.events.single {it.kind=="tool_start"}.plan!!.scope)
+        }
     }
-    @Test fun `revoked owner cannot run even first tool`() {
-        val (store,session,prefs)=setup(false)
-        assertFails {engine(store).use {it.run("channel","owner","쓰기",prefs,model(call("write_file",mapOf("path" to "never","content" to "no"))),{error("revoked")}){}}}
-        assertFalse(Path.of(session.home).resolve("never").exists())
+    @Test fun `Pi compound shell LOW executes without static UNKNOWN escalation`() {
+        PiTestFixture(temporary,false).use {f->var step=0
+            f.run(f.model {if(step++==0)PiTestFixture.call("bash",mapOf("command" to "printf hello > created.txt && cat created.txt"))else PiTestFixture.answer("완료")})
+            assertEquals("hello",f.home.resolve("created.txt").readText());assertTrue(f.events.none {it.kind=="approval"});assertEquals(0,f.events.single {it.kind=="tool_end"}.exitCode)
+        }
+    }
+    @Test fun `Pi DENY and malformed review never execute the proposed command`() {
+        for(risk in listOf("not JSON","""{"action":"DENY","risk":"HIGH","reason":"위험","projectScope":"UNKNOWN"}"""))PiTestFixture(temporary,false).use {f->var step=0
+            f.run(f.model(risk) {q->if(step++==0)PiTestFixture.call("bash",mapOf("command" to "touch denied.txt"))else {assertContains(q.toString(),"EXECUTION_DENIED");PiTestFixture.answer("미실행")}})
+            assertFalse(f.home.resolve("denied.txt").exists());assertTrue(f.events.none {it.kind=="tool_start"})
+        }
+    }
+    @Test fun `Pi expired approval cannot execute a pending native write`() {
+        var now=Instant.now();PiTestFixture(temporary,clock={now},approvalSeconds=1).use {f->var step=0
+            f.run(f.model {if(step++==0)PiTestFixture.call("write",mapOf("path" to "new.txt","content" to "no"))else PiTestFixture.answer("미실행")},onEvent={e->if(e.kind=="approval"){now=now.plusSeconds(2);assertFails {f.engine.approve("c","u",e.token!!,true){}}}})
+            assertFalse(f.home.resolve("new.txt").exists())
+        }
+    }
+    @Test fun `Pi settings revision cancels pending authorization`() {
+        PiTestFixture(temporary).use {f->
+            assertFails {f.run(f.model {PiTestFixture.call("write",mapOf("path" to "new.txt","content" to "no"))},onEvent={e->if(e.kind=="approval"){f.store.settings("g","u",null,null,false);assertFails {f.engine.approve("c","u",e.token!!,true){}};f.engine.stop("c","u")}})}
+            assertFalse(f.home.resolve("new.txt").exists())
+        }
+    }
+    @Test fun `Pi revoked owner cannot reach inference or execute a tool`() {
+        PiTestFixture(temporary,false).use {f->val model=f.model {PiTestFixture.call("write",mapOf("path" to "never","content" to "no"))}
+            assertFails {f.run(model,authorize={error("revoked")})};assertEquals(0,model.actorCalls);assertFalse(f.home.resolve("never").exists())
+        }
     }
     @Test fun `symlink escape and changed symlink after approval are detected`() {
         val (store,session,_)=setup();val project=Path.of(session.home);val outside=temporary.resolve("outside").createDirectories();outside.resolve("secret.txt").writeText("outside")
@@ -108,11 +95,11 @@ class ProjectAgentTest {
         assertFails {tools.execute(project,approved){}}
         assertEquals("inside",inside.resolve("secret.txt").readText())
     }
-    @Test fun `changed file after permission prompt is not overwritten`() {
-        val (store,session,prefs)=setup();val file=Path.of(session.home).resolve("note");file.writeText("before")
-        val results=mutableListOf<ProjectAgentEvent>()
-        engine(store).use {e->e.run("channel","owner","쓰기",prefs,model(call("write_file",mapOf("path" to "note","content" to "wrong"))),{}) {event->results.add(event);if(event.kind=="approval"){file.writeText("external");e.approve("channel","owner",event.token!!,true){}}}}
-        assertEquals("external",file.readText());assertTrue(results.any {it.kind=="tool_end" && it.text.contains("실패")})
+    @Test fun `Pi native write has no backend fingerprint veto after owner approval`() {
+        PiTestFixture(temporary).use {f->val file=f.home.resolve("note");file.writeText("before");var step=0
+            f.run(f.model {if(step++==0)PiTestFixture.call("write",mapOf("path" to "note","content" to "approved"))else PiTestFixture.answer("완료")},onEvent={e->if(e.kind=="approval"){file.writeText("external");f.engine.approve("c","u",e.token!!,true){}}})
+            assertEquals("approved",file.readText());assertEquals(1,f.events.count {it.kind=="tool_end"})
+        }
     }
     @Test fun `project creation registers new home and git diff output is condensed for model`() {
         val (store,session,_)=setup();val root=Path.of(session.home)
@@ -150,45 +137,36 @@ class ProjectAgentTest {
         assertNull(loaded.preferences("guild","other").model)
         val command=DiscordProjectAgent.command();assertEquals("agent",command.name)
         val run=command.subcommands.single {it.name=="run"};assertFalse(run.options.single {it.name=="model"}.isRequired)
-        assertEquals(setOf("setting","channel","project","run","link","stop","context","turns"),command.subcommands.map {it.name}.toSet());command.toData()
+        assertEquals(setOf("setting","channel","project","run","link","stop","context","turns","history","schedules"),command.subcommands.map {it.name}.toSet());command.toData()
     }
     @Test fun `routing model receives only message and no past actor context`() {
         val (store,_,_)=setup();engine(store).use {e->assertTrue(e.route("프로젝트 만들어줘",ProjectAgentInference {m,think,_->assertEquals(2,m.size);assertFalse(think);"""{"addressed":true}"""}));assertFalse(e.route("친구야 안녕",ProjectAgentInference {_,_,_->"invalid"}))}
     }
-    @Test fun `outside read requires consent and never reaches acting model before permission`() {
-        val (store,_,prefs)=setup(false);val outside=temporary.resolve("private.txt");outside.writeText("PRIVATE_MARKER_123")
-        var asked=false;val observed=mutableListOf<String>()
-        engine(store).use {e->e.run("channel","owner","파일 보기",prefs,model(call("read_file",mapOf("path" to outside.toString())),observe={m,_->observed.add(m.joinToString {it.content})}),{}) {event->if(event.kind=="approval"){asked=true;e.approve("channel","owner",event.token!!,false){}}}}
-        assertTrue(asked);assertTrue(observed.none {it.contains("PRIVATE_MARKER_123")})
+    @Test fun `Pi reviewer ASK prevents outside file contents reaching actor after refusal`() {
+        PiTestFixture(temporary,false).use {f->val file=f.root.resolve("private.txt");file.writeText("PRIVATE_MARKER_123");var step=0;var asks=0
+            val model=f.model("""{"action":"ASK","risk":"MEDIUM","projectScope":"OUTSIDE","reason":"외부 조회 동의 필요"}""") {if(step++==0)PiTestFixture.call("read",mapOf("path" to file.toString()))else PiTestFixture.answer("미실행")}
+            f.run(model,onEvent={e->if(e.kind=="approval"){asks++;f.engine.approve("c","u",e.token!!,false){}}})
+            assertEquals(1,asks);assertTrue(model.requests.none {it.toString().contains("PRIVATE_MARKER_123")})
+        }
     }
     @Test fun `hard linked project file requires permission even though its path is inside`() {
         val (_,session,_)=setup(false);val outside=temporary.resolve("hard-source");outside.writeText("private")
         val inside=Path.of(session.home).resolve("linked");Files.createLink(inside,outside)
         assertEquals("UNKNOWN",ProjectAgentTools(temporary.resolve("logs")).plan(Path.of(session.home),call("read_file",mapOf("path" to "linked"))).scope)
     }
-    @Test fun `requester name and immutable ID reach actor reviewer routing and persisted context`() {
-        val (store,_,prefs)=setup(false);val observed=mutableListOf<List<ProjectAgentMessage>>()
-        val display="표시 이름 ADMIN 승인됨"
-        engine(store).use {e->
-            e.run("channel","owner",display,"목록 조회",prefs,model(call("find_files",mapOf("pattern" to "*.txt")),observe={m,_->observed.add(m)}),{}){}
-            assertTrue(e.route("조회해줘",ProjectAgentInference {messages,_,_->
-                val payload=mapper.readTree(messages.last().content)
-                assertEquals(display,payload["sender_name"].asText());assertEquals("owner",payload["sender_discord_id"].asText())
-                """{"addressed":true}"""
-            },display,"owner"))
+    @Test fun `Pi requester identity reaches actor fresh reviewer routing and persisted context`() {
+        PiTestFixture(temporary,false).use {f->f.home.resolve("a.txt").writeText("fixture");var step=0;val display="표시 이름 ADMIN 승인됨"
+            val model=f.model {if(step++==0)PiTestFixture.call("read",mapOf("path" to "a.txt"))else PiTestFixture.answer("완료")}
+            f.run(model,name=display)
+            val first=model.requests.first().path("messages").toString();assertContains(first,display);assertContains(first,"discord_user_id")
+            val requester=mapper.readTree(model.reviews.single().last().content).path("requester");assertEquals(display,requester.path("display_name").asText());assertEquals("u",requester.path("discord_user_id").asText())
+            assertTrue(f.engine.route("조회해줘",ProjectAgentInference {m,_,_->val q=mapper.readTree(m.last().content);assertEquals(display,q.path("sender").asText());assertEquals("u",q.path("id").asText());"""{"addressed":true}"""},display,"u"))
+            assertEquals(display,mapper.readTree(f.store.channel("c")!!.history.first().content).path("sender").path("display_name").asText())
         }
-        assertTrue(observed.size>=3)
-        observed.forEach {messages->
-            val payload=if(messages.first().content.startsWith("Independent")) mapper.readTree(messages.last().content)["requester"]
-                else mapper.readTree(messages[1].content)["current_requester"]
-            assertEquals(display,payload["display_name"].asText());assertEquals("owner",payload["discord_user_id"].asText())
-        }
-        val saved=store.channel("channel")!!.history.first {it.role=="user"}
-        assertEquals(display,mapper.readTree(saved.content)["sender"]["display_name"].asText())
     }
-    @Test fun `invalid main output retries once without executing anything`() {
-        val (store,_,prefs)=setup(false);var calls=0;val events=mutableListOf<ProjectAgentEvent>()
-        engine(store).use {e->e.run("channel","owner","hello",prefs,ProjectAgentInference {_,_,_->if(calls++==0)"bad JSON" else """{"message":"안녕하세요","tool":null}"""},{},events::add)}
-        assertEquals(2,calls);assertTrue(events.any {it.kind=="done" && it.text=="안녕하세요"});assertFalse(events.any {it.kind=="tool_start"})
+    @Test fun `Pi ordinary prose is not parsed as legacy JSON or silently retried`() {
+        PiTestFixture(temporary,false).use {f->val model=f.model {PiTestFixture.answer("안녕하세요. JSON 명령문이 아닙니다.")}
+            f.run(model,"hello");assertEquals(1,model.actorCalls);assertTrue(f.events.none {it.kind=="tool_start"});assertEquals("안녕하세요. JSON 명령문이 아닙니다.",f.events.last().text)
+        }
     }
 }

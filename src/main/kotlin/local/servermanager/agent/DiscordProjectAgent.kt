@@ -426,7 +426,7 @@ internal class DiscordProjectAgentDisplay(private val channel:TextChannel,privat
     private fun output(text:String,plan:ProjectAgentPlan?)=if(PiToolOutput.limited(plan?.tool?.name ?: "bash"))PiToolOutput.live(text,toolOutputLimit)else text
     private fun tn(turn:Int)=if(maxTurns>0)"$turn/$maxTurns" else "$turn"
     private val readResults=mutableSetOf<String>();private val cardBases=mutableMapOf<String,net.dv8tion.jda.api.entities.MessageEmbed>();private val turns=mutableMapOf<String,Message>();private val threads=mutableMapOf<String,ThreadChannel>()
-    private val replies=mutableMapOf<Int,DiscordAgentText>();private val logs=mutableMapOf<String,Pair<StringBuilder,DiscordAgentText>>()
+    private val thoughts=mutableMapOf<Int,DiscordAgentText>();private val replies=mutableMapOf<Int,DiscordAgentText>();private val logs=mutableMapOf<String,Pair<StringBuilder,DiscordAgentText>>()
     private var usage:QwenUsage?=null;private var finished=false
     private class StatusSlot(val message:Message) {var active=true;lateinit var edits:CoalescedMessageEdits<net.dv8tion.jda.api.entities.MessageEmbed>}
     private var live:StatusSlot?=null
@@ -464,6 +464,7 @@ internal class DiscordProjectAgentDisplay(private val channel:TextChannel,privat
         // new answer chunk, preserving every completed tool card and the top summary.
         if(live!=null){retireStatus()?.delete()?.queue({}, {});statusSlot()}
     }
+    private fun clearThinking(){thoughts.values.forEach {it.discard()};thoughts.clear()}
     private fun reply(turn:Int)=replies.getOrPut(turn){DiscordAgentText(channel,editIntervalMillis,::textPosted)}
     @Synchronized fun emit(event:ProjectAgentEvent) {
         if(finished)return
@@ -479,13 +480,14 @@ internal class DiscordProjectAgentDisplay(private val channel:TextChannel,privat
             "ledger"->render("턴 ${tn(event.turn)} · 📋 ${event.text.take(200)}")
             "steer"->render("턴 ${tn(event.turn)} · 🧭 개입 반영: ${event.text.take(120).replace('\n',' ')}")
             "thinking"->{
+                clearThinking()
                 event.usage?.let {usage=it}
                 if(actorTurn!=event.turn){retireStatus()?.delete()?.queue({}, {});actorTurn=event.turn;latestStatus="모델 응답 대기";statusSlot()}
                 render("모델 응답 대기")
             }
-            "stream"->{if(event.text.isNotBlank())reply(event.turn).offer(event.text) else if(!event.output.isNullOrBlank())reply(event.turn).offer("‘${event.output.takeLast(1500)}’")}
-            "message"->{reply(event.turn).offer(event.text);render("턴 ${tn(event.turn)} · 모델 응답")}
-            "reviewing"->render("턴 ${tn(event.turn)} · 독립 위험 검토")
+            "stream"->{if(event.text.isNotBlank()){clearThinking();reply(event.turn).offer(event.text)}else if(!event.output.isNullOrBlank())thoughts.getOrPut(event.turn){DiscordAgentText(channel,editIntervalMillis,::textPosted)}.offer("‘${event.output.takeLast(1500)}’")}
+            "message"->{clearThinking();reply(event.turn).offer(event.text);render("턴 ${tn(event.turn)} · 모델 응답")}
+            "reviewing"->{clearThinking();render("턴 ${tn(event.turn)} · 독립 위험 검토")}
             "question"->{
                 val choices=event.plan!!.tool.arguments.path("choices").mapIndexed {i,v->Button.secondary("qa:answer:${event.token}:$i",v.asText())}
                 val message=channel.sendMessageEmbeds(EmbedBuilder().setTitle("루오의 질문").setDescription(event.text).setFooter("선택지를 누르거나 이 채널에 직접 답해주세요. 실행 승인은 아닙니다.").build()).setComponents(ActionRow.of(choices)).setAllowedMentions(emptyList()).complete()
@@ -493,6 +495,7 @@ internal class DiscordProjectAgentDisplay(private val channel:TextChannel,privat
             }
             "question_answered"->{turns["question:${event.token}"]?.editMessageEmbeds(DiscordQuestionAnswer.embed(event.plan!!.tool.arguments.path("question").asText(),event.text,event.requesterId.orEmpty()))?.setComponents(emptyList())?.setAllowedMentions(emptyList())?.queue({}, {})}
             "approval","tool_start","denied"->{
+                clearThinking()
                 val plan=event.plan!!
                 val card=EmbedBuilder().setTitle("턴 ${event.turn} : ${plan.tool.name} · ${when(event.kind){"approval"->"승인 대기";"denied"->"실행 거부";else->"도구 실행 중"}}").setDescription(plan.description.take(2800))
                     .addField("실행 폴더",plan.cwd.take(1000),false)
@@ -529,7 +532,7 @@ internal class DiscordProjectAgentDisplay(private val channel:TextChannel,privat
                 }
                 render("턴 ${tn(event.turn)} · 결과 검토 후 다음 단계")
             }
-            "done"->{if(readResults.isNotEmpty())DiscordResultCards.finishReading(channel.id,readResults);reply(event.turn).offer(event.text,true);finished=true;render("${if(event.text.startsWith("작업 중단"))"중단" else "종료"} · ${"%.1f".format(java.util.Locale.ROOT,event.seconds)}초",true);turns.values.forEach {it.editMessageComponents(emptyList()).queue({}, {})}}
+            "done"->{clearThinking();if(readResults.isNotEmpty())DiscordResultCards.finishReading(channel.id,readResults);reply(event.turn).offer(event.text,true);finished=true;render("${if(event.text.startsWith("작업 중단"))"중단" else "종료"} · ${"%.1f".format(java.util.Locale.ROOT,event.seconds)}초",true);turns.values.forEach {it.editMessageComponents(emptyList()).queue({}, {})}}
         }
     }
 }

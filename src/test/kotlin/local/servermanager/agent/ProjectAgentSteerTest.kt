@@ -30,43 +30,32 @@ class ProjectAgentSteerTest {
         }
     }
 
-    @Test fun `an instruction sent during a run reaches the next model call and is shown as an event`() {
-        val store=setup()
-        val inFirstCall=CountDownLatch(1);val release=CountDownLatch(1)
-        val seen=mutableListOf<List<ProjectAgentMessage>>()
-        val events=java.util.concurrent.CopyOnWriteArrayList<ProjectAgentEvent>()
-        val calls=java.util.concurrent.atomic.AtomicInteger()
-        val model=ProjectAgentInference {messages,_,_->
-            seen.add(messages)
-            if(calls.incrementAndGet()==1){inFirstCall.countDown();assertTrue(release.await(10,TimeUnit.SECONDS))
-                mapper.writeValueAsString(mapOf("message" to "done with the first goal","status" to "completed","tool" to null))}
-            else mapper.writeValueAsString(mapOf("message" to "now doing the new goal","status" to "completed","tool" to null))
-        }
-        ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {e->
-            val runner=Thread {e.run("channel","owner","owner","first goal",prefs,model,ProjectAgentLimits(5,AgentAccess.OWNER),{},{events.add(it)})}
-            runner.start()
-            assertTrue(inFirstCall.await(10,TimeUnit.SECONDS))
-            assertTrue(e.steer("channel","owner","change direction: do the second goal instead"))
-            release.countDown();runner.join(15000)
-            assertEquals(2,calls.get(),"the run must continue instead of finishing with the old goal")
-            assertTrue(seen[1].any {it.role=="user" && it.content.contains("mid_task_instruction") && it.content.contains("second goal")})
-            assertFalse(seen[0].any {it.role=="user" && it.content.contains("mid_task_instruction")})
-            assertTrue(events.any {it.kind=="done" && it.text.contains("new goal")})
+    @Test fun `Pi steering reaches the next actor call and emits user visible acknowledgement`() {
+        PiTestFixture(temp,false).use {f->val entered=CountDownLatch(1);val release=CountDownLatch(1);val accepted=CountDownLatch(1);var step=0;val failure=java.util.concurrent.atomic.AtomicReference<Throwable>()
+            val model=f.model {q->if(step++==0){entered.countDown();check(release.await(10,TimeUnit.SECONDS));PiTestFixture.answer("first goal")}else {assertContains(q.toString(),"second goal");PiTestFixture.answer("new goal")}}
+            val runner=Thread {try{f.run(model,onEvent={if(it.kind=="steer")accepted.countDown()})}catch(t:Throwable){failure.set(t)}}
+            try {runner.start();assertTrue(entered.await(10,TimeUnit.SECONDS));assertFails {f.engine.steer("c","other","intruder")};assertTrue(f.engine.steer("c","u","change direction: second goal"));assertTrue(accepted.await(3,TimeUnit.SECONDS));release.countDown();runner.join(15000);assertFalse(runner.isAlive);failure.get()?.let {throw it};assertEquals(2,model.actorCalls);assertEquals("new goal",f.events.last().text)}finally{release.countDown();f.engine.stop("c","u");runner.join(3000)}
         }
     }
 
-    @Test fun `a steer already waiting is applied before the first call and the queue is bounded`() {
-        val store=setup()
-        ProjectAgentEngine(store,{ProjectAgentTools(temp.resolve("logs"))}).use {e->
-            val started=CountDownLatch(1);val release=CountDownLatch(1)
-            val model=ProjectAgentInference {_,_,_->started.countDown();assertTrue(release.await(10,TimeUnit.SECONDS))
-                mapper.writeValueAsString(mapOf("message" to "ok","status" to "completed","tool" to null))}
-            val runner=Thread {e.run("channel","owner","owner","goal",prefs,model,ProjectAgentLimits(3,AgentAccess.OWNER),{},{})}
-            runner.start();assertTrue(started.await(10,TimeUnit.SECONDS))
-            repeat(5) {assertTrue(e.steer("channel","owner","msg $it"))}
-            assertFailsWith<IllegalStateException> {e.steer("channel","owner","one too many")}
-            assertFailsWith<IllegalArgumentException> {e.steer("channel","owner","   ")}
-            e.stop("channel","owner");release.countDown();runner.join(15000)
+    @Test fun `Pi startup steering is retained before session creation and capped at five inputs`() {
+        PiTestFixture(temp,false).use {f->val entered=CountDownLatch(1);val release=CountDownLatch(1);val first=java.util.concurrent.atomic.AtomicBoolean(true);val failure=java.util.concurrent.atomic.AtomicReference<Throwable>()
+            val model=f.model {PiTestFixture.answer("startup applied")}
+            val runner=Thread {try{f.run(model,authorize={if(first.compareAndSet(true,false)){entered.countDown();check(release.await(10,TimeUnit.SECONDS))}})}catch(t:Throwable){failure.set(t)}}
+            try {runner.start();assertTrue(entered.await(10,TimeUnit.SECONDS));repeat(5){assertTrue(f.engine.steer("c","u","startup-$it"))};assertFails {f.engine.steer("c","u","sixth")};assertFails {f.engine.steer("c","u","   ")};release.countDown();runner.join(15000);assertFalse(runner.isAlive);failure.get()?.let {throw it};assertContains(model.requests.first().toString(),"startup-0");repeat(5){assertContains(model.requests.joinToString(),"startup-$it")};assertTrue(model.actorCalls in 1..6);assertEquals(5,f.events.count {it.kind=="steer"})}finally {release.countDown();f.engine.stop("c","u");runner.join(3000)}
         }
     }
+    @Test fun `Pi active session also refuses a sixth steering input before execution`() {
+        PiTestFixture(temp,false).use {f->val entered=CountDownLatch(1);val release=CountDownLatch(1);val ended=CountDownLatch(1)
+            val model=f.model {entered.countDown();release.await();PiTestFixture.answer("cancelled")}
+            val runner=Thread {try{f.run(model)}catch(_:Exception){}finally{ended.countDown()}}
+            try {
+                runner.start();assertTrue(entered.await(10,TimeUnit.SECONDS))
+                repeat(5){assertTrue(f.engine.steer("c","u","queued-$it"))}
+                assertFailsWith<IllegalStateException> {f.engine.steer("c","u","sixth")}
+                f.engine.stop("c","u");assertTrue(ended.await(3,TimeUnit.SECONDS));assertTrue(f.events.none {it.kind=="tool_start"})
+            }finally {release.countDown();runner.interrupt();runner.join(3000)}
+        }
+    }
+
 }

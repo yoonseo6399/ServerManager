@@ -113,19 +113,11 @@ class ProjectAgentReliabilityTest {
         assertEquals(1,calls)
     }
 
-    @Test fun `changing line counts cannot repeat the same complete file result forever`() {
-        val home=root.resolve("project").createDirectories().toRealPath();home.resolve("a.txt").writeText("keep\n")
-        val store=ProjectAgentStore(root.resolve("settings"));store.addChannel(ProjectAgentChannel("g","c","u",null,home.toString()))
-        var actor=0;val events=mutableListOf<ProjectAgentEvent>()
-        ProjectAgentEngine(store,{ProjectAgentTools(root.resolve("logs"))}).use {engine->
-            engine.run("c","u","a.txt 내용을 확인해",ProjectAgentPreferences(),ProjectAgentInference {messages,_,_->
-                if(messages.first().content.startsWith("Context compressor"))"이미 읽은 원문 keep"
-                else {actor++;mapper.writeValueAsString(mapOf("message" to "조회","tool" to tool("read_file","path" to "a.txt","lines" to actor*10)))}
-            },{}) {events.add(it)}
+    @Test fun `Pi repeated reads remain bounded by the configured actor turn limit`() {
+        PiTestFixture(root,false).use {f->val file=f.home.resolve("a.txt");file.writeText("keep\n");var count=0
+            val model=f.model {PiTestFixture.call("read",mapOf("path" to "a.txt","limit" to ++count*10))}
+            assertFails {f.run(model,turns=4)};assertEquals(4,model.actorCalls);assertEquals(4,f.events.count {it.kind=="tool_end"});assertEquals("keep\n",file.readText())
         }
-        assertEquals(4,events.count {it.kind=="tool_end"})
-        assertContains(events.last {it.kind=="done"}.text,"같은 조회 결과")
-        assertEquals("keep\n",home.resolve("a.txt").readText())
     }
 
     @Test fun `missing file errors do not pretend that files exceed a size limit`() {

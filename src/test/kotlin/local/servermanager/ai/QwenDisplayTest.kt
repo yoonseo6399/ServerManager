@@ -61,7 +61,7 @@ class QwenDisplayTest {
         s.waitFor {s.top.card?.footer?.text?.contains("13.5 tok/s")==true};assertContains(s.top.card!!.footer!!.text!!,"18.0/24.0 GiB")
         display.emit(ProjectAgentEvent("stream",1,output="actual thought"));s.waitFor {s.rows.any {it.text=="‘actual thought’"} && s.rows.last().card?.title?.startsWith("상태창")==true}
         assertTrue(s.rows[1].deleted,"Old live placeholder should move below the new plain message")
-        display.emit(ProjectAgentEvent("stream",1,text="**answer**"));s.waitFor {s.rows.any {it.text=="**answer**"}}
+        display.emit(ProjectAgentEvent("stream",1,text="**answer**"));s.waitFor {s.rows.any {it.text=="**answer**"} && s.rows.single {it.text=="‘actual thought’"}.deleted}
         display.emit(ProjectAgentEvent("done",1,"**final**"));s.waitFor {s.rows.any {it.text=="**final**"} && !s.rows.last().buttons}
         display.emit(ProjectAgentEvent("stream",1,output="late"));Thread.sleep(30);assertTrue(s.rows.none {it.text?.contains("late")==true})
         assertEquals("request",s.top.card!!.description);assertFalse(s.top.buttons)
@@ -88,6 +88,30 @@ class QwenDisplayTest {
         s.waitFor {row.card?.title?.contains("답변 완료")==true};assertEquals("beta21",row.card!!.fields.single().value);assertContains(row.card!!.footer!!.text!!,"123");assertFalse(row.buttons)
         val custom="x".repeat(2000);val card=DiscordQuestionAnswer.embed("question",custom,"123")
         assertEquals(custom,card.fields.joinToString(""){it.value.orEmpty()});assertTrue(card.fields.all {it.value!!.length<=1024})
+    }
+
+    @Test fun `temporary thinking is deleted on review next turn stop and final answer`() {
+        for(transition in listOf("reviewing","thinking","done")) {
+            val s=Screen();val display=DiscordProjectAgentDisplay(s.channel,s.main,"request","14b","run",5)
+            display.emit(ProjectAgentEvent("thinking",1));display.emit(ProjectAgentEvent("stream",1,output="temporary-$transition"))
+            s.waitFor {s.rows.any {it.text=="‘temporary-$transition’"}}
+            display.emit(ProjectAgentEvent(transition,2,if(transition=="done")"작업 중단: 시험" else ""))
+            s.waitFor {s.rows.single {it.text=="‘temporary-$transition’"}.deleted}
+            if(transition!="done")display.emit(ProjectAgentEvent("done",2,"완료"))
+        }
+    }
+    @Test fun `discard also removes a thinking message sent after cleanup started`() {
+        val pending=java.util.concurrent.atomic.AtomicReference<Consumer<Message>>()
+        val deleted=java.util.concurrent.atomic.AtomicInteger()
+        val message=mock(Message::class.java){c->if(c.method.name=="delete")mock(net.dv8tion.jda.api.requests.restaction.AuditableRestAction::class.java){q->if(q.method.name=="queue"){deleted.incrementAndGet();null}else RETURNS_SELF.answer(q)}else RETURNS_DEFAULTS.answer(c)}
+        val channel=mock(TextChannel::class.java){c->if(c.method.name=="sendMessage")mock(MessageCreateAction::class.java){q->when(q.method.name){
+            "queue"->{@Suppress("UNCHECKED_CAST") pending.set(q.arguments[0] as Consumer<Message>);null}
+            else->RETURNS_SELF.answer(q)
+        }}else RETURNS_DEFAULTS.answer(c)}
+        val writer=DiscordAgentText(channel,5);writer.offer("temporary thought")
+        val until=System.nanoTime()+3_000_000_000;while(pending.get()==null && System.nanoTime()<until)Thread.sleep(2)
+        assertNotNull(pending.get());writer.discard();pending.get().accept(message)
+        assertEquals(1,deleted.get());writer.offer("late thought");Thread.sleep(20);assertEquals(1,deleted.get())
     }
     @Test fun `paging edits the original work card without creating a new embed`() {
         val edits=CopyOnWriteArrayList<MessageEmbed>();lateinit var original:Message

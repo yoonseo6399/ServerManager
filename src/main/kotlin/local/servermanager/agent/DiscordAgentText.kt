@@ -23,14 +23,24 @@ internal object DiscordAgentChunks {
 /** Only the latest snapshot waits; REST completion drives ordering without blocking inference. */
 internal class DiscordAgentText(private val channel:MessageChannel,intervalMillis:Long=750,private val onMessage:()->Unit={}) {
     private val messages=mutableListOf<Message>()
+    private val lock=Any();private var discarded=false
+    private fun remove(message:Message){message.delete().queue({}, {})}
     private val edits=CoalescedMessageEdits<String>({text,complete->
         val chunks=DiscordAgentChunks.split(text)
         fun next(index:Int){
-            if(index>=chunks.size){complete();return}
-            if(index<messages.size)messages[index].editMessage(chunks[index]).setAllowedMentions(emptyList()).queue({next(index+1)},{complete()})
-            else channel.sendMessage(chunks[index]).setAllowedMentions(emptyList()).queue({messages.add(it);runCatching {onMessage()};next(index+1)},{complete()})
+            val target=synchronized(lock){if(discarded || index>=chunks.size){complete();return}else messages.getOrNull(index)}
+            if(target!=null)target.editMessage(chunks[index]).setAllowedMentions(emptyList()).queue({next(index+1)},{complete()})
+            else channel.sendMessage(chunks[index]).setAllowedMentions(emptyList()).queue({message->
+                val keep=synchronized(lock){if(discarded)false else {messages.add(message);true}}
+                if(keep){runCatching {onMessage()};next(index+1)}else {remove(message);complete()}
+            },{complete()})
         }
         next(0)
     },intervalMillis=intervalMillis)
-    fun offer(text:String,finished:Boolean=false)=edits.offer(text,finished)
+    fun offer(text:String,finished:Boolean=false){if(synchronized(lock){!discarded})edits.offer(text,finished)}
+    /** Permanently discard temporary text, including an in-flight send completing later. */
+    fun discard(){
+        val sent=synchronized(lock){discarded=true;messages.toList().also {messages.clear()}}
+        edits.cancel();sent.forEach(::remove)
+    }
 }

@@ -181,7 +181,7 @@ class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clo
             instances.remove(stream);sable.removeStream(agentId,stream)
             players.remove(stream)?.let {runCatching {it.close()};if(notify)runCatching {channel.send(SecureChannel.CLOSE,stream)}}
         }
-        fun close() {datagrams.close();sable.removeRunner(agentId);channel.close();players.keys.toList().forEach {end(it,false)};opens.values.forEach {it.countDown()}}
+        fun close() {datagrams.close();sable.removeRunner(agentId);channel.close();players.keys.toTypedArray().forEach {end(it,false)};opens.values.forEach {it.countDown()}}
     }
     private val io=Executors.newVirtualThreadPerTaskExecutor()
     private val tunnels=ConcurrentHashMap<String,Tunnel>()
@@ -438,7 +438,7 @@ class DirectRelayAgent(private val endpoint:()->RelayEndpoint?,private val gameP
                 val tunnel=try {DirectRelayHandshake.client(socket,target.ticket)} catch(e:Exception){runCatching {socket.close()};throw e}
                 socket.soTimeout=0;channel=tunnel;connectedAt=System.currentTimeMillis();state=RelayAgentState.CONNECTED;reason=null;failures=0
                 datagrams=DatagramOutbox {bytes->runCatching {val b=java.nio.ByteBuffer.wrap(bytes);val stream=b.int;tunnel.send(SecureChannel.UDP_DOWN,stream,ByteArray(b.remaining()).also(b::get));true}.getOrDefault(false)}
-                try {serve(tunnel)} finally {datagrams?.close();datagrams=null;disableSable();channel=null;connectedAt=null;streams.keys.toList().forEach {end(it)};tunnel.close()}
+                try {serve(tunnel)} finally {datagrams?.close();datagrams=null;disableSable();channel=null;connectedAt=null;streams.keys.toTypedArray().forEach {end(it)};tunnel.close()}
                 if(!stopped && state==RelayAgentState.CONNECTED){state=RelayAgentState.UNREACHABLE;reason="중계 실행기 연결이 끊겼습니다"}
             } catch(e:DirectRelayRejected){state=RelayAgentState.REJECTED;reason=e.reason}
             catch(e:Exception){state=RelayAgentState.UNREACHABLE;reason="중계 실행기에 연결하지 못했습니다: ${e.javaClass.simpleName}"}
@@ -476,5 +476,5 @@ class DirectRelayAgent(private val endpoint:()->RelayEndpoint?,private val gameP
         }
     }
     private fun end(stream:Int){streamInstances.remove(stream);udpTokens.remove(stream);udp.remove(stream)?.close();streams.remove(stream)?.let {runCatching {it.close()}}}
-    override fun close() {stopped=true;disableSable();datagrams?.close();channel?.close();loop?.interrupt();streams.keys.toList().forEach {end(it)};io.shutdownNow();state=RelayAgentState.IDLE}
+    override fun close() {stopped=true;disableSable();datagrams?.close();channel?.close();loop?.interrupt();streams.keys.toTypedArray().forEach {end(it)};io.shutdownNow();state=RelayAgentState.IDLE}
 }
