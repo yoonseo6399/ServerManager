@@ -81,7 +81,11 @@ class RunnerWorkspace(private val base:Path,private val history:Path,private val
             }
             "LOG_LIST" -> LogFiles(logDirectory,base).list()
             "LOG_PAGE" -> LogFiles(logDirectory,base).page(req.path,req.offset,100,req.revision)
-            "LOG_WINDOW" -> LogFiles(logDirectory,base).window(req.path,req.offset,(req.data?.toIntOrNull() ?: 300).coerceIn(1,100),req.to.takeIf {it.isNotEmpty()})
+            "LOG_WINDOW" -> {
+                val window=LogFiles(logDirectory,base).window(req.path,req.offset,(req.data?.toIntOrNull() ?: 300).coerceIn(1,100),req.to.takeIf {it.isNotEmpty()})
+                var budget=0;val rows=window.lines.takeWhile {row->budget+=mapper.writeValueAsBytes(row).size;budget<=120000}
+                window.copy(lines=rows,first=rows.firstOrNull()?.no ?: 0,last=rows.lastOrNull()?.no ?: 0,next=if(rows.size<window.lines.size)(rows.lastOrNull()?.no ?: req.offset-1)+1 else window.next)
+            }
             "LIST" -> {
                 require(p.isDirectory());require(req.offset in 0..100000)
                 val entries=Files.list(p).use {it.filter {f->!Files.isSymbolicLink(f) && !f.name.startsWith(".remote-save-")}.sorted().limit(100001).toList()};require(entries.size<=100000) {"폴더의 파일이 너무 많습니다"}

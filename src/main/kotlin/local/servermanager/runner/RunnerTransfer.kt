@@ -284,7 +284,7 @@ class RunnerTransferApi(private val transfer:RunnerTransfer,private val gateway:
     @GetMapping("/{instanceId}/manifest") fun manifest(@PathVariable instanceId:String,@RequestHeader("X-SM-Runner-Id") runnerId:String,@RequestHeader("X-SM-Session",required=false) token:String?,@RequestParam(defaultValue="1") protocol:Int=1):ResponseEntity<*> {
         check(runnerId,token,instanceId)
         if(tasks.busy(instanceId))return pending(protocol)
-        val manifest=transfer.preparedInventory(instanceId,request.generation!=null) ?: return pending(protocol)
+        val manifest=transfer.preparedInventory(instanceId) ?: return pending(protocol)
         return ResponseEntity.ok().header("Cache-Control","no-store").body(manifest)
     }
     @GetMapping("/{instanceId}/file") fun file(@PathVariable instanceId:String,@RequestParam path:String,@RequestParam offset:Long,

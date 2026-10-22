@@ -27,7 +27,16 @@ class RemoteFiles(private val manager:ServerManager) {
     fun toggleMods(id:String,request:ModSelection)=manager.withRemoteFiles(id) {call(id,"MOD_TOGGLE",data=mapper.writeValueAsString(request));Unit}
     fun logFiles(id:String):List<LogFiles.Entry> = call(id,"LOG_LIST").map {mapper.treeToValue(it,LogFiles.Entry::class.java)}
     fun logPage(id:String,path:String,offset:Long,revision:String?):LogFiles.Page=mapper.treeToValue(call(id,"LOG_PAGE",path,offset,revision=revision),LogFiles.Page::class.java)
-    fun logWindow(id:String,path:String,from:Long,limit:Int,query:String?):LogFiles.Window=mapper.treeToValue(call(id,"LOG_WINDOW",path,from,data=limit.toString(),to=query.orEmpty()),LogFiles.Window::class.java)
+    fun logWindow(id:String,path:String,from:Long,limit:Int,query:String?):LogFiles.Window {
+        require(from>=1 && limit in 1..500);val rows=mutableListOf<LogFiles.Row>();var offset=from;var last:LogFiles.Window
+        do {
+            last=mapper.treeToValue(call(id,"LOG_WINDOW",path,offset,data=minOf(100,limit-rows.size).toString(),to=query.orEmpty()),LogFiles.Window::class.java)
+            rows+=last.lines
+            val next=last.next ?: break
+            check(next>offset);offset=next
+        }while(rows.size<limit && (query.isNullOrBlank() || rows.isNotEmpty()))
+        return LogFiles.Window(rows,last.total,rows.firstOrNull()?.no ?: 0,rows.lastOrNull()?.no ?: 0,last.next)
+    }
     fun files(id:String,path:String):List<FileEntry> {
         val result=mutableListOf<FileEntry>();var offset=0L
         do {val page=call(id,"LIST",path,offset);result+=page.path("entries").map {mapper.treeToValue(it,FileEntry::class.java)};check(result.size<=100000);val next=page.path("next");if(next.isNull || next.isMissingNode)break;check(next.asLong()>offset);offset=next.asLong()}while(true)
