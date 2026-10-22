@@ -200,10 +200,10 @@ class DirectRelayManagerTest {
         val live=player(w.h.gamePort);assertTrue(roundTrip(live,"hello"))
         w.relay.consent.set(false,"local-revoke");w.relay.role.tick()
         assertTrue(runCatching {live.getOutputStream().write(1);live.getInputStream().read()}.getOrDefault(-1)<0,"live stream must end when consent is withdrawn")
-        assertFailsWith<java.net.ConnectException> {Socket("127.0.0.1",w.h.gamePort).close()}
+        Socket().use {s->assertFailsWith<java.net.SocketException> {s.connect(InetSocketAddress("127.0.0.1",w.h.gamePort),1000)}}
         w.h.pump();enable(w) // owner tries again
         w.h.pump();Thread.sleep(300)
-        assertFailsWith<java.net.ConnectException> {Socket("127.0.0.1",w.h.gamePort).close()}
+        Socket().use {s->assertFailsWith<java.net.SocketException> {s.connect(InetSocketAddress("127.0.0.1",w.h.gamePort),1000)}}
         val view=w.h.manager.view().relays.single {it.runnerId==w.relay.id}
         assertFalse(view.consentAllowed);assertFalse(view.active);assertFalse(view.ready)
         // Granting again restores service without any remote step beyond the existing configuration.

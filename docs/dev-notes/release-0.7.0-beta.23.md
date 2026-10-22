@@ -1,4 +1,4 @@
-상태: Beta23 통합655통과/29조건부 미실행 · 프런트/브라우저/JAR 통과 · 태그 서명 CI 예정
+상태: 최초 CI2실패 · TCP 예외 계약/Python fixture 진단 보완 선커밋 후 재검증
 # release/0.7.0-beta.23
 - Beta22 태그5015c95 기반, origin/feat/turboquant-context ad049a7 통합. 단독 구현/검토. stable/main/latest 보존.
 - 변경·실측·미해결14B 검토 오판은 한국어 릴리즈 노트와 원문 증거에 보존.
@@ -9,3 +9,8 @@
 
 - 통합 검증: npm ci/TS/Vite 성공, Java21 compileKotlin/test/bootJar 성공(2m20s). JUnit137리포트684보고=655통과/29조건부 미실행/실패0. qwen-settings Playwright1통과(2.7s), 실제 DOM 토글 기본값/선택GPU 준비 payload/모델전환저장/메모리해제 확인. API fixture이므로 실Discord/원격엔진 설치 검증과 구별한다.
 - 원문 집계 integration-full-suite.json 보존. 시험 종료시 Ollama models[]·native/Strata시험프로세스없음·wired20480 확인, 기존 앱은 종료하지 않음.
+
+- 최초 태그 CI39746909392 게시 전 실패: 683완료/2실패/28스킵. DirectRelayManagerTest:203은 ConnectException을 기대했으나 SocketException이 전달됨. 연결이 성공하면 계속 실패하게 두고 connect 자체의 SocketException(ConnectException 포함)을 검증, 명시적1초 connect 한도. SocketTimeoutException은 허용하지 않으며 로컬 철회/원격 재허용 거부/재동의 복구 검증 유지.
+- LocalModelsTest:41의 양성 별 출력 검증 실패는 최초 로그에 이유가 없어 원인 미확정. 반환 출력/시간초과 사유를 assertion에 포함. /usr/bin/python3 시작과 생성코드 실행의 합3초 한도를 시작여유15초+생성코드 SIGALRM3초로 분리, AST/출력정확비교/거부 사례 유지. 제품/모델 검증 로직 변경 없음.
+- 최초 수정 스크립트는 기본 Python의 stdin 인코딩 오류로 쓰기 전에 실패. 그 상태에서 focused18개는 기존 코드 그대로 통과했으므로 수정 후 결과로 집계하지 않는다. UTF-8 Python으로 파일 수정 후 선커밋/재검증.
+- 선커밋 시험 계획: 두 클래스 focused 및 TCP 철회 반복, 전체 CI 재실행. 아직 공개되지 않은 Beta23만 수정된 검증 소스로 태그 갱신하며 기존 공개 버전/태그/파일은 건드리지 않는다. 재게시 전 공개 여부부터 별도 확인.

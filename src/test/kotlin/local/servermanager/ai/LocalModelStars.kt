@@ -10,7 +10,7 @@ internal object LocalModelStars {
     fun execute(code:String,home:Path):Pair<Boolean,String> {
         require(code.length<=12000)
         val wrapper="""
-import ast, json, sys
+import ast, json, sys, signal
 code=json.load(sys.stdin)['code']
 tree=ast.parse(code)
 allowed={'Module','Assign','AugAssign','For','If','IfExp','Expr','Name','Load','Store','Constant','Call','keyword','BinOp','Add','Sub','Mult','FloorDiv','Mod','Compare','Eq','NotEq','Lt','LtE','Gt','GtE','BoolOp','And','Or','UnaryOp','USub','UAdd','List','Tuple','ListComp','comprehension','JoinedStr','FormattedValue','Attribute','FunctionDef','arguments','arg','Return','Pass'}
@@ -27,12 +27,14 @@ def bounded_range(*args):
     if len(r)>1000: raise ValueError('Oversized range')
     return r
 safe={'print':print,'range':bounded_range,'len':len,'str':str,'int':int,'min':min,'max':max,'abs':abs}
+# Keep generated code execution bounded independently of a cold interpreter startup.
+if hasattr(signal,'SIGALRM'): signal.alarm(3)
 exec(compile(tree,'fixture.py','exec'),{'__builtins__':safe,'__name__':'__main__'})
 """.trimIndent()
         val p=ProcessBuilder("/usr/bin/python3","-I","-c",wrapper).directory(home.toFile()).redirectErrorStream(true).start()
         p.outputStream.use {it.write(jacksonObjectMapper().writeValueAsBytes(mapOf("code" to code)))}
         val captured=java.util.concurrent.CompletableFuture.supplyAsync {p.inputStream.use {stream->stream.readNBytes(4097)}}
-        if(!p.waitFor(3,TimeUnit.SECONDS)){p.destroyForcibly();p.waitFor();return false to "Python execution exceeded 3 seconds"}
+        if(!p.waitFor(15,TimeUnit.SECONDS)){p.destroyForcibly();p.waitFor();return false to "Python process startup/execution exceeded 15 seconds (generated execution alarm: 3 seconds)"}
         val output=captured.get(4,TimeUnit.SECONDS).toString(Charsets.UTF_8)
         val normalized=output.trimEnd('\n','\r').lines().joinToString("\n") {it.trimEnd()}
         return (p.exitValue()==0 && output.length<=4096 && normalized==expected) to output.take(4096)

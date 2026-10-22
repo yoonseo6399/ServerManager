@@ -38,7 +38,8 @@ class LocalModelsTest {
         assertContains(tools.execute(temp,partial){}.full,"trailing_line_breaks=20000")
     }
     @Test fun `star validator executes centered output and rejects imports and wrong alignment`() {
-        assertTrue(LocalModelStars.execute("n=5\nfor i in range(n):\n print(' '*(n-i-1)+'*'*(2*i+1))",temp).first)
+        val valid=LocalModelStars.execute("n=5\nfor i in range(n):\n print(' '*(n-i-1)+'*'*(2*i+1))",temp)
+        assertTrue(valid.first,valid.second)
         assertFalse(LocalModelStars.execute("print('*')",temp).first)
         assertFalse(LocalModelStars.execute("import os\nprint(os.getcwd())",temp).first)
     }
