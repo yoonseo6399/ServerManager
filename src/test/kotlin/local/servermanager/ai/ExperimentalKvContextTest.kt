@@ -46,7 +46,7 @@ class ExperimentalKvContextTest {
         val args=TurboQuantRuntime.arguments(temp.resolve("llama-server"),temp.resolve("model.gguf"),65536,"fixture",temp.resolve("key"))
         fun value(option:String)=args[args.indexOf(option)+1]
         assertEquals("65536",value("--ctx-size"));assertEquals("65536",value("--fit-ctx"))
-        assertEquals("1",value("--parallel"));assertEquals("turbo4",value("--cache-type-k"));assertEquals("turbo4",value("--cache-type-v"))
+        assertEquals("1",value("--parallel"));assertEquals("q8_0",value("--cache-type-k"));assertEquals("turbo4",value("--cache-type-v"))
         assertEquals("127.0.0.1",value("--host"));assertContains(args,"--api-key-file");assertFalse(args.contains("--api-key"))
         assertFalse(args.contains("--kv-stream-arena-mib"),"CUDA-only streaming is not a Metal feature")
     }

@@ -11,7 +11,7 @@
 - 큰 실행 창 설정만으로 모든 대화를 보존하지는 않는다. 출력 예약·실제 입력 토큰·Pi 압축 기준·문자/전송 상한이 함께 적용된다. 64K에서 입력 예산은 `65536 - output - 256`.
 
 ## 실제 실행 경로
-토글 꺼짐: 기존 Ollama/Strata(FP16 KV). 켜짐: 27B는 별도 TurboQuant fork 서버의 `turbo4` K/V, Flash-Next는 기존 고정 Strata의 `--kv q4_0`(Hadamard 회전 Q4). **두 구현은 같지 않으며 Flash-Next에 Google TurboQuant를 적용했다고 주장하지 않는다.** 다른 모델에는 토글을 적용하지 않는다. native backend 오류를 일반 모드로 대체하지 않는다.
+토글 꺼짐: 기존 Ollama/Strata(FP16 KV). 켜짐: 27B는 별도 TurboQuant fork 서버의 `q8_0` K + `turbo4` V, Flash-Next는 기존 고정 Strata의 `--kv q4_0`(Hadamard 회전 Q4). **두 구현은 같지 않으며 Flash-Next에 Google TurboQuant를 적용했다고 주장하지 않는다.** 다른 모델에는 토글을 적용하지 않는다. native backend 오류를 일반 모드로 대체하지 않는다.
 
 27B는 Ollama `/api/show`의 로컬 GGUF를 읽어 재사용하며 모델을 다시 받지 않는다. Ollama 파일·OS wired 한도·환경 전역 설정은 수정하지 않는다. 요청 실행 때만 기존 관리 대상 모델을 먼저 내리고 별도 서버를 올린다. `--parallel 1`, 요청한 ctx/fit 최소 창 고정, 자동 GPU 배치, prompt RAM cache 꺼짐. `/props`의 실제 창을 확인하고 불일치면 중단한다. CPU 부분 실행이 가능해도 통합 RAM 총량이 늘어나는 것은 아니다.
 
@@ -26,3 +26,5 @@ Strata는 요청별 임시 config에 max-context/kv를 지정하고 설치 원�
 
 ## 미실행 시험
 27B64K와 Flash16K의 로딩, 실제 긴 프롬프트, 스왑 증가/압력/다른 앱 응답, 생성속도, tool call, 원문 보존/기억/정확도. 짧은 요청이 큰 창으로 로드된 것과 실제 창 길이까지 채운 것은 나눠 기록해야 한다. 앱 종료 후 한 모델씩 제한 시간·중단 조건을 두고 수행한다.
+
+27B 실제 시작 로그에서 GQA6:1 품질 보호로 K를 Turbo4에서 Q8로 자동 승격하는 것을 확인했다. 이를 숨기거나 보호를 끄는 대신 명시적으로 Q8 K/Turbo4 V를 지정한다. 처음 로드 시험의 자동 승격 결과와 동일한 실제 캐시 구성이다.

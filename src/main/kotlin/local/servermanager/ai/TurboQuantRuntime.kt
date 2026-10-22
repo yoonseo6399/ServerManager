@@ -60,7 +60,7 @@ object TurboQuantRuntime {
             if(!p.waitFor(20,TimeUnit.SECONDS)){p.destroyForcibly();error("TurboQuant 지원 검사 시간 초과")}
             check(p.exitValue()==0 && help.readText().contains("turbo4")) {"TurboQuant 지원 검사 실패 · $help 확인"}
             release.resolve("verified").writeText("$VERSION\n$HASH\n$SSL_HASH\n")
-            message="TurboQuant 준비됨 · turbo4 K/V · 27B 64K 실모델 시험은 아직 미실행"
+            message="TurboQuant 준비됨 · Q8 K + Turbo4 V · 27B 64K 실모델 시험은 아직 미실행"
         }catch(e:Exception){Files.deleteIfExists(release.resolve("verified"));message="TurboQuant 설치 실패: "+e.message.orEmpty().take(300)}finally{synchronized(this){installing=false;releaseLock()}}},"turboquant-install").apply {isDaemon=true;start()}
         return status()
     }
@@ -78,7 +78,7 @@ object TurboQuantRuntime {
     }
     internal fun arguments(binary:Path,model:Path,window:Int,alias:String,keyFile:Path):List<String> {
         require(window in LocalContextBudget.WINDOWS)
-        return listOf(binary.toString(),"--model",model.toString(),"--host","127.0.0.1","--port","18081","--parallel","1","--ctx-size",window.toString(),"--fit-ctx",window.toString(),"--gpu-layers","auto","--cache-type-k","turbo4","--cache-type-v","turbo4","--flash-attn","on","--jinja","--alias",alias,"--api-key-file",keyFile.toString(),"--cache-ram","0")
+        return listOf(binary.toString(),"--model",model.toString(),"--host","127.0.0.1","--port","18081","--parallel","1","--ctx-size",window.toString(),"--fit-ctx",window.toString(),"--gpu-layers","auto","--cache-type-k","q8_0","--cache-type-v","turbo4","--flash-attn","on","--jinja","--alias",alias,"--api-key-file",keyFile.toString(),"--cache-ram","0")
     }
     @Synchronized fun start(model:Path,window:Int,alias:String,allowCriticalMemory:Boolean=false):Int {
         check(status().ready && !installing) {"TurboQuant 엔진을 먼저 준비하세요."}
@@ -99,7 +99,7 @@ object TurboQuantRuntime {
                 if(Thread.currentThread().isInterrupted)throw InterruptedException()
                 check(p.isAlive) {"TurboQuant 시작 실패 · $log 확인"}
                 val actual=runCatching {val r=client.send(HttpRequest.newBuilder(endpoint.resolve("/props")).timeout(Duration.ofSeconds(2)).header("Authorization","Bearer $token").GET().build(),HttpResponse.BodyHandlers.ofString());if(r.statusCode()==200)mapper.readTree(r.body()).path("default_generation_settings").path("n_ctx").asInt()else null}.getOrNull()
-                if(actual!=null){check(actual==window) {"TurboQuant 실행 창 불일치: 요청 $window / 실제 $actual"};profile=next;message="TurboQuant · turbo4 K/V · ${window/1024}K 실행 중(실험)";return actual}
+                if(actual!=null){check(actual==window) {"TurboQuant 실행 창 불일치: 요청 $window / 실제 $actual"};profile=next;message="TurboQuant · Q8 K + Turbo4 V · ${window/1024}K 실행 중(실험)";return actual}
                 Thread.sleep(500)
             }
             error("TurboQuant 시작 시간 초과 · $log 확인")

@@ -38,7 +38,7 @@ export function QwenSettings(){
  </select></label>
  <label>모델<select value={model} onChange={e=>setModel(e.target.value)}>{view?.models?.map(m=><option key={m.id} value={m.id}>{m.label}</option>)}</select></label><label>추론 요청 제한 (분)<input type="number" min={1} max={240} required value={requestTimeoutMinutes} onChange={e=>setRequestTimeoutMinutes(Number(e.target.value))}/></label></div>
  <label><input type="checkbox" checked={experimentalKvCompression} onChange={e=>setExperimentalKvCompression(e.target.checked)}/> 실험 KV 캐시 압축</label>
- <p className="muted">기본 꺼짐. 27B: 별도 TurboQuant 엔진의 turbo4 K/V 사용. Flash-Next: Strata 회전 Q4 KV 사용(동일 구현 아님). 다른 모델에는 적용하지 않습니다. 켜짐만으로 문맥이 늘어나지는 않으며 /agent context window:65536(27B) 또는 16384(Flash-Next)로 설정하세요. 압축에 따른 정확도·속도 변화와 이 컴퓨터의 해당 창 실행 가능성은 미검증입니다. 다음 요청부터 적용되며 실행 중인 요청은 바꾸지 않습니다. 엔진 시작 실패 시 일반 모드로 대체하지 않습니다.</p>
+ <p className="muted">기본 꺼짐. 27B: 별도 TurboQuant 엔진의 Q8 K + Turbo4 V 사용. Flash-Next: Strata 회전 Q4 KV 사용(동일 구현 아님). 다른 모델에는 적용하지 않습니다. 켜짐만으로 문맥이 늘어나지는 않으며 /agent context window:65536(27B) 또는 16384(Flash-Next)로 설정하세요. 압축에 따른 정확도·속도 변화와 이 컴퓨터의 해당 창 실행 가능성은 미검증입니다. 다음 요청부터 적용되며 실행 중인 요청은 바꾸지 않습니다. 엔진 시작 실패 시 일반 모드로 대체하지 않습니다.</p>
  <p className="muted">Pi /agent의 모델 호출 한 번에 적용됩니다. 기본 20분, 1~240분 · 행동·위험 검토·문맥 압축과 추론 실행기에 같은 제한을 전달합니다. 다음 요청부터 적용되며 여러 단계 작업 전체나 셸 명령의 실행 제한과는 별개입니다.</p>
  {model==='gemma4-31b'&&<p className="muted">31B는 24GB 컴퓨터에서 메모리 여유가 작을 수 있습니다. 긴 문맥·다른 앱 동시 실행 시 메모리와 스왑을 확인하세요.</p>}
  {view?.models?.find(m=>m.id===model)?.supportsThinking===false&&<p className="muted">선택한 모델은 Thinking 미지원 · 자동 꺼짐</p>}
