@@ -8,17 +8,6 @@ import kotlin.test.*
 
 class ProjectAgentLedgerEngineTest {
     @TempDir lateinit var temp:Path
-    private val allow="""{"action":"ALLOW","risk":"LOW","projectScope":"INSIDE","reason":"ok"}"""
-    private lateinit var store:ProjectAgentStore
-    private lateinit var prefs:ProjectAgentPreferences
-
-    private fun setup() {
-        val home=temp.resolve("project").createDirectories().toRealPath()
-        store=ProjectAgentStore(temp.resolve("settings"))
-        store.addChannel(ProjectAgentChannel("g","c","u",null,home.toString()))
-        prefs=store.settings("g","u","14b",true,true)
-    }
-    private fun home()=Path.of(store.channel("c")!!.home)
     private val request="- a.txt 파일을 만들고 hello를 넣어줘. 다른 파일은 건드리지 마.\n- 결과를 알려줘."
 
     @Test fun `Pi multi step request creates and verifies actual output without legacy ledger injection`() {

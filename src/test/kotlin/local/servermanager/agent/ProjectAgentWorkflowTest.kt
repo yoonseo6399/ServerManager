@@ -12,7 +12,6 @@ class ProjectAgentWorkflowTest {
     @TempDir lateinit var temp:Path
     private val mapper=jacksonObjectMapper()
     private fun call(name:String,vararg args:Pair<String,Any>)=ProjectAgentTool(name,mapper.valueToTree(args.toMap()))
-    private fun response(tool:ProjectAgentTool?)=mapper.writeValueAsString(mapOf("message" to if(tool==null)"검증 완료" else "다음 단계", "tool" to tool))
     private val risk="""{"action":"ALLOW","risk":"LOW","projectScope":"INSIDE","reason":"검토"}"""
     private fun store():ProjectAgentStore=ProjectAgentStore(temp.resolve("settings")).also {it.addChannel(ProjectAgentChannel("g","c","u","project",temp.toRealPath().toString()))}
     @Test fun `Pi failed build is observed corrected rerun and reported through native tools`() {

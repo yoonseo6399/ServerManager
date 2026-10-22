@@ -21,25 +21,6 @@ class ProjectAgentTest {
         return Triple(store,session,preferences)
     }
     private fun call(name:String,args:Map<String,Any>)=ProjectAgentTool(name,mapper.valueToTree(args))
-    private fun response(tool:ProjectAgentTool)=mapper.writeValueAsString(mapOf("message" to "작업합니다","tool" to tool))
-    private fun model(tool:ProjectAgentTool,risk:String=allow,observe:(List<ProjectAgentMessage>,Boolean)->Unit={_,_->}):ProjectAgentInference {
-        var actor=0
-        return ProjectAgentInference {messages,think,_->observe(messages,think)
-            val path=temporary.resolve("project").resolve(tool.arguments.path("path").asText("."))
-            val existing=path.isRegularFile() && tool.name in setOf("write_file","edit_file") && !tool.arguments.path("path").asText().startsWith("../")
-            when {
-                messages.first().content.startsWith("Independent")->risk
-                messages.first().content.startsWith("Requirement extractor")->mapper.writeValueAsString(mapOf("items" to listOf(messages.last().content)))
-                actor++==0 && existing->response(call("read_file",mapOf("path" to tool.arguments.path("path").asText())))
-                actor==1 || (existing && actor==2)->response(if(existing && tool.name=="write_file")call("edit_file",mapOf("path" to tool.arguments.path("path").asText(),"find" to path.readText(),"replace" to tool.arguments.path("content").asText()))else tool)
-                else->{
-                    val pinned=messages.firstOrNull {it.content.contains("current_requester") }?.let {mapper.readTree(it.content)}
-                    val receipt=pinned?.path("verified_tool_receipts")?.lastOrNull {it.path("tool").asText() in setOf("write_file","edit_file","run_command","make_new_project")}
-                    mapper.writeValueAsString(mapOf("message" to "완료했습니다","tool" to null,"requirements" to listOf(mapOf("id" to "R1","status" to "done","evidence_ids" to listOfNotNull(receipt?.path("id")?.asText()),"evidence" to "실제 도구 결과로 요청 작업을 확인했습니다"))))
-                }
-            }
-        }
-    }
     private fun engine(store:ProjectAgentStore)=ProjectAgentEngine(store,{s->ProjectAgentTools(temporary.resolve("logs")){name,path->store.register(s.guild,s.user,name,path)}})
     @Test fun `Pi auto edit preserves source and reviewer receives fresh isolated input`() {
         PiTestFixture(temporary,false).use {f->

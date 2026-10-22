@@ -36,6 +36,10 @@
 
 위 코드/테스트/계획을 선커밋한 뒤 PiAgentRuntimeTest·DirectSableTest로 검증하고 전체 테스트를 다시 실행한다. 원격 사용자 폴더의 생성·삭제나 운영 재시작은 하지 않는다.
 
+## 현재 로그 수정 후 관련 검증
+
+82f4859 선커밋 후 PiAgentRuntimeTest28개와 DirectSableTest4개, 총32개 실패/스킵 없이 통과했다. 기존 폴더 충돌이 후속 Bash 검토를 막지 않음, 실제 거부 후 인증된 새 지시만 재검토하게 함, 이전 위험 명령 미실행·새 읽기만 실행을 실제 SDK로 확인했다. exporter --check와 diff --check 통과. 미사용 레거시 model fixture 예시도 제거하고 선커밋한 뒤 전체 테스트를 다시 실행한다.
+
 ## 최종 결과
 
 진행 중.
