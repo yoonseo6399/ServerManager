@@ -1,4 +1,4 @@
-상태: 원격 실시간 콘솔 누락 수정·계획 선커밋 준비, 테스트 미실행
+상태: 통합 브랜치에서 전체 백엔드 661통과/29조건부 미실행·브라우저 12통과, 운영 배포 전
 
 # fix/runner-live-console
 
@@ -17,3 +17,5 @@
 - 2026-10-22 iMac 대상 236 JAR/disabled JAR 합계 770.17 MiB. 읽기 전용 Python SHA-256+SHA-512 순차 스캔 1회 5.067초. 캐시 상태를 통제하지 않은 단일 관측이며 JVM의 전체 토글 실행시간과 동일하다고 주장하지 않는다.
 - 경로: ModManagement.toggle의 files(id) 전체 이중 해시 → ModFiles.rename의 FileInventory.collect 전체 SHA-256 → 선택 JAR 복사 및 복구 journal/atomic 이동 → scan(id)의 전체 이중 해시와 캐시/미조회 Modrinth 조회. DeltaTransfer.apply는 전체 해시 재검사 대신 shape 검사를 사용하므로 이 부분을 추가 해시 비용으로 세지 않는다.
 - 즉 전체 모드 약 770 MiB를 3회 읽으며 2회는 두 해시를 계산한다. 변경 파일 자체의 크기·디스크·외부 메타데이터 조회·복구 이력 검사도 영향을 준다. 실제 사용자 토글의 단계별 JVM 시간/외부 조회 시간은 아직 미측정. 무결성 검사를 제거하는 변경은 하지 않는다.
+
+검증 결과: `fix/mod-start-diagnostics`의 `docs/testing/mod-start-diagnostics.md` 및 JSON 참조. 전체 Kotlin/Java 테스트 실패 0, bootJar 및 TypeScript/Vite 통과. 관련 브라우저 12개는 원격 API fixture이며 운영 Discord·다른 OS 검증은 수행하지 않았다.
