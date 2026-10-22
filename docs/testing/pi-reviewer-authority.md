@@ -39,4 +39,10 @@ Pi는 고정 실제 SDK1.3.0을 사용하며, 회귀 테스트의 모델은 재�
 
 ## 최종 결과
 
-아직 미실행. 후속 검증 커밋에서 실제 결과·미실행 범위를 기록한다.
+- `716eafd`를 먼저 커밋한 뒤 계획의7클래스 총54개 기능 테스트 통과(Gradle BUILD SUCCESSFUL, 실패/스킵 없음). 실제 고정 Pi SDK와 격리 Git/localhost HTTP를 사용했다. 모델 판정은 fixture이며 실제27B 호출 시험은 이번에 하지 않았다.
+- 다음 턴에서 상단 누적 지표를 유지하는 보완과 그 검증 항목을 `cea32a6`로 먼저 커밋한 뒤, 영향받는 QwenDisplayTest7개만 재실행해 전부 통과했다. 이를 신규7개로 더해61개라고 세지 않는다.
+- 프롬프트 exporter --check와 git diff --check 통과. Gradle 기능 테스트 과정의 Kotlin 컴파일/bootJar도 통과했지만 별도 설치판이나 릴리즈 CI 검증을 뜻하지 않는다.
+- 선택/자유 응답·상태 메시지 ID/표시 순서·지연 편집은 Discord REST mock에서 확인했다. 실제 Discord 버튼 클릭과 네트워크 속도/429 처리 상황은 미실행이다.
+- 전체 테스트·다른 OS·운영 업데이트/재시작·새 실제27B 판정 품질 시험·릴리즈 자산 다운로드/해시 비교는 생략했다.
+- 선행 실패 로그와 커밋 후 실행 로그는 각각 로컬 `/private/tmp/sm-reviewer-tests.log`, `/private/tmp/sm-reviewer-final-tests.log`, `/private/tmp/sm-status-final-tests.log`에 보존했다.
+- 이 브랜치는 코드/테스트/문서 변경만 포함하며 게시된 Beta20과 운영 설치를 변경하지 않았다.
