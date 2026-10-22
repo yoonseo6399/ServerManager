@@ -89,7 +89,7 @@ object StrataRuntime {
         val p=ProcessBuilder("/usr/bin/tar","-xzf",archive.toString(),"-C",root.toString()).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start()
         check(p.waitFor(60,TimeUnit.SECONDS) && p.exitValue()==0) {"Strata 구성요소 압축 해제 실패"}
     }
-    @Synchronized fun start(window:Int=8192,compressed:Boolean=false):Int {
+    @Synchronized fun start(window:Int=8192,compressed:Boolean=false,allowCriticalMemory:Boolean=false):Int {
         require(window in setOf(8192,16384))
         check(supported()) {"Flash-Next 자동 실행은 Apple Silicon Mac에서 지원합니다."}
         check(!installing && installed()) {"관리웹의 Flash-Next 설치를 먼저 실행하세요."}
@@ -104,7 +104,8 @@ object StrataRuntime {
         val runtimeConfig=files.prepareConfig(config,window,compressed)
         val p=builder(listOf(control.resolve("bin/strata").toString(),"serve","--config",runtimeConfig.toString(),"--host","127.0.0.1","--port","18080","--parallel","1","--offline","--ready-file",files.ready.toString(),"--shutdown-timeout","15","--output","jsonl")).redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile())).start()
         process=p;activeProfile=window to compressed;message="Flash-Next ${window/1024}K 시작 중"
-        repeat(180){if(Thread.currentThread().isInterrupted){stop();throw InterruptedException()};check(p.isAlive) {"Strata 시작 실패 · ${log} 확인"};health()?.let {ownedChildren=p.descendants().toList();check(it.path("max_context").asInt()>=window) {"Strata가 요청한 ${window/1024}K 창을 적용하지 못했습니다."};message="Flash-Next 실행 중 · ${window/1024}K · ${if(compressed)"회전 Q4 KV(실험)"else "FP16 KV"} · SSD 오프로딩 · GPU 작업 공간 4GB";return it.path("max_context").asInt()};Thread.sleep(500)}
+        val guard=LlmMemoryGuard(allowCriticalMemory)
+        repeat(180){guard.check();if(Thread.currentThread().isInterrupted){stop();throw InterruptedException()};check(p.isAlive) {"Strata 시작 실패 · ${log} 확인"};health()?.let {ownedChildren=p.descendants().toList();check(it.path("max_context").asInt()>=window) {"Strata가 요청한 ${window/1024}K 창을 적용하지 못했습니다."};message="Flash-Next 실행 중 · ${window/1024}K · ${if(compressed)"회전 Q4 KV(실험)"else "FP16 KV"} · SSD 오프로딩 · GPU 작업 공간 4GB";return it.path("max_context").asInt()};Thread.sleep(500)}
         error("Strata 시작 시간 초과 · $log 확인")
         }catch(e:Exception){try{stop()}catch(cleanup:Exception){e.addSuppressed(cleanup)};if(process==null){clearLaunchFiles();releaseLock()};throw e}
     }

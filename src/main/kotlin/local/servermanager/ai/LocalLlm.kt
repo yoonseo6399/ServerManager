@@ -147,7 +147,7 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
             if(budget.experimentalKvCompression && size=="qwen38-27b") {
                 check(TurboQuantRuntime.status().ready) {"TurboQuant 엔진 준비가 필요합니다. 관리웹에서 설치/지원 상태를 확인하세요."}
                 val file=modelFile(size);StrataRuntime.stop();unloadQwen()
-                return StrataLlm(endpoint=TurboQuantRuntime.endpoint,context={TurboQuantRuntime.start(file,budget.window,tag(size))},memory={LlmMemory.sample(metric="TurboQuant · OS 메모리")},model=tag(size),backend="TurboQuant",allowedWindows=LocalContextBudget.WINDOWS,authorization={TurboQuantRuntime.authorization()},modelMaximum={modelContext(size)}).conversation(messages,think,budget,progress)
+                return StrataLlm(endpoint=TurboQuantRuntime.endpoint,context={TurboQuantRuntime.start(file,budget.window,tag(size),budget.allowCriticalMemory)},memory={LlmMemory.sample(metric="TurboQuant · OS 메모리")},model=tag(size),backend="TurboQuant",allowedWindows=LocalContextBudget.WINDOWS,authorization={TurboQuantRuntime.authorization()},modelMaximum={modelContext(size)}).conversation(messages,think,budget,progress)
             }
             TurboQuantRuntime.stop()
             if(LocalModels.get(size).backend=="strata") {unloadQwen();return StrataLlm().conversation(messages,think,budget,progress)}

@@ -35,7 +35,7 @@ internal class StrataLlm(private val endpoint:URI=StrataRuntime.endpoint,private
         // Reject before starting a 66GB offloaded model, rather than silently shrinking a user's window.
         require(budget.window in allowedWindows) {"$backend 지원 창: ${allowedWindows.joinToString()}. 요청한 창을 줄여서 실행하지 않습니다."}
         val memoryGuard=LlmMemoryGuard(budget.allowCriticalMemory);memoryGuard.check()
-        val maximum=context?.invoke() ?: StrataRuntime.start(budget.window,budget.experimentalKvCompression);require(budget.window<=maximum) {"Strata 실행 창보다 큰 문맥입니다."}
+        val maximum=context?.invoke() ?: StrataRuntime.start(budget.window,budget.experimentalKvCompression,budget.allowCriticalMemory);require(budget.window<=maximum) {"Strata 실행 창보다 큰 문맥입니다."}
         val pi=PiWire.decode(messages)
         val native=ProjectAgentNativeTools.active(messages)
         val body=linkedMapOf<String,Any>("model" to model,"messages" to (pi?.path("messages") ?: wire(messages)),"stream" to true,"stream_options" to mapOf("include_usage" to true),"max_tokens" to budget.output,"temperature" to 0,

@@ -80,7 +80,7 @@ object TurboQuantRuntime {
         require(window in LocalContextBudget.WINDOWS)
         return listOf(binary.toString(),"--model",model.toString(),"--host","127.0.0.1","--port","18081","--parallel","1","--ctx-size",window.toString(),"--fit-ctx",window.toString(),"--gpu-layers","auto","--cache-type-k","turbo4","--cache-type-v","turbo4","--flash-attn","on","--jinja","--alias",alias,"--api-key-file",keyFile.toString(),"--cache-ram","0")
     }
-    @Synchronized fun start(model:Path,window:Int,alias:String):Int {
+    @Synchronized fun start(model:Path,window:Int,alias:String,allowCriticalMemory:Boolean=false):Int {
         check(status().ready && !installing) {"TurboQuant 엔진을 먼저 준비하세요."}
         val next=Triple(model,window,alias)
         if(process?.isAlive==true && profile==next)return window
@@ -93,7 +93,9 @@ object TurboQuantRuntime {
             val log=root.resolve("server.log");if(log.exists() && log.fileSize()>10_000_000)Files.move(log,root.resolve("server.previous.log"),java.nio.file.StandardCopyOption.REPLACE_EXISTING)
             val p=ProcessBuilder(arguments(binary,model,window,alias,key)).apply {environment()["DYLD_LIBRARY_PATH"]=ssl()?.toString() ?: error("격리 OpenSSL이 없습니다.")}.redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile())).start()
             process=p;message="TurboQuant ${window/1024}K 시작 중 · 모델 준비 대기"
+            val guard=LlmMemoryGuard(allowCriticalMemory)
             repeat(240){
+                guard.check()
                 if(Thread.currentThread().isInterrupted)throw InterruptedException()
                 check(p.isAlive) {"TurboQuant 시작 실패 · $log 확인"}
                 val actual=runCatching {val r=client.send(HttpRequest.newBuilder(endpoint.resolve("/props")).timeout(Duration.ofSeconds(2)).header("Authorization","Bearer $token").GET().build(),HttpResponse.BodyHandlers.ofString());if(r.statusCode()==200)mapper.readTree(r.body()).path("default_generation_settings").path("n_ctx").asInt()else null}.getOrNull()
