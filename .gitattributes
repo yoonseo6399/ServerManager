@@ -1,1 +1,5 @@
 scripts/*.sh text eol=lf
+
+# These source metadata bytes are SHA-256 pinned; Windows checkouts must retain LF.
+gradle/youtube-source-*/*.pom text eol=lf
+gradle/youtube-source-*/*.module text eol=lf

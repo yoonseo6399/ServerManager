@@ -19,3 +19,7 @@
 
 - c36771c 전체 회귀 재검증684보고=655통과/29조건부미실행/실패0(1m52s), bootJar성공. --rerun으로 실제 TCP철회 단일시험3회 각각성공(각2초), 캐시된 test결과 아님. 기존 공개버전과 운영소켓은 변경하지 않음. 최초Python실패의 구체 원인은 여전히 미확정이며 CI재시도에서 수정한 경계/진단을 검증한다.
 - GitHub API Beta23 release 조회404 확인(아직게시없음). 다음커밋을push 후 미게시 태그만 갱신, 새push CI1개 실행.
+
+- 사용자 링크39749229293/job119725290135는 Windows 의존성준비62행의 저장소POM/module 고정checksum 실패(네트워크다운로드 전). 동일커밋Mac installer는성공. .gitattributes가 shell만LF고정하므로 메타데이터에도LF를고정한다. SHA256 pins/검증을 완화하거나CRLF임의정규화하지 않는다.
+- 추가 선커밋 시험 계획: 임시Git index에 고정6메타데이터와 수정전/후attributes를넣고 core.autocrlf=true/core.eol=crlf로 checkout-index. 원본규칙에서checksum불일치재현, 수정규칙에서모든6해시일치·CRLF없음을검증. 실제WindowsOS실행과구별한다. 이후Windows/macOS installer workflow 및전체releaseCI재실행.
+- 현재아직미게시(API404)인Beta23 release CI39749275529는 이수정을포함하기위해중단. 모델/제품변경아님. 기존공개태그/자산보존.
