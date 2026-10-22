@@ -41,10 +41,14 @@ dependencies {
 tasks.test {
     dependsOn(tasks.bootJar) // Packaged-host/runner fixtures must use this source, including on a clean CI checkout.
     useJUnitPlatform()
+    testLogging { exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
     // A live benchmark is a measurement, never a reusable cached test result.
     if (providers.environmentVariable("LOCAL_MODELS_BENCHMARK").orNull == "true") outputs.upToDateWhen { false }
     if (providers.environmentVariable("PI_AGENT_LIVE").orNull == "true") outputs.upToDateWhen { false }
     if (providers.environmentVariable("PROJECT_AGENT_BETA11_LIVE").orNull == "true") outputs.upToDateWhen { false }
+    listOf("EXTENDED_CONTEXT_LIVE","PI_NETWORK_RISK_LIVE","TURBOQUANT_INSTALL_LIVE").forEach { name ->
+        if (providers.environmentVariable(name).orNull == "true") outputs.upToDateWhen { false }
+    }
     // Tests must never inherit the live profile, even when launched from its working directory.
     environment("SERVER_MANAGER_DATA", layout.buildDirectory.dir("test-profile").get().asFile.absolutePath)
     environment("SERVER_MANAGER_HOME", layout.buildDirectory.dir("test-desktop-home").get().asFile.absolutePath)
