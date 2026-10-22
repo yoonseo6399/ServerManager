@@ -1,0 +1,63 @@
+{
+  "before": [
+    {
+      "file": "gradle/youtube-source-1.18.2/v2-1.18.2.pom",
+      "bytes": 1347,
+      "sha256": "90368211f892baaf2d6e252ec398320a523930aeab1845b7b3c26fcf3c10e80b",
+      "pin_matches": false,
+      "crlf": true
+    },
+    {
+      "file": "gradle/youtube-source-1.18.2/v2-1.18.2.module",
+      "bytes": 3440,
+      "sha256": "00e1820e54202cd90492a6ee389c5fec4d61f2fde8bad4f8f6388e2ea1758dd0",
+      "pin_matches": false,
+      "crlf": true
+    },
+    {
+      "file": "gradle/youtube-source-1.18.2/common-1.18.2.pom",
+      "bytes": 1165,
+      "sha256": "e8690b269b46f655c01ce7dc57937e04b0b232c709a61c01e1abf9ce533ef015",
+      "pin_matches": false,
+      "crlf": true
+    },
+    {
+      "file": "gradle/youtube-source-1.18.2/common-1.18.2.module",
+      "bytes": 3098,
+      "sha256": "292a6acf8773d10c6fe2c675e3cb6c4204142356862223fe4e064b7b30d7715c",
+      "pin_matches": false,
+      "crlf": true
+    }
+  ],
+  "after": [
+    {
+      "file": "gradle/youtube-source-1.18.2/v2-1.18.2.pom",
+      "bytes": 1314,
+      "sha256": "05261c70964656d33957f3b410099bd503002b035b11696ae33c1096a6e32479",
+      "pin_matches": true,
+      "crlf": false
+    },
+    {
+      "file": "gradle/youtube-source-1.18.2/v2-1.18.2.module",
+      "bytes": 3328,
+      "sha256": "b0bfc97589a6cab3aec70aa516fe1149f40d0f2fd1eea6d0715ddfef240eb4eb",
+      "pin_matches": true,
+      "crlf": false
+    },
+    {
+      "file": "gradle/youtube-source-1.18.2/common-1.18.2.pom",
+      "bytes": 1138,
+      "sha256": "4a52753d5281544a00cbdaf68768ed8b50d4ddff3cd154a92b1022934a7d0110",
+      "pin_matches": true,
+      "crlf": false
+    },
+    {
+      "file": "gradle/youtube-source-1.18.2/common-1.18.2.module",
+      "bytes": 3002,
+      "sha256": "528752131dfb67627e84bc4fa93200ee524bb5119df7609e7977bfac4d1a6d39",
+      "pin_matches": true,
+      "crlf": false
+    }
+  ],
+  "tamper_rejected": true
+}

@@ -1,4 +1,4 @@
-상태: CI fixture 보완 후 전체655통과/29스킵 · TCP 철회3회 통과 · 미게시 태그 CI 재시도 준비
+상태: Windows CRLF checksum 실패 재현/수정 검증 · 전체655통과 유지 · 최종 CI 준비
 # release/0.7.0-beta.23
 - Beta22 태그5015c95 기반, origin/feat/turboquant-context ad049a7 통합. 단독 구현/검토. stable/main/latest 보존.
 - 변경·실측·미해결14B 검토 오판은 한국어 릴리즈 노트와 원문 증거에 보존.
@@ -21,5 +21,7 @@
 - GitHub API Beta23 release 조회404 확인(아직게시없음). 다음커밋을push 후 미게시 태그만 갱신, 새push CI1개 실행.
 
 - 사용자 링크39749229293/job119725290135는 Windows 의존성준비62행의 저장소POM/module 고정checksum 실패(네트워크다운로드 전). 동일커밋Mac installer는성공. .gitattributes가 shell만LF고정하므로 메타데이터에도LF를고정한다. SHA256 pins/검증을 완화하거나CRLF임의정규화하지 않는다.
-- 추가 선커밋 시험 계획: 임시Git index에 고정6메타데이터와 수정전/후attributes를넣고 core.autocrlf=true/core.eol=crlf로 checkout-index. 원본규칙에서checksum불일치재현, 수정규칙에서모든6해시일치·CRLF없음을검증. 실제WindowsOS실행과구별한다. 이후Windows/macOS installer workflow 및전체releaseCI재실행.
+- 추가 선커밋 시험 계획: 임시Git index에 고정4메타데이터와 수정전/후attributes를넣고 core.autocrlf=true/core.eol=crlf로 checkout-index. 원본규칙에서checksum불일치재현, 수정규칙에서모든4해시일치·CRLF없음을검증. 실제WindowsOS실행과구별한다. 이후Windows/macOS installer workflow 및전체releaseCI재실행.
 - 현재아직미게시(API404)인Beta23 release CI39749275529는 이수정을포함하기위해중단. 모델/제품변경아님. 기존공개태그/자산보존.
+
+- core.autocrlf=true/core.eol=crlf 재현결과: 기존규칙의POM/module4개모두CRLF/해시불일치, LF고정후4개모두기존pin일치/CRLF없음. 변조바이트추가거부확인. windows-metadata-checkout.json에원문해시/바이트보존. Mac에서Windows체크아웃정책을재현한것이며실제WindowsCI결과는별도확인한다. 제품코드·메타데이터원문·버전·pin은불변.

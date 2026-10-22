@@ -727,3 +727,5 @@ Beta22 태그 기반 feat/turboquant-context ad049a7 통합(solo), 앞선 fix/pi
 Beta23 통합 검증도684보고=655통과/29조건부 미실행/실패0(2m20s). compileKotlin/bootJar 및 npm ci/TS/Vite, Qwen 설정 browser1개 통과. 단일 태그 CI 전체테스트/서명/게시 예정.
 
 Beta23 최초 CI39746909392가683완료/2실패/28스킵으로 게시 전 중단. TCP 연결거부 ConnectException하위타입기대를 SocketException(connect자체, timeout거부)으로 보완. Python AST시험 시작여유15초/실행SIGALRM3초 분리 및 실패출력, 최초원인은미확정. 테스트 실패FULL진단/새실측 UP-TO-DATE캐시금지. 관련20개/전체655통과29스킵/TCP철회3회 통과 후 미게시태그만갱신하여 전체CI재시도.
+
+사용자링크Windows CI39749229293/job119725290135: prepare-youtube-source.py62행고정POM/modulechecksum실패. core.autocrlf true+core.eol crlf로기존규칙4개변환/불일치재현. .gitattributes메타데이터LF고정후4개pin일치/변조거부. 원문/버전/pin불변. 미게시release재시도중단후이수정포함최종CI진행.
