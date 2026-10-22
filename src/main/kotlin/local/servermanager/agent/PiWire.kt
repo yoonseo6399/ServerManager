@@ -6,12 +6,13 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 
 /** Private provider envelope. It is data carried through the consented runner, never an instruction/tool loop. */
 internal object PiWire {
+    const val MAX_REQUEST_BYTES=1_048_576
     const val PREFIX="SERVERMANAGER_PI_PROVIDER_V1\n"
     private val mapper=jacksonObjectMapper()
     fun active(messages:List<ProjectAgentMessage>)=messages.size==1 && messages[0].role=="system" && messages[0].content.startsWith(PREFIX)
     fun decode(messages:List<ProjectAgentMessage>):JsonNode? {
         if(!active(messages))return null
-        val raw=messages[0].content.removePrefix(PREFIX);require(raw.length<=180000) {"Pi 요청 크기 한도입니다. 문맥을 압축하세요."}
+        val raw=messages[0].content.removePrefix(PREFIX);require(raw.toByteArray(Charsets.UTF_8).size<=MAX_REQUEST_BYTES) {"Pi 요청 크기 한도입니다. 문맥을 압축하세요."}
         val body=mapper.readTree(raw)
         require(body.isObject && body.path("messages").isArray && body.path("messages").size() in 1..256)
         require(!body.has("tools") || body.path("tools").isArray && body.path("tools").size()<=32)

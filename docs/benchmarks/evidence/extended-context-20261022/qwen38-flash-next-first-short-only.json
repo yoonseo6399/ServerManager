@@ -1,0 +1,45 @@
+{
+  "model" : "qwen38-flash-next",
+  "requestedWindow" : 16384,
+  "compressed" : true,
+  "before" : {
+    "totalBytes" : 25769803776,
+    "usedBytes" : 20768587776,
+    "swapUsedBytes" : 7926185984,
+    "pressure" : "정상",
+    "modelBytes" : null,
+    "modelMetric" : null,
+    "wiredLimitMb" : 20480,
+    "sampledAt" : 1792654521021
+  },
+  "short" : {
+    "text" : "KV_READY",
+    "limited" : false,
+    "seconds" : 4.459979084,
+    "tokens" : 3,
+    "thinking" : "",
+    "inputTokens" : 21,
+    "modelContext" : 16384,
+    "tokensPerSecond" : 9.4,
+    "memory" : {
+      "totalBytes" : 25769803776,
+      "usedBytes" : 25471877120,
+      "swapUsedBytes" : 7917797376,
+      "pressure" : "정상",
+      "modelBytes" : 9320693760,
+      "modelMetric" : "RSS 합계·공유 중복 가능",
+      "wiredLimitMb" : 20480,
+      "sampledAt" : 1792654531410
+    }
+  },
+  "afterShort" : {
+    "totalBytes" : 25769803776,
+    "usedBytes" : 25474007040,
+    "swapUsedBytes" : 7917797376,
+    "pressure" : "정상",
+    "modelBytes" : null,
+    "modelMetric" : null,
+    "wiredLimitMb" : 20480,
+    "sampledAt" : 1792654531424
+  }
+}

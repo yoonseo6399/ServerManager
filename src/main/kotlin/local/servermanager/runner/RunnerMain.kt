@@ -532,7 +532,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     override fun onOpen(webSocket:WebSocket) { connection.set(webSocket);webSocket.request(1) }
     override fun onText(webSocket:WebSocket,data:CharSequence,last:Boolean):CompletionStage<*> {
         synchronized(textBuffer) {
-            if(textBuffer.length+data.length>256*1024){textBuffer.setLength(0);webSocket.abort();return CompletableFuture.completedFuture(null)}
+            if(textBuffer.length+data.length>4*PiWire.MAX_REQUEST_BYTES){textBuffer.setLength(0);webSocket.abort();return CompletableFuture.completedFuture(null)}
             textBuffer.append(data)
             if(last) {
                 val raw=textBuffer.toString();textBuffer.setLength(0)
@@ -543,7 +543,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                         "sable-registered" -> message.token?.let {sableRegistrations[it]?.complete(message.state=="OK")}
 
                         "session" -> { sessionToken=message.token;tcpRelay?.close();tcpRelay=if(tcpRelayAllowed)TcpRelayPeer(::send,::sendBinary) else null
-                            send(RunnerMessage("restart-capability",state="RESTART_V1"));send(RunnerMessage("update-capability",state=if(updater!=null)"RELEASE_SELECTION_V1" else "OFF",detail=if(updater?.rollbackSupported==true)"ROLLBACK_V1" else null));confirmActivation();hosted?.relaySession() ?: directRelay.onSession();reportUpdateDetail();send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));send(RunnerMessage("llm-capability",state=if(llmAllowed)"OLLAMA_AGENT_V3" else "OFF",detail="CONTEXT_TOOLS_V1",command="STRATA_V1",version="PI_PROVIDER_V1",token="AGENT_SAFETY_PROFILE_V1"));reportUpdate();recoverStates() }
+                            send(RunnerMessage("restart-capability",state="RESTART_V1"));send(RunnerMessage("update-capability",state=if(updater!=null)"RELEASE_SELECTION_V1" else "OFF",detail=if(updater?.rollbackSupported==true)"ROLLBACK_V1" else null));confirmActivation();hosted?.relaySession() ?: directRelay.onSession();reportUpdateDetail();send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));send(RunnerMessage("llm-capability",state=if(llmAllowed)"OLLAMA_AGENT_V3" else "OFF",detail="CONTEXT_TOOLS_V1",command="STRATA_V1",version="PI_PROVIDER_V1",token="AGENT_SAFETY_PROFILE_V1"));send(RunnerMessage("llm-context-capability",version="KV_CONTEXT_V1"));reportUpdate();recoverStates() }
                         "relay-config" -> {
                             val port=message.detail?.toIntOrNull()
                             val ok=tcpRelayAllowed && (message.state=="OFF" || port in 1024..65535) && runCatching {tcpRelay?.listen(if(message.state=="ON")port else null);true}.getOrDefault(false)
@@ -679,8 +679,9 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                     "probe" -> llm.probe()
                     "unload" -> llm.unloadAll()
                     "install-strata" -> StrataRuntime.install()
+                    "install-turboquant" -> TurboQuantRuntime.install()
                     else -> if(size.startsWith("agent-profile:")) {
-                        require(prompt.length<=200000)
+                        require(prompt.toByteArray(Charsets.UTF_8).size<=2*PiWire.MAX_REQUEST_BYTES)
                         val body=mapper.readTree(prompt)
                         val budget=mapper.treeToValue(body.path("budget"),LocalContextBudget::class.java)
                         val messages=body.path("messages").map {ProjectAgentMessage(it.path("role").asText(),it.path("content").asText(),it.path("native").takeIf {n->n.isTextual}?.asText())}

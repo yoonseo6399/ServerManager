@@ -27,7 +27,7 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
         require(endpoint.scheme=="http" && endpoint.host in setOf("localhost","127.0.0.1","[::1]","::1") && endpoint.rawUserInfo==null && endpoint.rawQuery==null && endpoint.rawFragment==null && endpoint.path in setOf("","/")) {"OLLAMA_URL은 로컬 Ollama의 HTTP 주소여야 합니다."}
     }
     data class OllamaModel(val name:String,val sizeBytes:Long)
-    data class Status(val reachable:Boolean,val version:String?,val models:List<OllamaModel>,val loaded:List<String>,val tags:Map<String,String>,val installed:Map<String,Boolean>,val message:String,val modelLimits:Map<String,Int> = emptyMap(),val memory:LlmMemory?=null,val strata:StrataRuntime.Status?=null)
+    data class Status(val reachable:Boolean,val version:String?,val models:List<OllamaModel>,val loaded:List<String>,val tags:Map<String,String>,val installed:Map<String,Boolean>,val message:String,val modelLimits:Map<String,Int> = emptyMap(),val memory:LlmMemory?=null,val strata:StrataRuntime.Status?=null,val turboQuant:TurboQuantRuntime.Status?=null)
     data class Answer(val text:String,val limited:Boolean,val seconds:Double,val tokens:Long,val thinking:String="",val inputTokens:Long?=null,val modelContext:Int?=null,@get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) val nativeMessage:String?=null,val tokensPerSecond:Double?=null,val memory:LlmMemory?=null)
     private val client=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
     private fun get(path:String):com.fasterxml.jackson.databind.JsonNode {
@@ -65,7 +65,7 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
         return stale
     }
     fun modelContext(size:String):Int? {
-        if(LocalModels.get(size).backend=="strata")return 8192
+        if(LocalModels.get(size).backend=="strata")return 16384
         val cacheKey=endpoint.toString()+tag(size)
         modelMetadata[cacheKey]?.takeIf {System.currentTimeMillis()-it.first<300_000}?.let {return it.second}
         return runCatching {
@@ -75,13 +75,22 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
             mapper.readTree(bytes).path("model_info").properties().firstOrNull {it.key.endsWith(".context_length")}?.value?.asInt()?.takeIf {it>0}}
     }.getOrNull().also {modelMetadata[cacheKey]=System.currentTimeMillis() to it}
     }
+    private fun modelFile(size:String):java.nio.file.Path {
+        val request=HttpRequest.newBuilder(endpoint.resolve("/api/show")).timeout(Duration.ofSeconds(8)).header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(mapOf("model" to tag(size))))).build()
+        val response=client.send(request,HttpResponse.BodyHandlers.ofInputStream())
+        val raw=response.body().use {it.readNBytes(1_048_577)};check(response.statusCode()==200 && raw.size<=1_048_576) {"Ollama 모델 경로를 확인하지 못했습니다."}
+        val from=mapper.readTree(raw).path("modelfile").asText().lineSequence().firstOrNull {it.startsWith("FROM ")}?.removePrefix("FROM ")?.trim()?.trim('"') ?: error("GGUF 경로가 없습니다.")
+        val path=java.nio.file.Path.of(from);require(path.isAbsolute && java.nio.file.Files.isRegularFile(path)) {"로컬 GGUF 모델 파일을 찾을 수 없습니다."}
+        check(java.nio.file.Files.newInputStream(path).use {it.readNBytes(4)}.contentEquals("GGUF".toByteArray())) {"TurboQuant에는 로컬 GGUF가 필요합니다."}
+        return path.toRealPath()
+    }
     private fun memory():LlmMemory = runCatching {
         val rows=get("/api/ps").path("models");val sizes=rows.mapNotNull {it.get("size")?.asLong()}
         if(rows.isEmpty || sizes.isNotEmpty())LlmMemory.sample(sizes.sum(),"Ollama 전체 할당")else LlmMemory.sample()
     }.getOrElse {LlmMemory.sample()}
     fun unloadAll():Status {
         check(inference.tryAcquire()) {"다른 로컬 모델 요청이 진행 중입니다."}
-        try {StrataRuntime.stop();unloadQwen();return probe()}finally {inference.release()}
+        try {TurboQuantRuntime.stop();StrataRuntime.stop();unloadQwen();return probe()}finally {inference.release()}
     }
     fun probe():Status {
         val tags=SIZES.associateWith {tag(it)};val strata=StrataRuntime.status()
@@ -89,15 +98,16 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
         val models=runCatching {get("/api/tags").path("models").map {OllamaModel(it.path("name").asText(),it.path("size").asLong())}.filter {it.name.isNotBlank()}}.getOrDefault(emptyList())
         val installed=tags.mapValues {(id,tag)->if(LocalModels.get(id).backend=="strata")strata.installed else models.any {it.name==tag}}
         val missing=installed.filter {(id,ok)->!ok && LocalModels.get(id).backend=="ollama"}.keys.map {LocalModels.label(it)}
-        val loaded=loaded()+if(strata.running)listOf(StrataRuntime.MODEL)else emptyList()
+        val loaded=loaded()+(if(strata.running)listOf(StrataRuntime.MODEL)else emptyList())+(if(TurboQuantRuntime.status().running)listOf(tag("qwen38-27b"))else emptyList())
         return Status(version!=null || strata.running,version,models,loaded,tags,installed,if(version!=null)"Ollama 실행 중"+(if(missing.isEmpty())" · Ollama 모델 모두 설치됨"else " · 미설치: ${missing.joinToString()}")+" · Flash-Next는 별도 Strata 엔진을 사용합니다."else "Ollama에 연결하지 못했습니다. Flash-Next 상태는 아래에서 확인하세요.",
-            tags.keys.mapNotNull {key->if(installed[key]==true)modelContext(key)?.let {key to it}else null}.toMap(),if(strata.running)StrataRuntime.memory()else memory(),strata)
+            tags.keys.mapNotNull {key->if(installed[key]==true)modelContext(key)?.let {key to it}else null}.toMap(),if(strata.running)StrataRuntime.memory()else if(TurboQuantRuntime.status().running)TurboQuantRuntime.memory()else memory(),strata,TurboQuantRuntime.status())
     }
     fun chat(size:String,prompt:String,think:Boolean=false):Answer {
         check(inference.tryAcquire()) {"다른 로컬 모델 요청이 진행 중입니다."}
         try {return chatLocked(size,prompt,think)} finally {inference.release()}
     }
     private fun chatLocked(size:String,prompt:String,think:Boolean):Answer {
+        TurboQuantRuntime.stop()
         require(size in SIZES && prompt.isNotBlank() && prompt.length<=6000)
         if(LocalModels.get(size).backend=="strata") {unloadQwen();return StrataLlm().conversation(listOf(ProjectAgentMessage("user",prompt)),think,LocalContextBudget(output=2048),plain=true)}
         StrataRuntime.stop()
@@ -127,13 +137,19 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
     fun conversation(size:String,messages:List<ProjectAgentMessage>,think:Boolean=true,progress:(QwenProgress)->Unit={}):Answer = conversationWithBudget(size,messages,think,LocalContextBudget.DEFAULT,progress)
     fun conversationWithBudget(size:String,messages:List<ProjectAgentMessage>,think:Boolean,budget:LocalContextBudget,progress:(QwenProgress)->Unit={}):Answer {
         val pi=PiWire.decode(messages)
-        require(size in SIZES && messages.size in 1..32 && messages.all {it.role in setOf("system","user","assistant")} && messages.sumOf {it.content.length}<=(if(pi!=null)190000 else 140000))
+        require(size in SIZES && messages.size in 1..32 && messages.all {it.role in setOf("system","user","assistant")} && messages.sumOf {it.content.length}<=(if(pi!=null)PiWire.MAX_REQUEST_BYTES else 140000))
         val native=ProjectAgentNativeTools.active(messages)
         val overhead=if(native)ProjectAgentNativeTools.overhead(messages.first().content)else 0
         require(pi!=null || messages.sumOf {ProjectAgentContext.messageTokens(it)}+overhead<=budget.input) {"설정된 입력 예산(${budget.input})보다 문맥이 큽니다. 파일·변경을 작은 구간으로 나눠 요청하세요."}
         check(inference.tryAcquire()) {"다른 로컬 모델 요청이 진행 중입니다."}
         try {
             val memoryGuard=LlmMemoryGuard(budget.allowCriticalMemory);memoryGuard.check()
+            if(budget.experimentalKvCompression && size=="qwen38-27b") {
+                check(TurboQuantRuntime.status().ready) {"TurboQuant 엔진 준비가 필요합니다. 관리웹에서 설치/지원 상태를 확인하세요."}
+                val file=modelFile(size);StrataRuntime.stop();unloadQwen()
+                return StrataLlm(endpoint=TurboQuantRuntime.endpoint,context={TurboQuantRuntime.start(file,budget.window,tag(size),budget.allowCriticalMemory)},memory={TurboQuantRuntime.memory()},model=tag(size),backend="TurboQuant",allowedWindows=LocalContextBudget.WINDOWS,authorization={TurboQuantRuntime.authorization()},modelMaximum={modelContext(size)}).conversation(messages,think,budget,progress)
+            }
+            TurboQuantRuntime.stop()
             if(LocalModels.get(size).backend=="strata") {unloadQwen();return StrataLlm().conversation(messages,think,budget,progress)}
             StrataRuntime.stop()
             unloadQwen(tag(size))
@@ -192,7 +208,7 @@ object QwenRequests {
         check(slot.tryAcquire()) {"다른 Qwen 요청이 진행 중입니다."}
         try {
             val remote=RemoteLlm.budgetConversationProvider?.invoke(size,messages,LocalModels.thinking(size,think),runnerId,budget,progress)
-                ?: if(RemoteLlm.budgetConversationProvider==null && budget.window==8192)RemoteLlm.conversationProvider?.invoke(size,messages,LocalModels.thinking(size,think),runnerId,progress)else null
+                ?: if(RemoteLlm.budgetConversationProvider==null && budget.window==8192 && !budget.experimentalKvCompression)RemoteLlm.conversationProvider?.invoke(size,messages,LocalModels.thinking(size,think),runnerId,progress)else null
             check(remote!=null || runnerId==null) {"선택한 실행기가 프로젝트 에이전트 대화를 지원하지 않습니다. 실행기를 업데이트하세요."}
             return Reply(remote?.answer ?: LocalLlm().conversationWithBudget(size,messages,think,budget,progress),remote?.runnerName)
         }finally {slot.release()}

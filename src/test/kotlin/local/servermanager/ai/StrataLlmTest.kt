@@ -31,7 +31,7 @@ class StrataLlmTest {
     @Test fun `unfinished streams and oversized Flash context fail instead of fabricated completion`() {
         serve("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n") {llm->assertFails {llm.conversation(listOf(ProjectAgentMessage("user","test")),false,LocalContextBudget(),plain=true)}}
         var started=false
-        assertFails {StrataLlm(context={started=true;8192}).conversation(listOf(ProjectAgentMessage("user","test")),false,LocalContextBudget(16384))};assertFalse(started)
+        assertFails {StrataLlm(context={started=true;8192}).conversation(listOf(ProjectAgentMessage("user","test")),false,LocalContextBudget(32768))};assertFalse(started)
         assertFails {StrataLlm(URI("http://192.168.1.2:18080"))}
     }
     @Test fun `timings exclude prompt time and unavailable telemetry stays unknown`() {
