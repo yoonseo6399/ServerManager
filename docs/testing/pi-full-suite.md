@@ -66,6 +66,10 @@
 
 정책 변경 전 ASK/HIGH였던 실험 원문은 review-before-requested-rm-policy.json, 최종 결과는 review.json으로 구분해 보존한다. 현재 사용자 작업 채널의 과거 Thinking 메시지 일괄 삭제는 하지 않았으며 업데이트 후 작업에 임시 메시지 정리가 적용된다. 업데이트/운영 재시작은 아직 하지 않았다.
 
+## TCP 분할을 고려한 마지막 시험 보완
+
+마지막 재실행에서 idle read cleanup 시험이 간헐 실패했다. EchoGame fixture가 TCP read마다 echo:를 삽입해 분할에 따라 hello/still-alive 표식 자체가 달라질 수 있었고, 일부 시험은 최소6바이트만 받고 전체 응답을 확인한 것으로 가정했다. prefix를 연결당 한 번만 출력하고 이후 바이트 스트림을 그대로 echo하며, 요청 표식이 올 때까지 bounded read로 확인하도록 보완한다. idle 시험은 먼저 hello 전달을 확인한 뒤 원격 EOF와 양측 stream0을 기다리므로 실제 유출/정리 조건은 유지한다. 이 시험 보완을 선커밋한 뒤 DirectRelayTest를 재확인하고 전체를 재실행한다.
+
 ## 최종 결과
 
 마지막 전체 테스트 실행 예정.
