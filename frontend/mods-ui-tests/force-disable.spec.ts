@@ -35,6 +35,7 @@ test('dependency card offers orange force disable with warning and confirmation 
  await expect(dialog).toContainText('강제 비활성화');await expect(dialog).toContainText('iris.jar');
  expect(f.toggles).toEqual([]);await dialog.getByRole('button',{name:'취소',exact:true}).click();expect(f.toggles).toEqual([]);
  await force.click();dialog=page.getByRole('dialog',{name:'모드 변경 확인'});
+ await expect(dialog).toBeVisible();
  await page.screenshot({path:'test-results/mod-force-disable-desktop.png'});
  await dialog.getByRole('button',{name:'위험을 확인하고 강제로 끄기',exact:true}).click();
  expect(f.toggles).toEqual([{revision:'r',files:['sodium.jar'],enabled:false,ignoreDependencies:true}]);
