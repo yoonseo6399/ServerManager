@@ -31,19 +31,19 @@ internal class ProjectAgentFileChanges(home:Path,profile:Path) {
     private fun collect(paths:List<Path>,broad:Boolean):Capture {
         val values=linkedMapOf<String,String?>();val existing=mutableSetOf<String>();var complete=true;var bytes=0;var visited=0
         fun add(path:Path) {existing.add(path.toAbsolutePath().normalize().toString());if(values.size>=1000 || bytes>=4*1024*1024){complete=false;return};val value=text(path);if(value!=null){bytes+=value.length*2;if(bytes<=4*1024*1024)values[path.toAbsolutePath().normalize().toString()]=value else complete=false}}
-        if(!broad){paths.forEach {p->if(safe(p)){val key=p.toAbsolutePath().normalize().toString();if(Files.exists(p,LinkOption.NOFOLLOW_LINKS))add(p)else values[key]=null}};return Capture(values,existing,true)}
+        if(!broad){paths.forEach {p->if(safe(p)){val key=p.toAbsolutePath().normalize().toString();if(Files.exists(p,LinkOption.NOFOLLOW_LINKS))add(p)else values[key]=null}};return Capture(values,existing,complete)}
         Files.walkFileTree(home,setOf(),12,object:SimpleFileVisitor<Path>() {
             override fun preVisitDirectory(dir:Path,attrs:BasicFileAttributes):FileVisitResult {
                 if(++visited>5000){complete=false;return FileVisitResult.TERMINATE}
                 return if(!safe(dir) || dir!=home && dir.fileName.toString() in ignored)FileVisitResult.SKIP_SUBTREE else FileVisitResult.CONTINUE
             }
             override fun visitFile(file:Path,attrs:BasicFileAttributes):FileVisitResult {if(++visited>5000){complete=false;return FileVisitResult.TERMINATE};if(attrs.isRegularFile)add(file);return FileVisitResult.CONTINUE}
-            override fun visitFileFailed(file:Path,error:java.io.IOException)=FileVisitResult.CONTINUE
+            override fun visitFileFailed(file:Path,error:java.io.IOException):FileVisitResult {complete=false;return FileVisitResult.CONTINUE}
         });return Capture(values,existing,complete)
     }
     fun before(plan:ProjectAgentPlan):Snapshot? {
         if(plan.readOnly || plan.tool.name in ProjectAgentServicePort.names || plan.tool.name=="ask_user" || plan.tool.name=="upload_file" || plan.tool.name=="make_new_project")return null
-        val broad=plan.tool.name in setOf("bash","run_command","build","test","git","make_new_project")
+        val broad=plan.tool.name in setOf("bash","run_command","build","test","git")
         val paths=plan.resolvedTargets.map {normalized(Path.of(it))}
         return runCatching {Snapshot(collect(paths,broad),broad,paths)}.getOrNull()
     }
