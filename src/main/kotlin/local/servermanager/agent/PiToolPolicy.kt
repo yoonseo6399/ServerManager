@@ -35,6 +35,15 @@ internal class PiToolPolicy(private val profile:Path,private val home:Path,priva
             val plan=ProjectAgentPlan(ProjectAgentTool(name,args),cwd.toString(),description,name=="read",scope=if(target==null)"UNKNOWN"else if(target.startsWith(cwd))"INSIDE"else "OUTSIDE",resolvedTargets=target?.let {listOf(it.toString())} ?: emptyList())
             return Checked(plan,plan,true,if(name=="bash")PiExecutableEvidence.inspect(home,profile,command)else null)
         }
+        // These are delegated-role ACL restrictions, not OWNER execution-risk decisions.
+        if(tier!=AgentAccess.OWNER && args.has("path")) {
+            val target=canonical(home.resolve(args.path("path").asText()))
+            val actualProfile=profile.toRealPath()
+            val root=if(actualProfile.fileName.toString()=="agent" && actualProfile.parent?.fileName?.toString()=="security")actualProfile.parent else actualProfile
+            val project=home.toRealPath()
+            check(name=="read" && outputTemp!=null && target.startsWith(canonical(outputTemp)) || !target.startsWith(root) || project.startsWith(root) && project!=root && target.startsWith(project)) {"관리 앱 인증·설정 폴더는 이 역할에 허용되지 않습니다."}
+            require(target.none {ProjectAgentShell.isSecret(it.toString()) || it.toString() in setOf(".release-keys","private.der")}) {"이 역할은 비밀 파일에 접근할 수 없습니다."}
+        }
         if(name=="ask_user") {
             require(args.path("question").isTextual && args.path("question").asText().length in 1..1000)
             val choices=args.path("choices");require(choices.isArray && choices.size() in 2..4 && choices.all {it.isTextual && it.asText().length in 1..80 && it.asText().isNotBlank() && it.asText().none {c->c.isISOControl()}} && choices.map {it.asText()}.distinct().size==choices.size()) {"질문은 선택지2~4개, 각1~80자로 입력하세요."}

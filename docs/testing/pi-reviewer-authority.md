@@ -35,7 +35,7 @@ Pi는 고정 실제 SDK1.3.0을 사용하며, 회귀 테스트의 모델은 재�
 
 ## 선행 실행 기록
 
-사용자의 커밋 우선 지시 전에 시작했던 실행은 결과를 보존한다. 초기 Kotlin 컴파일에서 JDA6 API의 버튼 조회 속성 오류를 발견해 event.button으로 수정했다. 이후 승인·실제 Pi 관련32개 통과. 다음 UI 포함47개 실행은46개 통과/1개 실패: 새 UI 테스트 mock이 setComponents 인자를 Collection으로만 처리해 ClassCastException 발생. 해당 fixture 수정도 먼저 커밋한 뒤 재검증한다. 이 결과는 현재 최종 구현 전체의 통과를 의미하지 않는다.
+사용자의 커밋 우선 지시 전에 시작했던 실행은 결과를 보존한다. 초기 Kotlin 컴파일에서 JDA6 API의 버튼 조회 속성 오류를 발견해 event.button으로 수정했다. 이후 승인·실제 Pi 관련32개 통과. 다음 UI 포함47개 실행은46개 통과/1개 실패: 새 UI 테스트 mock이 setComponents 인자를 Collection으로만 처리해 ClassCastException 발생. 해당 fixture의 Collection/vararg 처리 수정과 delegated-role ACL 보존 보완도 먼저 커밋한 뒤 재검증한다. 이 결과는 현재 최종 구현 전체의 통과를 의미하지 않는다.
 
 ## 최종 결과
 

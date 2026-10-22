@@ -22,7 +22,7 @@ class QwenDisplayTest {
                 var buttons:Boolean?=null
                 fun apply(){if(card!=null){row.card=card;calls.add(row.id to card.title.orEmpty())};if(text!=null)row.text=text;buttons?.let {row.buttons=it}}
                 return mock(MessageEditAction::class.java){c->when(c.method.name){
-                    "setComponents"->{buttons=(c.arguments[0] as Collection<*>).isNotEmpty();c.mock}
+                    "setComponents"->{buttons=when(val a=c.arguments[0]){is Collection<*>->a.isNotEmpty();is Array<*>->a.isNotEmpty();else->a!=null};c.mock}
                     "queue"->{apply();@Suppress("UNCHECKED_CAST") (c.arguments[0] as Consumer<Message>).accept(msg);null}
                     "complete"->{apply();msg}
                     else->RETURNS_SELF.answer(c)
@@ -44,7 +44,7 @@ class QwenDisplayTest {
                 val row=Row(rows.size,if(c.method.name=="sendMessageEmbeds")embed(c.arguments[0])else null,if(c.method.name=="sendMessage")c.arguments[0].toString()else null)
                 val msg=message(row)
                 mock(MessageCreateAction::class.java){q->when(q.method.name){
-                    "setComponents"->{row.buttons=(q.arguments[0] as Collection<*>).isNotEmpty();q.mock}
+                    "setComponents"->{row.buttons=when(val a=q.arguments[0]){is Collection<*>->a.isNotEmpty();is Array<*>->a.isNotEmpty();else->a!=null};q.mock}
                     "complete"->{rows.add(row);msg}
                     "queue"->{rows.add(row);@Suppress("UNCHECKED_CAST") (q.arguments[0] as Consumer<Message>).accept(msg);null}
                     else->RETURNS_SELF.answer(q)
