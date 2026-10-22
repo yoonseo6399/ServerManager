@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test';
 
-for(const burst of [0,1200])test(`an immediate startup crash follows ${burst} startup lines in live console without reload or file selection`,async({page})=>{
+for(const filtered of [false,true])for(const burst of [0,1200])test(`an immediate startup crash follows ${burst} startup lines with filter ${filtered} without reload or file selection`,async({page})=>{
  const lines=['The server installed successfully'];let state='STOPPED',reads=0;
  const crash='Exception in thread "main" java.lang.NoClassDefFoundError: org/lwjgl/Version';
  await page.route('**/api/**',async route=>{
@@ -11,12 +11,13 @@ for(const burst of [0,1200])test(`an immediate startup crash follows ${burst} st
   else if(path==='/api/memory')body={totalMb:16000,freeMb:8000,reservedMb:1600,maxHeapMb:14400,startableHeapMb:14400};
   else if(path==='/api/game-addresses')body={enabled:false};
   else if(path.endsWith('/log-files'))body=[];
-  else if(path.endsWith('/log-display'))body={revision:0,enabled:false,rules:[],presets:[]};
+  else if(path==='/api/log-filters/test')body={revision:0,config:{enabled:filtered,rules:{keywords:[],mods:[],onlyDebug:true},presets:[],activeId:null}};
   else if(path.endsWith('/log-window')){
    reads++;expect(url.searchParams.get('path')).toBe('console.log');
    const from=Number(url.searchParams.get('from')),limit=Number(url.searchParams.get('limit'));
    const rows=lines.map((text,n)=>({no:n+1,text,kind:text.startsWith('Exception')||text.startsWith('Caused by:')?'error':'output'})).filter(row=>row.no>=from).slice(0,limit);
-   body={lines:rows,total:lines.length,first:rows[0]?.no||0,last:rows.at(-1)?.no||0,next:null};
+   const last=rows.at(-1)?.no||0;
+   body={lines:rows,total:lines.length,first:rows[0]?.no||0,last,next:last&&last<lines.length?last+1:null};
   }
   else if(path.endsWith('/start')){
    state='FAILED';lines.push(...Array.from({length:burst},(_,n)=>`Startup output ${n+1}`),crash,'\tat sodium_service/net.caffeinemc.mods.sodium.PreLaunchChecks.checkEnvironment(PreLaunchChecks.java:25)','Caused by: java.lang.ClassNotFoundException: org.lwjgl.Version');
@@ -32,5 +33,5 @@ for(const burst of [0,1200])test(`an immediate startup crash follows ${burst} st
  await expect(page.getByTestId('log-count')).toContainText(`${(burst+4).toLocaleString()}줄`);
  expect(reads).toBeGreaterThan(initialReads);
  await page.getByTestId('log-viewport').scrollIntoViewIfNeeded();
- await page.screenshot({path:`test-results/remote-live-crash-${burst}.png`});
+ await page.screenshot({path:`test-results/remote-live-crash-${filtered}-${burst}.png`});
 });
