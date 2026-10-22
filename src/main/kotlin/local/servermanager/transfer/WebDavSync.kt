@@ -75,8 +75,8 @@ class WebDavSync(private val manager:ServerManager,private val settings:WebDavSe
     private val running=mutableSetOf<String>()
     private val successes=mutableMapOf<String,String>()
     private val errors=mutableMapOf<String,String>()
-    private val subscription=manager.onSignal { signal -> if(signal.kind in setOf("stop","import")) {
-        if(manager.instance(signal.instanceId).syncEnabled() && !manager.runtime(signal.instanceId).diagnosticActive && settings.view().config.enabled) runCatching { schedule(signal.instanceId) }
+    private val subscription=manager.onSignal { signal -> if(signal.kind in setOf("stop","import","snapshot")) {
+        if(!manager.backgroundPending(signal.instanceId) && manager.instance(signal.instanceId).syncEnabled() && !manager.runtime(signal.instanceId).diagnosticActive && settings.view().config.enabled) runCatching { schedule(signal.instanceId) }
         else manager.remoteCloudReady(signal.instanceId)
     } }
     private fun stateFile(id:String)=manager.root.resolve(id).resolve("webdav-sync.json")
