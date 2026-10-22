@@ -30,7 +30,7 @@ internal class ProjectAgentFileChanges(home:Path,profile:Path) {
     }.getOrNull()
     private fun collect(paths:List<Path>,broad:Boolean):Capture {
         val values=linkedMapOf<String,String?>();val existing=mutableSetOf<String>();var complete=true;var bytes=0;var visited=0
-        fun add(path:Path) {existing.add(path.toAbsolutePath().normalize().toString());if(values.size>=1000 || bytes>=4*1024*1024)return;val value=text(path);if(value!=null){bytes+=value.length*2;if(bytes<=4*1024*1024)values[path.toAbsolutePath().normalize().toString()]=value}}
+        fun add(path:Path) {existing.add(path.toAbsolutePath().normalize().toString());if(values.size>=1000 || bytes>=4*1024*1024){complete=false;return};val value=text(path);if(value!=null){bytes+=value.length*2;if(bytes<=4*1024*1024)values[path.toAbsolutePath().normalize().toString()]=value else complete=false}}
         if(!broad){paths.forEach {p->if(safe(p)){val key=p.toAbsolutePath().normalize().toString();if(Files.exists(p,LinkOption.NOFOLLOW_LINKS))add(p)else values[key]=null}};return Capture(values,existing,true)}
         Files.walkFileTree(home,setOf(),12,object:SimpleFileVisitor<Path>() {
             override fun preVisitDirectory(dir:Path,attrs:BasicFileAttributes):FileVisitResult {
@@ -42,18 +42,20 @@ internal class ProjectAgentFileChanges(home:Path,profile:Path) {
         });return Capture(values,existing,complete)
     }
     fun before(plan:ProjectAgentPlan):Snapshot? {
-        if(plan.readOnly || plan.tool.name in ProjectAgentServicePort.names || plan.tool.name=="ask_user" || plan.tool.name=="upload_file")return null
+        if(plan.readOnly || plan.tool.name in ProjectAgentServicePort.names || plan.tool.name=="ask_user" || plan.tool.name=="upload_file" || plan.tool.name=="make_new_project")return null
         val broad=plan.tool.name in setOf("bash","run_command","build","test","git","make_new_project")
         val paths=plan.resolvedTargets.map {normalized(Path.of(it))}
         return runCatching {Snapshot(collect(paths,broad),broad,paths)}.getOrNull()
     }
     fun after(snapshot:Snapshot?):List<ProjectAgentFileChange> {
         if(snapshot==null)return emptyList()
-        return runCatching {val after=collect(snapshot.paths,snapshot.broad);(snapshot.captured.files.keys+after.files.keys).distinct().asSequence().mapNotNull {path->
+        return runCatching {val after=collect(snapshot.paths,snapshot.broad);if(!snapshot.captured.complete || !after.complete)return@runCatching emptyList()
+            val changes=(snapshot.captured.files.keys+after.files.keys).distinct().asSequence().mapNotNull {path->
             val before=snapshot.captured.files[path];val next=after.files[path]
             if(before==null && path in snapshot.captured.existing || before==null && !snapshot.captured.complete || next==null && Files.exists(Path.of(path),LinkOption.NOFOLLOW_LINKS))null
-            else if(before==next)null else ProjectAgentFileChange(path,before,next,unified(path,before,next))
-        }.take(20).toList()}.getOrDefault(emptyList())
+            else if(before==next)null else Triple(path,before,next)
+        }.take(2).toList()
+            changes.singleOrNull()?.let {(path,before,next)->listOf(ProjectAgentFileChange(path,before,next,unified(path,before,next)))} ?: emptyList()}.getOrDefault(emptyList())
     }
     companion object {
         /** Bounded LCS diff. Large files use an honest excerpt rather than claiming a complete patch. */

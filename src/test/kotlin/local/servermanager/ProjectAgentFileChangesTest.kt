@@ -25,9 +25,39 @@ class ProjectAgentFileChangesTest {
     @Test fun `bash reports bounded project changes and skips secrets symlinks binary and private profile`() {
         val home=temp.resolve("project").createDirectories();val profile=home.resolve("private-profile").createDirectories();val capture=ProjectAgentFileChanges(home,profile)
         val normal=home.resolve("a.txt");normal.writeText("a");home.resolve(".env").writeText("secret-before");profile.resolve("auth.json").writeText("private-before")
-        val pre=capture.before(plan("bash",emptyList()));normal.writeText("b");home.resolve("new.py").writeText("print(1)\n");home.resolve(".env").writeText("secret-after");profile.resolve("auth.json").writeText("private-after")
-        val changes=capture.after(pre);assertEquals(setOf("a.txt","new.py"),changes.map {Path.of(it.path).fileName.toString()}.toSet())
+        val pre=capture.before(plan("bash",emptyList()));normal.writeText("b");home.resolve(".env").writeText("secret-after");profile.resolve("auth.json").writeText("private-after")
+        val changes=capture.after(pre);assertEquals(setOf("a.txt"),changes.map {Path.of(it.path).fileName.toString()}.toSet())
         val previous=capture.before(plan("write",listOf(normal)));normal.writeBytes(byteArrayOf(0,1,2));assertTrue(capture.after(previous).isEmpty(),"unreadable/binary result must not be falsely reported as deletion")
+    }
+    @Test fun `multi file bash changes suppress all diffs rather than selecting a first file`() {
+        val home=temp.resolve("project").createDirectories();val profile=temp.resolve("profile").createDirectories()
+        val capture=ProjectAgentFileChanges(home,profile)
+        home.resolve("a.txt").writeText("original")
+        val before=capture.before(plan("bash",emptyList()))
+        home.resolve("a.txt").writeText("changed");home.resolve("b.txt").writeText("new")
+        assertTrue(capture.after(before).isEmpty())
+        assertEquals("changed",home.resolve("a.txt").readText());assertEquals("new",home.resolve("b.txt").readText())
+    }
+    @Test fun `clone like new tree and explicit project creation never flood file diffs`() {
+        val home=temp.resolve("project").createDirectories();val profile=temp.resolve("profile").createDirectories()
+        val capture=ProjectAgentFileChanges(home,profile)
+        assertNull(capture.before(plan("make_new_project",listOf(home.resolve("clone")))))
+        val before=capture.before(plan("bash",emptyList()))
+        val repo=home.resolve("clone").createDirectories()
+        repeat(30){repo.resolve("file-$it.txt").writeText("source $it")}
+        assertTrue(capture.after(before).isEmpty())
+        // A subsequent focused edit still has a preview even inside the cloned tree.
+        val single=capture.before(plan("bash",emptyList()))
+        repo.resolve("file-0.txt").writeText("updated")
+        assertContains(capture.after(single).single().diff,"+updated")
+    }
+    @Test fun `incomplete broad snapshot does not claim only one file changed`() {
+        val home=temp.resolve("project").createDirectories();val profile=temp.resolve("profile").createDirectories()
+        val capture=ProjectAgentFileChanges(home,profile)
+        val file=home.resolve("a.txt");file.writeText("old")
+        val before=capture.before(plan("bash",emptyList()))!!
+        file.writeText("new")
+        assertTrue(capture.after(before.copy(captured=before.captured.copy(complete=false))).isEmpty())
     }
     @Test fun `preview is owner channel epoch bound expires and original bytes remain intact`() {
         var now=100L;val previews=ProjectAgentFilePreviews {now};val change=ProjectAgentFileChange("/p/a.txt","a\r\n","b\r\n","diff")

@@ -524,7 +524,7 @@ internal class DiscordProjectAgentDisplay(private val channel:TextChannel,privat
                 val completedCard=EmbedBuilder().setTitle("턴 ${event.turn} : ${event.plan!!.tool.name} · ${"%.1f".format(java.util.Locale.ROOT,event.seconds)}초").setDescription("${event.plan!!.description.take(1600)}\n\n${event.text.take(1100)}").addField("독립 검토",event.risk?.let {"${it.action} · ${it.risk} · ${it.reason}"}?.take(1000) ?: "검토 기록은 실행 전 카드에 표시됩니다.",false).setFooter(footer()).build()
                 cardBases[key]=completedCard;DiscordResultCards.completed(channel.id,key,completedCard)
                 turns[key]?.editMessageEmbeds(completedCard)?.setComponents(emptyList())?.queue({}, {})
-                event.changes.forEach {change->
+                event.changes.singleOrNull()?.let {change->
                     val token=filePreview?.invoke(change)
                     val actions=if(token==null)emptyList()else listOf(ActionRow.of(Button.secondary("qa:file:$token","자세히 · 변경 전/후 원문")))
                     channel.sendMessageEmbeds(EmbedBuilder().setTitle("파일 변경 · "+Path.of(change.path).fileName.toString().take(180)).setDescription(change.path.take(1000)).setFooter("실행 전후 관측된 변경 · diff는 일부일 수 있습니다 · 원문 10분 보관").build()).setComponents(actions).setAllowedMentions(emptyList()).complete()
