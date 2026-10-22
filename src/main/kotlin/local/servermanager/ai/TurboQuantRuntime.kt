@@ -37,6 +37,11 @@ object TurboQuantRuntime {
     private fun supported()=System.getProperty("os.name").contains("Mac",true) && System.getProperty("os.arch") in setOf("arm64","aarch64") && System.getProperty("os.version").substringBefore('.').toIntOrNull()?.let {it>=15}==true
     private fun ssl():Path?=if(!release.exists())null else Files.walk(release).use {s->s.filter {it.fileName.toString()=="libssl.3.dylib" && Files.isRegularFile(it)}.findFirst().orElse(null)?.parent}
     fun status()=Status(supported(),supported() && binary.isExecutable() && release.resolve("verified").exists(),installing,process?.isAlive==true,VERSION,profile?.second,message)
+    fun memory():LlmMemory {
+        val pid=process?.takeIf {it.isAlive}?.pid()
+        val rss=pid?.let {LlmMemory.command("/bin/ps","-o","rss=","-p",it.toString())?.trim()?.toLongOrNull()?.takeIf {value->value>=0}?.times(1024)}
+        return LlmMemory.sample(rss,"TurboQuant RSS · 공유 페이지 포함")
+    }
     @Synchronized fun authorization():String="Bearer "+(secret ?: error("TurboQuant가 시작되지 않았습니다."))
     private fun privateDir(path:Path){path.createDirectories();Files.setPosixFilePermissions(path,PosixFilePermissions.fromString("rwx------"))}
     private fun acquire(){privateDir(root);val c=java.nio.channels.FileChannel.open(root.resolve("service.lock"),java.nio.file.StandardOpenOption.CREATE,java.nio.file.StandardOpenOption.WRITE);val l=runCatching {c.tryLock()}.getOrNull();if(l==null){c.close();error("다른 관리 앱/실행기가 TurboQuant를 사용 중입니다.")};lockChannel=c;lock=l}

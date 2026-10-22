@@ -100,7 +100,7 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
         val missing=installed.filter {(id,ok)->!ok && LocalModels.get(id).backend=="ollama"}.keys.map {LocalModels.label(it)}
         val loaded=loaded()+(if(strata.running)listOf(StrataRuntime.MODEL)else emptyList())+(if(TurboQuantRuntime.status().running)listOf(tag("qwen38-27b"))else emptyList())
         return Status(version!=null || strata.running,version,models,loaded,tags,installed,if(version!=null)"Ollama 실행 중"+(if(missing.isEmpty())" · Ollama 모델 모두 설치됨"else " · 미설치: ${missing.joinToString()}")+" · Flash-Next는 별도 Strata 엔진을 사용합니다."else "Ollama에 연결하지 못했습니다. Flash-Next 상태는 아래에서 확인하세요.",
-            tags.keys.mapNotNull {key->if(installed[key]==true)modelContext(key)?.let {key to it}else null}.toMap(),if(strata.running)StrataRuntime.memory()else memory(),strata,TurboQuantRuntime.status())
+            tags.keys.mapNotNull {key->if(installed[key]==true)modelContext(key)?.let {key to it}else null}.toMap(),if(strata.running)StrataRuntime.memory()else if(TurboQuantRuntime.status().running)TurboQuantRuntime.memory()else memory(),strata,TurboQuantRuntime.status())
     }
     fun chat(size:String,prompt:String,think:Boolean=false):Answer {
         check(inference.tryAcquire()) {"다른 로컬 모델 요청이 진행 중입니다."}
@@ -147,7 +147,7 @@ class LocalLlm(private val endpoint:URI=URI(System.getenv("OLLAMA_URL") ?: "http
             if(budget.experimentalKvCompression && size=="qwen38-27b") {
                 check(TurboQuantRuntime.status().ready) {"TurboQuant 엔진 준비가 필요합니다. 관리웹에서 설치/지원 상태를 확인하세요."}
                 val file=modelFile(size);StrataRuntime.stop();unloadQwen()
-                return StrataLlm(endpoint=TurboQuantRuntime.endpoint,context={TurboQuantRuntime.start(file,budget.window,tag(size),budget.allowCriticalMemory)},memory={LlmMemory.sample(metric="TurboQuant · OS 메모리")},model=tag(size),backend="TurboQuant",allowedWindows=LocalContextBudget.WINDOWS,authorization={TurboQuantRuntime.authorization()},modelMaximum={modelContext(size)}).conversation(messages,think,budget,progress)
+                return StrataLlm(endpoint=TurboQuantRuntime.endpoint,context={TurboQuantRuntime.start(file,budget.window,tag(size),budget.allowCriticalMemory)},memory={TurboQuantRuntime.memory()},model=tag(size),backend="TurboQuant",allowedWindows=LocalContextBudget.WINDOWS,authorization={TurboQuantRuntime.authorization()},modelMaximum={modelContext(size)}).conversation(messages,think,budget,progress)
             }
             TurboQuantRuntime.stop()
             if(LocalModels.get(size).backend=="strata") {unloadQwen();return StrataLlm().conversation(messages,think,budget,progress)}
