@@ -1,4 +1,4 @@
-상태: TurboQuant/긴 문맥 실행 경로 구현 중 · 실모델 시험은 앱 종료 후
+상태: 전체회귀 통과 · 27B64K 긴 입력 성공 · Flash16K 긴 입력 시험 중
 # feat/turboquant-context
 - fix/pi-single-file-diff 17eacb2 위 별도 로컬 브랜치. 앞선 두 수정 포함, 릴리즈/푸시 보류. 단독 작업.
 - 사용자 목표: 27B 64K, Flash-Next 최소16K. Illustrator 종료 전 실모델 시험 금지, 기존 실행 중 모델·OS 메모리 설정 유지.
@@ -20,3 +20,5 @@
 - 27B64K: 실제56464입력, 표식회수 일치, 총840.32초, 생성6.57tok/s, 주의 압력/위험중단없음. 파일 build/extended-context-live/qwen38-27b.json 보존.
 - Flash16K: health16384/짧은 응답 성공. 긴10290입력은 약7tok/s로 기본20분 한도를 넘을 것으로 관측하여 시험 JVM6617만 SIGTERM으로 종료(운영 앱·실행기 미변경). first-short-only.json에 첫 관측 보존. 모델 오류나 long retrieval 실패로 단정하지 않음. 다음 시험은16K창에 기존8K보다 큰 약8.6K입력을 넣고 시험전용 요청제한40분으로 진행, 실제 처리량과16K전체 미충전 사실 명시.
 - 전체회귀중 기존 LlmMemoryGuardTest의 선택지 기대가8K/16K에 고정되어 실패. 신규32K/64K 공개 계약을 반영하는 기대4개로 갱신하고 재검증한다. 코드/시험 계획 선커밋 후 실행.
+
+- 최종 로컬 전체회귀5e5e1d9: {'tests': 684, 'failures': 0, 'errors': 0, 'skipped': 29, 'passed': 655} (총684/655통과/29조건부 미실행/실패0). 설정 관련24개 및 격리 native 설치1개도 별도 통과. 전체회귀는 Flash 시험과 일부 동시 실행되어 Flash 처리시간을 독점 벤치마크로 해석하지 않는다.

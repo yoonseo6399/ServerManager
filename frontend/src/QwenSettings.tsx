@@ -45,7 +45,7 @@ export function QwenSettings(){
  {runnerId&&!ready&&<p className="muted">{runner?(runner.online?capabilityText[runner.capability]:'실행기가 오프라인입니다.'):'등록된 실행기가 아닙니다.'} 지정한 실행기를 쓸 수 없으면 관리 앱 컴퓨터로 대체하지 않고 요청이 실패합니다.</p>}
  {!runnerId&&<p className="muted">아래 환경 확인·설치·메모리 해제는 관리 앱 컴퓨터에 적용됩니다. 자동 추론이 선택하는 실행기와 다를 수 있으므로 원격 상태를 보려면 실행기를 직접 고르세요.</p>}
  {model==='qwen38-27b'&&<p className="muted">설치 태그: <code>ollama pull qwen3.8:27b-q4_K_M</code> · 모델 약 16.8GB · 16K/32K/64K는 /agent context에서 선택합니다. 64K 목표는 TurboQuant 엔진 준비와 실모델 검증이 필요합니다. 메모리 압력·스왑 증가량을 확인하세요.</p>}
- {model==='qwen38-flash-next'&&<p className="muted">Apple Silicon Mac · 약 66.4GB 모델 다운로드·여유 공간 75GB 필요 · 8K/16K 실행 창(16K 실험·미검증) · SSD 속도에 따라 입력 처리가 오래 걸릴 수 있습니다. 첫 요청에서 자동 시작하고 다른 모델을 고르면 먼저 종료합니다.</p>}
+ {model==='qwen38-flash-next'&&<p className="muted">Apple Silicon Mac · 약 66.4GB 모델 다운로드·여유 공간 75GB 필요 · 8K/16K 실행 창(16K 실험·미검증) · SSD 속도에 따라 입력 처리가 오래 걸릴 수 있습니다. 긴 입력은 기본20분 제한을 넘길 수 있으므로 필요하면 상단 추론 요청 제한을 늘리세요. 첫 요청에서 자동 시작하고 다른 모델을 고르면 먼저 종료합니다.</p>}
  <div className="actions"><button type="submit">로컬 LLM 설정 저장</button>
  <button type="button" disabled={!ready} onClick={check}>실행 환경 확인</button>
  <button type="button" disabled={!ready||!probe?.loaded.length} onClick={unload}>메모리에서 내리기</button></div>
