@@ -729,3 +729,5 @@ Beta23 통합 검증도684보고=655통과/29조건부 미실행/실패0(2m20s).
 Beta23 최초 CI39746909392가683완료/2실패/28스킵으로 게시 전 중단. TCP 연결거부 ConnectException하위타입기대를 SocketException(connect자체, timeout거부)으로 보완. Python AST시험 시작여유15초/실행SIGALRM3초 분리 및 실패출력, 최초원인은미확정. 테스트 실패FULL진단/새실측 UP-TO-DATE캐시금지. 관련20개/전체655통과29스킵/TCP철회3회 통과 후 미게시태그만갱신하여 전체CI재시도.
 
 사용자링크Windows CI39749229293/job119725290135: prepare-youtube-source.py62행고정POM/modulechecksum실패. core.autocrlf true+core.eol crlf로기존규칙4개변환/불일치재현. .gitattributes메타데이터LF고정후4개pin일치/변조거부. 원문/버전/pin불변. 미게시release재시도중단후이수정포함최종CI진행.
+
+Beta23최종게시완료: v0.7.0-beta.23 source83536d1342bea637036972b7265c19baa719dfdb, 2026-10-22T09:02:07Z, 공개prerelease자산9개API확인. release CI39751161519 전체backend/frontend/JAR/패키징/격리bootstrap/서명/게시success. installer CI39751161529 Windows/Mac모두success, 사용자가지적한WindowsPOM/module해시문제해결확인. 이전실패/취소이력보존, lateststable6.3와main보존, 운영직접설치/재시작·게시자산재다운로드해시없음. 상세는release dev-note와publication.json.

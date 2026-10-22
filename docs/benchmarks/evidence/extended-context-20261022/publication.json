@@ -1,0 +1,73 @@
+{
+  "tag": "v0.7.0-beta.23",
+  "url": "https://github.com/yoonseo6399/ServerManager/releases/tag/v0.7.0-beta.23",
+  "published_at": "2026-10-22T09:02:07Z",
+  "prerelease": true,
+  "draft": false,
+  "source": "83536d1342bea637036972b7265c19baa719dfdb",
+  "release_ci": "https://github.com/yoonseo6399/ServerManager/actions/runs/39751161519",
+  "conclusion": "success",
+  "assets": [
+    {
+      "name": "server-manager-0.7.0-beta.23.jar",
+      "size": 94581383,
+      "state": "uploaded"
+    },
+    {
+      "name": "ServerManager-0.7.0-beta.23-universal.pkg",
+      "size": 179579514,
+      "state": "uploaded"
+    },
+    {
+      "name": "ServerManager-Runner-0.7.0-beta.23-mac-universal.zip",
+      "size": 180465421,
+      "state": "uploaded"
+    },
+    {
+      "name": "ServerManager-Runner-0.7.0-beta.23-windows-x64.zip",
+      "size": 137821595,
+      "state": "uploaded"
+    },
+    {
+      "name": "ServerManager-Runner-UI-0.7.0-beta.23-mac-universal.zip",
+      "size": 180529411,
+      "state": "uploaded"
+    },
+    {
+      "name": "ServerManager-Runner-UI-0.7.0-beta.23-windows-x64.zip",
+      "size": 137823784,
+      "state": "uploaded"
+    },
+    {
+      "name": "SHA256SUMS",
+      "size": 846,
+      "state": "uploaded"
+    },
+    {
+      "name": "update.properties",
+      "size": 157,
+      "state": "uploaded"
+    },
+    {
+      "name": "update.sig",
+      "size": 64,
+      "state": "uploaded"
+    }
+  ],
+  "verification": "GitHub API metadata only; no release asset downloaded or hashed",
+  "installer_ci": {
+    "url": "https://github.com/yoonseo6399/ServerManager/actions/runs/39751161529",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "name": "installer (windows-latest)",
+        "conclusion": "success"
+      },
+      {
+        "name": "installer (macos-14)",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "stable_latest": "v0.6.3"
+}

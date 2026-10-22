@@ -1,4 +1,4 @@
-상태: Windows CRLF checksum 실패 재현/수정 검증 · 전체655통과 유지 · 최종 CI 준비
+상태: Beta23 서명 게시 완료 · 전체/Windows/Mac CI 성공 · 공개 자산9개 메타데이터 확인
 # release/0.7.0-beta.23
 - Beta22 태그5015c95 기반, origin/feat/turboquant-context ad049a7 통합. 단독 구현/검토. stable/main/latest 보존.
 - 변경·실측·미해결14B 검토 오판은 한국어 릴리즈 노트와 원문 증거에 보존.
@@ -25,3 +25,8 @@
 - 현재아직미게시(API404)인Beta23 release CI39749275529는 이수정을포함하기위해중단. 모델/제품변경아님. 기존공개태그/자산보존.
 
 - core.autocrlf=true/core.eol=crlf 재현결과: 기존규칙의POM/module4개모두CRLF/해시불일치, LF고정후4개모두기존pin일치/CRLF없음. 변조바이트추가거부확인. windows-metadata-checkout.json에원문해시/바이트보존. Mac에서Windows체크아웃정책을재현한것이며실제WindowsCI결과는별도확인한다. 제품코드·메타데이터원문·버전·pin은불변.
+
+- 최종 게시 source/tag: 83536d1342bea637036972b7265c19baa719dfdb / v0.7.0-beta.23. 2026-10-22T09:02:07Z 공개 prerelease, draftfalse, 자산9개모두uploaded/size>0. API메타데이터만확인, 재다운로드/해시없음. publication.json보존.
+- 최종 release CI39751161519 success: 전체backend/frontend/JAR/runner-setup/manager·runner패키징/격리bootstrap/서명/게시모두통과. installer CI39751161529 success: Windows5m2s/Mac3m35s, 준비/파일전달복구통과, 중앙권한시험은기존정책대로Mac만실행. 실제설치된Windows앱일반동작까지검증했다고표현하지않음.
+- 앞선재시도39749275529도전체backend/JAR/runner-setup/manager패키징은통과후WindowsLF수정을추가하려취소했다. 최초Python실패원인은미확정이지만보완후두CI전체suite통과. 기존실패기록은삭제하지않음.
+- lateststablev0.6.3유지. main·게시태그·자산은변경없음. 이후이커밋은보고기록만추가하며태그를옮기지않는다. 운영앱/실행기/호스트직접설치/재시작은하지않았다.
