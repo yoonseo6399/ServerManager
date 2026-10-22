@@ -696,3 +696,12 @@ Common bounded file diff/detail attachments and fenced output, per-run8K/16K, in
 /agent setting tool_output_limit(512..8000,기본2400), 전체 비정밀 도구 원문 보관/첨부+발췌, 정확한 원문/편집 예외, 기존 세션 큰 결과 제한, 원래 카드의 결과 paging 진행, 긴 단일 줄 start_char와 마지막 개행 line count를 보완했다. 관련47개·실제27B 검토3사례 통과, 최초 로딩 취소 실패도 보존. 전체/다른OS/운영 Discord 실기 검증은 생략. 기존 서명 CI를 skip_full_tests=true로 게시하며 stable main/latest와 게시된 태그/파일 보존. 운영 설치·재시작·게시 후 자산 다운로드/해시 비교 없음.
 
 Beta20 게시 전 외부 Maven이 MinIO 디렉터리 HTML을 반환해 CI2회 실패했다. 동일버전 공식 GitHub YouTube v2/common을 SHA256 고정한 빌드 로컬 Maven 준비 스크립트를 추가했다. 내부94클래스/리소스의 바이트 동일, ZIP시간 차이만 확인; 버전/의존성 그래프 불변. 고정 메타데이터와 라이선스 보존, 준비·변조거부·실제 bootJar 검증. ServerManager 게시 자산을 내려받는 검사는 하지 않았다.
+
+
+## 2026-10-22 — 0.7.0-beta.21
+
+게시된 Beta20 기준 fix/pi-reviewer-authority53a5249 통합, solo. 사용자 요청으로 OWNER native read/edit/write/bash의 정적 명령 allowlist·경로/비밀 파일명/fingerprint veto와 UNKNOWN→ASK/LOW→MEDIUM 변환을 제거했다. 독립 새 모델 검토·정확한 원 요청 ledger·명시 승인 모드로 통일하며 DENY/검토 실패·역할/ACL·본인 승인·중지/취소는 유지한다. Gradle 별도 신뢰 우회도 기본 Pi 경로에서 제거. 정적 변경 재검사가 없으며 모델 오판/TOCTOU는 보장하지 않는다.
+
+선택/자유 응답을 원 질문에 기록하고 응답자 ID·멘션 차단, 상단 고정 요청/모델/진행/지표 요약과 하단 상태창 분리. 새 응답 청크 뒤 placeholder 재전송, 같은 메시지를 도구 카드로 전환, 다음 actor 턴 새 상태창, 지연 편집 취소·중지 버튼 수명과 누적 지표 유지. 주입 지시문·exporter 일치.
+
+구현과 테스트 계획 선커밋 후 focused54개 통과, 최종 지표 수정 후 UI7개 재검증 통과. 실제 Pi SDK/Git localhost 연쇄 실행이며 모델 fixture; 실제27B 신규 검토와 운영 Discord는 미실행. 전체/다른 OS/운영 설치·재시작/게시 후 자산 다운로드·해시 대조 생략. 기존 서명 secret과 skip_full_tests=true CI로 게시하며 stable/main/latest·기존 게시 태그/자산은 보존한다.
