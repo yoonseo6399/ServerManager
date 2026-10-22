@@ -1,4 +1,4 @@
-상태: 강제 비활성화 구현·검증 계획 선커밋 준비, 테스트 미실행
+상태: 통합 브랜치에서 전체 백엔드 661통과/29조건부 미실행·브라우저 12통과, 운영 배포 전
 
 # fix/mod-force-disable
 
@@ -13,3 +13,5 @@
 3. TypeScript/Vite build와 bootJar. 전체 테스트는 사용자 요청에 따라 최종 수정 통합 후 실행한다.
 
 후속 요청: 실시간 콘솔 크래시 누락과 모드 토글 지연 원인은 별도 조사한다. 설치·릴리즈·운영 재시작은 이 커밋에 포함하지 않는다.
+
+검증 결과: `fix/mod-start-diagnostics`의 `docs/testing/mod-start-diagnostics.md` 및 JSON 참조. 전체 Kotlin/Java 테스트 실패 0, bootJar 및 TypeScript/Vite 통과. 관련 브라우저 12개는 원격 API fixture이며 운영 Discord·다른 OS 검증은 수행하지 않았다.
