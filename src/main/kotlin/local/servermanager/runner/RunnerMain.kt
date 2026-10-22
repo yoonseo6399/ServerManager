@@ -311,7 +311,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             reportFolders()
             home.resolve("instances").takeIf {it.exists()}?.listDirectoryEntries()?.forEach {dir->dir.resolve("install-result.json").takeIf {it.exists()}?.let {file->runCatching {send(mapper.readValue<RunnerMessage>(file.readText()))}}}
             processes.forEach { (id,process) -> report(id,process) }
-            if(sessionToken!=null) home.resolve("instances").takeIf { it.exists() }?.let { root -> Files.list(root).use { dirs -> dirs.filter { it.isDirectory() && it.resolve("dirty").exists() && processes[it.fileName.toString()]?.isAlive!=true }.forEach { dir ->
+            if(sessionToken!=null) home.resolve("instances").takeIf { it.exists() }?.let { root -> Files.list(root).use { dirs -> dirs.filter { it.isDirectory() && (it.resolve("dirty").exists() && processes[it.fileName.toString()]?.isAlive!=true || snapshots(it.fileName.toString()).list().isNotEmpty()) }.forEach { dir ->
                 val id=dir.fileName.toString()
                 configs[id] ?: runCatching { mapper.readValue<Instance>(dir.resolve("instance.json").readText()) }.getOrNull()?.let { configs[id]=it }
                 if(configs[id]!=null) {
@@ -1025,6 +1025,10 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             }
         } catch(e:Exception) {
             // Runtime state belongs to the current game; background failures must not turn it into SYNC_FAILED.
+            if(dirty(id).exists() && processes[id]?.isAlive!=true) {
+                send(RunnerMessage("file-progress",id,detail=mapper.writeValueAsString(FolderImportProgress("FAILED",message="종료 복사본 준비 실패: "+e.message.orEmpty().take(300)))))
+                send(RunnerMessage("state",id,"SYNC_FAILED",version(),"종료 복사본을 준비하지 못했습니다. 원본은 보존했습니다."))
+            }
             send(RunnerMessage("log",id,"warn",version(),"종료 복사본 전송 대기: "+e.message.orEmpty().take(300)))
             snapshots(id).list().firstOrNull()?.let {s->runCatching {http("POST","/api/runners/transfer/$id/snapshot-progress?generation=${s.ready.generation}",HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(FolderImportProgress("RETRYING",message=e.message.orEmpty().take(300)))),"application/json")}}
         }finally{if(reserved)uploading.remove(id)}
@@ -1199,7 +1203,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         }
 
         processes.forEach { (id,process)->report(id,process) }
-        home.resolve("instances").takeIf { it.exists() }?.let { root -> Files.list(root).use { dirs -> dirs.filter { it.isDirectory() && it.resolve("dirty").exists() && processes[it.fileName.toString()]?.isAlive!=true }.forEach { dir ->
+        home.resolve("instances").takeIf { it.exists() }?.let { root -> Files.list(root).use { dirs -> dirs.filter { it.isDirectory() && (it.resolve("dirty").exists() && processes[it.fileName.toString()]?.isAlive!=true || snapshots(it.fileName.toString()).list().isNotEmpty()) }.forEach { dir ->
             val id=dir.fileName.toString()
             if(orphanAlive(id))send(RunnerMessage("state",id,"UNKNOWN",version(),"실행기 재시작 전 Minecraft 프로세스가 계속 실행 중입니다"))
             else workers.submit { uploadStopped(id) }
