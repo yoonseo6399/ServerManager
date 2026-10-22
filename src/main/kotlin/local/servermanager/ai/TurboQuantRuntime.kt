@@ -65,7 +65,7 @@ object TurboQuantRuntime {
             if(!p.waitFor(20,TimeUnit.SECONDS)){p.destroyForcibly();error("TurboQuant 지원 검사 시간 초과")}
             check(p.exitValue()==0 && help.readText().contains("turbo4")) {"TurboQuant 지원 검사 실패 · $help 확인"}
             release.resolve("verified").writeText("$VERSION\n$HASH\n$SSL_HASH\n")
-            message="TurboQuant 준비됨 · Q8 K + Turbo4 V · 27B 64K 실모델 시험은 아직 미실행"
+            message="TurboQuant 준비됨 · Q8 K + Turbo4 V · 큰 실행 창은 실험 기능이며 메모리·처리시간에 주의하세요"
         }catch(e:Exception){Files.deleteIfExists(release.resolve("verified"));message="TurboQuant 설치 실패: "+e.message.orEmpty().take(300)}finally{synchronized(this){installing=false;releaseLock()}}},"turboquant-install").apply {isDaemon=true;start()}
         return status()
     }
