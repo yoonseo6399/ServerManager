@@ -28,7 +28,7 @@ class LlmMemoryGuardTest {
         val command=DiscordProjectAgent.command()
         for(name in listOf("run","context")) {
             val option=command.subcommands.first {it.name==name}.options.first {it.name=="window"}
-            assertFalse(option.isRequired);assertEquals(listOf(8192L,16384L),option.choices.map {it.asLong})
+            assertFalse(option.isRequired);assertEquals(listOf(8192L,16384L,32768L,65536L),option.choices.map {it.asLong})
         }
     }
 }

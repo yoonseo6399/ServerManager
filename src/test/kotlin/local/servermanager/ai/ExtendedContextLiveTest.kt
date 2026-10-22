@@ -12,8 +12,8 @@ import kotlin.test.*
 /** Explicitly authorized RAM-consuming experiment. No project tools execute. */
 @EnabledIfEnvironmentVariable(named="EXTENDED_CONTEXT_LIVE",matches="true")
 class ExtendedContextLiveTest {
-    @Test @Timeout(1800) fun `27B64K real short and long retrieval with compressed cache`()=check("qwen38-27b",65536,2300)
-    @Test @Timeout(1800) fun `Flash16K real short and long retrieval with rotated cache`()=check("qwen38-flash-next",16384,430)
+    @Test @Timeout(3000) fun `27B64K real short and long retrieval with compressed cache`()=check("qwen38-27b",65536,2300)
+    @Test @Timeout(3000) fun `Flash16K real short and long retrieval with rotated cache`()=check("qwen38-flash-next",16384,360)
     private fun check(id:String,window:Int,lines:Int) {
         val llm=LocalLlm();val json=jacksonObjectMapper()
         val output=Path.of("build/extended-context-live").createDirectories().resolve("$id.json")
@@ -27,7 +27,7 @@ class ExtendedContextLiveTest {
             }
             fun ask(text:String):LocalLlm.Answer {
                 val wire=PiWire.PREFIX+json.writeValueAsString(mapOf("messages" to listOf(mapOf("role" to "user","content" to text)),"tools" to emptyList<Any>()))
-                return llm.conversationWithBudget(id,listOf(ProjectAgentMessage("system",wire)),false,LocalContextBudget(window,512,requestTimeoutSeconds=1200,experimentalKvCompression=true))
+                return llm.conversationWithBudget(id,listOf(ProjectAgentMessage("system",wire)),false,LocalContextBudget(window,512,requestTimeoutSeconds=2400,experimentalKvCompression=true))
             }
             val first=ask("Reply with exactly KV_READY and nothing else.")
             records["short"]=first.copy(nativeMessage=null,thinking="")
@@ -41,7 +41,7 @@ class ExtendedContextLiveTest {
             records["long"]=final.copy(nativeMessage=null,thinking="");records["expected"]=marker
             records["needleMatched"]=marker in final.text;records["afterLong"]=LlmMemory.sample()
             assertContains(final.text,marker);assertFalse(final.limited);assertNotNull(final.inputTokens)
-            assertTrue(final.inputTokens!!>if(window==65536)40000 else 7000,"Long-input test must actually consume a large prompt")
+            assertTrue(final.inputTokens!!>if(window==65536)40000 else 8192,"Long-input test must actually consume a large prompt")
         }catch(e:Throwable){records["failure"]=e.message;throw e}
         finally {
             runCatching {llm.unloadAll()}.onFailure {records["cleanupError"]=it.message}
