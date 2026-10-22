@@ -51,7 +51,7 @@ class AuthApi(private val store:AuthStore,private val settings:SecuritySettings,
     }
     @GetMapping("/auth/session") fun session(req:HttpServletRequest):Map<String,Any?> {
         val user=current();val token=req.getAttribute(CsrfToken::class.java.name) as CsrfToken
-        return mapOf("appVersion" to javaClass.getResourceAsStream("/app-version.txt")!!.bufferedReader().use { it.readText().trim() },"user" to user?.let { mapOf("id" to it.id,"name" to it.displayName,"owner" to it.owner,"administrator" to (it.role==AccountRole.ADMIN),"role" to it.role,"permissions" to it.instancePermissions()) },"csrf" to token.token,"publicOrigin" to settings.publicOrigin,"origin" to settings.origin,"setupRequired" to !store.hasOwnerCredential())
+        return mapOf("bootId" to ServiceBoot.id,"appVersion" to javaClass.getResourceAsStream("/app-version.txt")!!.bufferedReader().use { it.readText().trim() },"user" to user?.let { mapOf("id" to it.id,"name" to it.displayName,"owner" to it.owner,"administrator" to (it.role==AccountRole.ADMIN),"role" to it.role,"permissions" to it.instancePermissions()) },"csrf" to token.token,"publicOrigin" to settings.publicOrigin,"origin" to settings.origin,"setupRequired" to !store.hasOwnerCredential())
     }
     @PostMapping("/auth/register/options") fun registration(@RequestBody body:RegistrationStart,req:HttpServletRequest):JsonNode {
         val invitation=body.token?.let { store.invitation(it.trim()) ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED,"초대 코드가 잘못되었거나 만료되었습니다") }

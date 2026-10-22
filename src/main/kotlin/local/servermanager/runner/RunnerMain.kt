@@ -135,7 +135,9 @@ object RunnerMain {
     }
 }
 
-class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,updateService:RunnerUpdater?=null):WebSocket.Listener {
+class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,updateService:RunnerUpdater?=null,private val supervisedRestart:Boolean=System.getenv("RUNNER_BOOTSTRAP_PROTOCOL")?.toIntOrNull()?.let {it>=1}==true):WebSocket.Listener {
+    private val serviceBootId=UUID.randomUUID().toString()
+    internal var restartProcess:()->Unit={kotlin.system.exitProcess(75)}
     private val mapper=jacksonObjectMapper()
     private val client=HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).connectTimeout(Duration.ofSeconds(15)).build()
     private val workers=Executors.newCachedThreadPool()
@@ -478,11 +480,14 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
      * Manager-requested restart of this control layer (same exit code the supervisor already restarts on). Games owned by the
      * resident host keep running. Refuses instead of waiting, so the requester gets the real reason and can retry.
      */
-    private fun restartRequested():String? {
+    internal fun restartRequested(requestId:String?=null):String? {
         val reason=synchronized(lifecycle) {
             val root=home.resolve("instances")
             val dirs=if(root.exists())root.listDirectoryEntries().filter {it.isDirectory()} else emptyList()
             when {
+                !supervisedRestart -> "UNSUPERVISED"
+                updatePauseRequested -> "BUSY"
+                updater?.pending()==true || updater?.busy()==true -> "UPDATE_PENDING"
                 hostReplacing -> "HOST_REPLACING"
                 tcpRelay?.busy()==true || directRelay.busy() -> "RELAY_STREAMS_ACTIVE"
                 processes.values.any {it.isAlive && it !is HostedProcess} || dirs.any {orphanAlive(it.name)} -> "LEGACY_GAME_RUNNING"
@@ -493,8 +498,8 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                 else -> {updatePauseRequested=true;null}
             }
         }
-        send(RunnerMessage("restart-result",state=if(reason==null)"ACCEPTED" else "REFUSED",detail=reason))
-        if(reason==null)workers.submit {Thread.sleep(700);kotlin.system.exitProcess(75)}
+        send(RunnerMessage("restart-result",state=if(reason==null)"ACCEPTED" else "REFUSED",detail=reason,token=requestId))
+        if(reason==null)workers.submit {Thread.sleep(700);restartProcess()}
         return reason
     }
     fun restartForUpdate():Boolean=synchronized(lifecycle) {
@@ -543,7 +548,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                         "sable-registered" -> message.token?.let {sableRegistrations[it]?.complete(message.state=="OK")}
 
                         "session" -> { sessionToken=message.token;tcpRelay?.close();tcpRelay=if(tcpRelayAllowed)TcpRelayPeer(::send,::sendBinary) else null
-                            send(RunnerMessage("restart-capability",state="RESTART_V1"));send(RunnerMessage("update-capability",state=if(updater!=null)"RELEASE_SELECTION_V1" else "OFF",detail=if(updater?.rollbackSupported==true)"ROLLBACK_V1" else null));confirmActivation();hosted?.relaySession() ?: directRelay.onSession();reportUpdateDetail();send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));send(RunnerMessage("llm-capability",state=if(llmAllowed)"OLLAMA_AGENT_V3" else "OFF",detail="CONTEXT_TOOLS_V1",command="STRATA_V1",version="PI_PROVIDER_V1",token="AGENT_SAFETY_PROFILE_V1"));send(RunnerMessage("llm-context-capability",version="KV_CONTEXT_V1"));reportUpdate();recoverStates() }
+                            send(RunnerMessage("restart-capability",state=if(supervisedRestart)"RESTART_V2" else "OFF",detail=serviceBootId));send(RunnerMessage("update-capability",state=if(updater!=null)"RELEASE_SELECTION_V1" else "OFF",detail=if(updater?.rollbackSupported==true)"ROLLBACK_V1" else null));confirmActivation();hosted?.relaySession() ?: directRelay.onSession();reportUpdateDetail();send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));send(RunnerMessage("llm-capability",state=if(llmAllowed)"OLLAMA_AGENT_V3" else "OFF",detail="CONTEXT_TOOLS_V1",command="STRATA_V1",version="PI_PROVIDER_V1",token="AGENT_SAFETY_PROFILE_V1"));send(RunnerMessage("llm-context-capability",version="KV_CONTEXT_V1"));reportUpdate();recoverStates() }
                         "relay-config" -> {
                             val port=message.detail?.toIntOrNull()
                             val ok=tcpRelayAllowed && (message.state=="OFF" || port in 1024..65535) && runCatching {tcpRelay?.listen(if(message.state=="ON")port else null);true}.getOrDefault(false)
@@ -558,7 +563,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                         "update-request" -> if(message.detail in setOf("WHEN_IDLE","PAUSE_TRANSFER")) {
                             requestUpdate(message.detail=="PAUSE_TRANSFER",message.command,message.state=="BETA_OK",message.state=="STABLE_ROLLBACK")
                         }
-                        "restart-request" -> restartRequested()
+                        "restart-request" -> restartRequested(message.token)
                         "llm-request" -> submitLlm(message)
                         "llm-cancel" -> message.token?.let {llmTasks.remove(it)?.cancel(true)}
                         "workspace" -> if(message.instanceId!=null && message.token!=null && message.detail!=null)workers.submit {workspace(message.instanceId,message.token,message.detail)}
