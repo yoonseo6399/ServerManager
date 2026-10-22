@@ -1,0 +1,11 @@
+{
+  "tests": 684,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 29,
+  "passed": 655,
+  "source": "612794e (backend production same ff9fb04)",
+  "command": "Java21 gradlew compileKotlin test bootJar, max-workers1, Kotlin in-process",
+  "duration": "2m20s",
+  "note": "29 opt-in cases skipped; no live models loaded by ordinary suite"
+}
