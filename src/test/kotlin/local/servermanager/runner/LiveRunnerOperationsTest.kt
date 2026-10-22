@@ -120,4 +120,44 @@ class LiveRunnerOperationsTest {
             assertEquals("value-8",manager.serverDir(cfg.id).resolve("file-8.txt").readText())
         }finally{transfer.close()}
     }
+    @Test fun `real runner HTTP resumes failed snapshot while newer original and game stay untouched`()=managerFixture {manager,cfg->
+        manager.start(cfg.id);val token=manager.root.resolve(cfg.id).resolve("remote-run").readText()
+        val registry=mock(RunnerRegistry::class.java);`when`(registry.active("runner")).thenReturn(RunnerDevice("runner","test","MAC","owner","key","now",allowedInstanceIds=setOf(cfg.id)))
+        val transfer=RunnerTransfer(manager,registry);var fail=true
+        val server=com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress("127.0.0.1",0),0)
+        server.createContext("/") {exchange->
+            var status=200
+            val query=exchange.requestURI.rawQuery.orEmpty().split('&').filter {it.isNotEmpty()}.associate {val pair=it.split('=',limit=2);pair[0] to java.net.URLDecoder.decode(pair.getOrElse(1){""},Charsets.UTF_8)}
+            val op=exchange.requestURI.path.substringAfterLast('/')
+            val result:Any=try {when(op) {
+                "capabilities" -> mapOf("stoppedSnapshotProtocol" to 1,"batchProtocol" to 0)
+                "snapshot-ready" -> {manager.snapshotReady(cfg.id,"runner",mapper.readValue(exchange.requestBody,SnapshotReady::class.java));mapOf("ok" to true)}
+                "snapshot-progress" -> mapOf("ok" to true)
+                "transfer-state" -> mapOf("state" to transfer.transferState("runner",cfg.id,query.getValue("transferId")))
+                "begin" -> {val request=mapper.readValue(exchange.requestBody,RunnerTransferBegin::class.java);transfer.begin("runner",cfg.id,request.manifest,resumeProtocol=request.resumeProtocol,generation=request.generation)}
+                "chunk" -> if(fail){fail=false;status=500;mapOf("error" to "injected connection failure")}else {transfer.upload("runner",cfg.id,query.getValue("transferId"),query.getValue("path"),query.getValue("offset").toLong(),exchange.requestBody.readAllBytes());mapOf("ok" to true)}
+                "commit" -> {transfer.commit("runner",cfg.id,query.getValue("transferId"));mapOf("ok" to true)}
+                else -> {status=404;mapOf("error" to op)}
+            }}catch(e:Throwable){status=409;mapOf("error" to (e.message ?: e.javaClass.simpleName))}
+            val bytes=mapper.writeValueAsBytes(result);exchange.sendResponseHeaders(status,bytes.size.toLong());exchange.responseBody.use {it.write(bytes)}
+        }
+        server.start();val home=temp.resolve("http-agent");val root=home.resolve("instances/${cfg.id}").createDirectories();val base=root.resolve("server").createDirectory()
+        base.resolve("world.txt").writeText("stopped original")
+        root.resolve("dirty").writeText("99999999|1");root.resolve("exit.json").writeText(mapper.writeValueAsString(RunnerExitReport(0)))
+        val agent=RunnerAgent(home,RunnerIdentity("http://127.0.0.1:${server.address.port}","runner","fixture","unused","MAC"))
+        field<MutableMap<String,Instance>>(agent,"configs")[cfg.id]=cfg.copy(runToken=token)
+        RunnerAgent::class.java.getDeclaredField("sessionToken").also {it.isAccessible=true}.set(agent,"session")
+        val upload=RunnerAgent::class.java.getDeclaredMethod("uploadStopped",String::class.java).also {it.isAccessible=true}
+        try {
+            upload.invoke(agent,cfg.id);assertEquals(1,StoppedSnapshots(root.resolve("stopped-snapshots")).list().size);assertFalse(root.resolve("dirty").exists());assertEquals("STOPPED",manager.runtime(cfg.id).state)
+            manager.start(cfg.id);manager.remoteState(cfg.id,"runner","RUNNING");manager.runtime(cfg.id).remotePid=4567
+            val process=mock(Process::class.java);`when`(process.isAlive).thenReturn(true);field<MutableMap<String,Process>>(agent,"processes")[cfg.id]=process
+            base.resolve("world.txt").writeText("new live original")
+            upload.invoke(agent,cfg.id)
+            assertTrue(StoppedSnapshots(root.resolve("stopped-snapshots")).list().isEmpty())
+            assertEquals("stopped original",manager.serverDir(cfg.id).resolve("world.txt").readText());assertEquals("new live original",base.resolve("world.txt").readText())
+            assertEquals("RUNNING",manager.runtime(cfg.id).state);assertEquals(4567,manager.runtime(cfg.id).remotePid)
+        }finally{field<MutableMap<String,Process>>(agent,"processes").clear();agent.shutdownGracefully();server.stop(0);transfer.close()}
+    }
+
 }

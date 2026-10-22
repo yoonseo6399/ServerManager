@@ -21,7 +21,7 @@ class StoppedSnapshots(private val root:Path) {
         }
     }
     @Synchronized fun capture(source:Path,runToken:String?,exit:RunnerExitReport?,revision:String?,editOnly:Boolean=false):StoppedSnapshot {
-        val before=FileInventory.snapshot(source)
+        val before=FileInventory.snapshot(source,200000)
         root.createDirectories();require(!Files.isSymbolicLink(root));check(list().size<32) {"미완료 종료 복사본이 32개입니다. 전송을 완료하세요"}
         val bytes=Files.walk(source).use {paths->paths.filter {it.isRegularFile(LinkOption.NOFOLLOW_LINKS)}.mapToLong {it.fileSize()}.sum()}
         check(Files.getFileStore(root).usableSpace>minOf(bytes,512L*1024*1024)+128L*1024*1024) {"종료 복사본 공간이 부족합니다"}
@@ -41,9 +41,9 @@ class StoppedSnapshots(private val root:Path) {
                     if(p.isDirectory(LinkOption.NOFOLLOW_LINKS))to.createDirectories() else {require(p.isRegularFile(LinkOption.NOFOLLOW_LINKS));Files.copy(p,to,StandardCopyOption.COPY_ATTRIBUTES)}
                 }}
             }
-            check(FileInventory.snapshot(source)==before) {"종료 복사 중 원본이 변경됐습니다. 원본을 보존했습니다"}
+            check(FileInventory.snapshot(source,200000)==before) {"종료 복사 중 원본이 변경됐습니다. 원본을 보존했습니다"}
             // Also reject copied links/special files before publishing this copy for restart.
-            FileInventory.snapshot(target)
+            FileInventory.snapshot(target,200000)
             val ready=SnapshotReady(generation,runToken,exit,revision,editOnly)
             atomicText(stage.resolve("ready.json"),mapper.writeValueAsString(ready))
             val destination=root.resolve(generation);Files.move(stage,destination,StandardCopyOption.ATOMIC_MOVE)
