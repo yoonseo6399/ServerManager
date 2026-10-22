@@ -143,6 +143,7 @@ class ModManagementTest {
         } finally {release.countDown();isolated.close()}
     }
     @Test fun `toggle never retries unavailable metadata after the user already loaded the inventory`()=fixture {manager,_,id->
+        jar(manager.originalServerDir(id).resolve("mods/unavailable.jar"),"unavailable")
         var calls=0
         val api=object:ModrinthLookup {
             override fun versionsFromHashes(hashes:List<String>):Map<String,RinVersion> {calls++;throw java.io.IOException("offline")}
