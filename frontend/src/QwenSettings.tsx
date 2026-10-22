@@ -3,25 +3,27 @@ import {api,ApiError} from './http';
 import {useAuth} from './Auth';
 type Capability='ALLOWED'|'DENIED'|'UNKNOWN';
 type Runner={id:string;name:string;online:boolean;capability:Capability};
-type Config={runnerId:string|null;model:string;requestTimeoutMinutes?:number};
+type Config={runnerId:string|null;model:string;requestTimeoutMinutes?:number;experimentalKvCompression?:boolean};
 type Model={id:string;label:string;supportsThinking:boolean;backend?:string};
 type Memory={totalBytes?:number;usedBytes?:number;swapUsedBytes?:number;pressure?:string;modelBytes?:number;modelMetric?:string;wiredLimitMb?:number;sampledAt:number};
 type Strata={supported:boolean;installed:boolean;running:boolean;state:string;message:string;context?:number;log?:string};
+type TurboQuant={supported:boolean;ready:boolean;installing:boolean;running:boolean;version:string;context:number|null;message:string};
 type View={config:Config;runners:Runner[];models:Model[]};
-type Probe={reachable:boolean;version:string|null;models:{name:string;sizeBytes:number}[];loaded:string[];tags:Record<string,string>;installed:Record<string,boolean>;message:string;memory?:Memory;strata?:Strata};
+type Probe={reachable:boolean;version:string|null;models:{name:string;sizeBytes:number}[];loaded:string[];tags:Record<string,string>;installed:Record<string,boolean>;message:string;memory?:Memory;strata?:Strata;turboQuant?:TurboQuant};
 const capabilityText:Record<Capability,string>={ALLOWED:'로컬 LLM 사용 가능',DENIED:'허용 안 됨 · 실행기 컴퓨터에서 llm-enabled 설정 필요',UNKNOWN:'오프라인이거나 0.5.0 미만'};
 const gb=(bytes:number)=>`${(bytes/1024/1024/1024).toFixed(1)} GiB`;
 export function QwenSettings(){
- const auth=useAuth();const [view,setView]=useState<View|null>(null),[runnerId,setRunnerId]=useState(''),[model,setModel]=useState('14b'),[requestTimeoutMinutes,setRequestTimeoutMinutes]=useState(20);
+ const auth=useAuth();const [view,setView]=useState<View|null>(null),[runnerId,setRunnerId]=useState(''),[model,setModel]=useState('14b'),[requestTimeoutMinutes,setRequestTimeoutMinutes]=useState(20),[experimentalKvCompression,setExperimentalKvCompression]=useState(false);
  const probeTarget=useRef(runnerId);probeTarget.current=runnerId;
  const [probe,setProbe]=useState<Probe|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
- async function load(){const result=await api<View>('/admin/qwen');setView(result);setRunnerId(result.config.runnerId??'');setModel(result.config.model);setRequestTimeoutMinutes(result.config.requestTimeoutMinutes??20);}
+ async function load(){const result=await api<View>('/admin/qwen');setView(result);setRunnerId(result.config.runnerId??'');setModel(result.config.model);setRequestTimeoutMinutes(result.config.requestTimeoutMinutes??20);setExperimentalKvCompression(result.config.experimentalKvCompression??false);}
  useEffect(()=>{load().catch(e=>setError(e.message));},[]);
  const runner=view?.runners.find(r=>r.id===runnerId);const ready=!runnerId||!!runner&&runner.online&&runner.capability==='ALLOWED';
  // Saving and unloading change what runs on someone's computer, so they need a fresh passkey check like other admin settings.
  async function run<T>(fn:()=>Promise<T>):Promise<T|undefined>{setBusy(true);setError('');setNotice('');try{try{return await fn();}catch(e){if(!(e instanceof ApiError)||e.status!==428)throw e;await auth.login(true);return await fn();}}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
- async function save(){const result=await run(()=>api<{unloaded:boolean|null}>('/admin/qwen','PUT',{runnerId:runnerId||null,model,requestTimeoutMinutes}));if(!result)return;await load();setNotice(result.unloaded===true?'저장했습니다. 이전 설정의 로컬 모델은 메모리에서 내렸습니다.':'저장했습니다. 다음 /agent 요청부터 적용됩니다. 개인 기본 모델은 /agent setting에서 선택할 수 있습니다.');}
+ async function save(){const result=await run(()=>api<{unloaded:boolean|null}>('/admin/qwen','PUT',{runnerId:runnerId||null,model,requestTimeoutMinutes,experimentalKvCompression}));if(!result)return;await load();setNotice(result.unloaded===true?'저장했습니다. 이전 설정의 로컬 모델은 메모리에서 내렸습니다.':'저장했습니다. 다음 /agent 요청부터 적용됩니다. 개인 기본 모델은 /agent setting에서 선택할 수 있습니다.');}
  async function check(){const target=runnerId;const result=await run(()=>api<Probe>('/admin/qwen/probe','POST',{runnerId:target}));if(result&&probeTarget.current===target)setProbe(result);}
+ async function installTurboQuant(){const result=await run(()=>api<TurboQuant>('/admin/qwen/turboquant/install','POST',{runnerId}));if(result){setNotice(result.message);await check();}}
  async function installStrata(){const result=await run(()=>api<Strata>('/admin/qwen/strata/install','POST',{runnerId}));if(result){setNotice(result.message);await check();}}
  useEffect(()=>{if(!probe||!ready)return;let active=true,inFlight=false;const timer=setInterval(()=>{if(inFlight)return;inFlight=true;api<Probe>('/admin/qwen/probe','POST',{runnerId}).then(p=>{if(active)setProbe(p);}).catch(()=>{}).finally(()=>{inFlight=false;});},10000);return()=>{active=false;clearInterval(timer);};},[!!probe,ready,runnerId]);
  async function unload(){const result=await run(()=>api<Probe>('/admin/qwen/unload','POST',{runnerId}));if(result){setProbe(result);setNotice('로컬 모델을 메모리에서 내렸습니다.');}}
@@ -35,13 +37,15 @@ export function QwenSettings(){
   {view?.runners.map(r=><option key={r.id} value={r.id}>{r.name} · {r.online?capabilityText[r.capability]:'오프라인'}</option>)}
  </select></label>
  <label>모델<select value={model} onChange={e=>setModel(e.target.value)}>{view?.models?.map(m=><option key={m.id} value={m.id}>{m.label}</option>)}</select></label><label>추론 요청 제한 (분)<input type="number" min={1} max={240} required value={requestTimeoutMinutes} onChange={e=>setRequestTimeoutMinutes(Number(e.target.value))}/></label></div>
+ <label><input type="checkbox" checked={experimentalKvCompression} onChange={e=>setExperimentalKvCompression(e.target.checked)}/> 실험 KV 캐시 압축</label>
+ <p className="muted">기본 꺼짐. 27B: 별도 TurboQuant 엔진의 turbo4 K/V 사용. Flash-Next: Strata 회전 Q4 KV 사용(동일 구현 아님). 다른 모델에는 적용하지 않습니다. 켜짐만으로 문맥이 늘어나지는 않으며 /agent context window:65536(27B) 또는 16384(Flash-Next)로 설정하세요. 압축에 따른 정확도·속도 변화와 이 컴퓨터의 해당 창 실행 가능성은 미검증입니다. 다음 요청부터 적용되며 실행 중인 요청은 바꾸지 않습니다. 엔진 시작 실패 시 일반 모드로 대체하지 않습니다.</p>
  <p className="muted">Pi /agent의 모델 호출 한 번에 적용됩니다. 기본 20분, 1~240분 · 행동·위험 검토·문맥 압축과 추론 실행기에 같은 제한을 전달합니다. 다음 요청부터 적용되며 여러 단계 작업 전체나 셸 명령의 실행 제한과는 별개입니다.</p>
  {model==='gemma4-31b'&&<p className="muted">31B는 24GB 컴퓨터에서 메모리 여유가 작을 수 있습니다. 긴 문맥·다른 앱 동시 실행 시 메모리와 스왑을 확인하세요.</p>}
  {view?.models?.find(m=>m.id===model)?.supportsThinking===false&&<p className="muted">선택한 모델은 Thinking 미지원 · 자동 꺼짐</p>}
  {runnerId&&!ready&&<p className="muted">{runner?(runner.online?capabilityText[runner.capability]:'실행기가 오프라인입니다.'):'등록된 실행기가 아닙니다.'} 지정한 실행기를 쓸 수 없으면 관리 앱 컴퓨터로 대체하지 않고 요청이 실패합니다.</p>}
  {!runnerId&&<p className="muted">아래 환경 확인·설치·메모리 해제는 관리 앱 컴퓨터에 적용됩니다. 자동 추론이 선택하는 실행기와 다를 수 있으므로 원격 상태를 보려면 실행기를 직접 고르세요.</p>}
- {model==='qwen38-27b'&&<p className="muted">설치 태그: <code>ollama pull qwen3.8:27b-q4_K_M</code> · 모델 약 16.8GB · 16K는 /agent context에서 실행 창 16384로 선택할 수 있습니다. 메모리 압력·스왑 증가량을 확인하세요.</p>}
- {model==='qwen38-flash-next'&&<p className="muted">Apple Silicon Mac · 약 66.4GB 모델 다운로드·여유 공간 75GB 필요 · 8K 문맥 · SSD 속도에 따라 입력 처리가 오래 걸릴 수 있습니다. 첫 요청에서 자동 시작하고 다른 모델을 고르면 먼저 종료합니다.</p>}
+ {model==='qwen38-27b'&&<p className="muted">설치 태그: <code>ollama pull qwen3.8:27b-q4_K_M</code> · 모델 약 16.8GB · 16K/32K/64K는 /agent context에서 선택합니다. 64K 목표는 TurboQuant 엔진 준비와 실모델 검증이 필요합니다. 메모리 압력·스왑 증가량을 확인하세요.</p>}
+ {model==='qwen38-flash-next'&&<p className="muted">Apple Silicon Mac · 약 66.4GB 모델 다운로드·여유 공간 75GB 필요 · 8K/16K 실행 창(16K 실험·미검증) · SSD 속도에 따라 입력 처리가 오래 걸릴 수 있습니다. 첫 요청에서 자동 시작하고 다른 모델을 고르면 먼저 종료합니다.</p>}
  <div className="actions"><button type="submit">로컬 LLM 설정 저장</button>
  <button type="button" disabled={!ready} onClick={check}>실행 환경 확인</button>
  <button type="button" disabled={!ready||!probe?.loaded.length} onClick={unload}>메모리에서 내리기</button></div>
@@ -51,6 +55,9 @@ export function QwenSettings(){
   <p>RAM {probe.memory.usedBytes!=null&&probe.memory.totalBytes!=null?`${gb(probe.memory.usedBytes)} / ${gb(probe.memory.totalBytes)}`:'확인 불가'} · 스왑 {probe.memory.swapUsedBytes!=null?gb(probe.memory.swapUsedBytes):'확인 불가'} · 압력 {probe.memory.pressure??'확인 불가'}</p>
   <p>모델 측정: {probe.memory.modelBytes!=null?`${gb(probe.memory.modelBytes)} (${probe.memory.modelMetric})`:'미수신'} · GPU wired 한도 {probe.memory.wiredLimitMb==null?'확인 불가':probe.memory.wiredLimitMb>0?`${(probe.memory.wiredLimitMb/1024).toFixed(1)} GiB`:'시스템 기본값'}</p>
   <small>RAM은 OS 총량−여유량으로 캐시를 포함할 수 있습니다. Strata RSS 합계는 공유 페이지가 중복될 수 있어 Ollama 할당량과 직접 비교하지 않습니다.</small></div>}
+  {probe.turboQuant&&<div aria-label="TurboQuant 실행 환경"><strong>27B TurboQuant · {probe.turboQuant.version} · {probe.turboQuant.running?'실행 중':probe.turboQuant.ready?'준비됨':'미준비'}{probe.turboQuant.context?` · ${probe.turboQuant.context/1024}K`:''}</strong><p>{probe.turboQuant.message}</p>
+  <button type="button" disabled={!ready||!probe.turboQuant.supported||probe.turboQuant.ready||probe.turboQuant.installing} onClick={installTurboQuant}>TurboQuant 엔진 준비 (모델 로딩 없음)</button>
+  <p className="muted">macOS15 이상 Apple Silicon · 고정 버전/해시의 별도 엔진과 OpenSSL을 사용자 전용 폴더에 설치합니다. Ollama와 OS 메모리 설정을 변경하지 않습니다. 준비됨은 모델 실행 성공을 뜻하지 않습니다.</p></div>}
   {probe.strata&&<div aria-label="Flash-Next 실행 환경"><strong>Flash-Next · {probe.strata.state}</strong><p>{probe.strata.message}</p>
   <button type="button" disabled={!ready||!probe.strata.supported||probe.strata.installed||probe.strata.state==='INSTALLING'} onClick={installStrata}>Flash-Next 설치 (약 66.4GB)</button>
   {probe.strata.log&&<details><summary>설치 진행 로그</summary><pre style={{whiteSpace:'pre-wrap'}}>{probe.strata.log}</pre></details>}</div>}
