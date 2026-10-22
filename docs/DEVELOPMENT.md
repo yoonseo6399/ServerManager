@@ -705,3 +705,12 @@ Beta20 게시 전 외부 Maven이 MinIO 디렉터리 HTML을 반환해 CI2회 �
 선택/자유 응답을 원 질문에 기록하고 응답자 ID·멘션 차단, 상단 고정 요청/모델/진행/지표 요약과 하단 상태창 분리. 새 응답 청크 뒤 placeholder 재전송, 같은 메시지를 도구 카드로 전환, 다음 actor 턴 새 상태창, 지연 편집 취소·중지 버튼 수명과 누적 지표 유지. 주입 지시문·exporter 일치.
 
 구현과 테스트 계획 선커밋 후 focused54개 통과, 최종 지표 수정 후 UI7개 재검증 통과. 실제 Pi SDK/Git localhost 연쇄 실행이며 모델 fixture; 실제27B 신규 검토와 운영 Discord는 미실행. 전체/다른 OS/운영 설치·재시작/게시 후 자산 다운로드·해시 대조 생략. 기존 서명 secret과 skip_full_tests=true CI로 게시하며 stable/main/latest·기존 게시 태그/자산은 보존한다.
+
+
+## 2026-10-22 — 0.7.0-beta.22
+
+게시된 Beta21 기준 fix/pi-full-suite2df0fda 통합, solo. Beta21 태그 생성이 별도 전체 CI를 실행해38실패를 낸 뒤 사용자가 전체 테스트 실행/수정을 새로 승인했다. 로컬 기준선665개39실패/23스킵(추가 TCP 철회1)부터 재현하고 옛 custom actor/ledger/parser/repair/자체 압축 기대를 공식 Pi SDK+native transport fixture로 이관했다. 순수 helper/parser 시험은 유지, 일반 테스트를 삭제/disable하지 않음. 제품 수정: 세션 준비 중 steering 보관/순차 native 전달/화면 ACK/준비 전후 요청당5개 상한·허용 역할 사전 검증. 중계 종료 CHM.keys.toList 단일 원소 경쟁 예외를 배열 snapshot으로 수정하고 실제 TCP20회 반복. TCP 분할 echo·자유 포트 fixture 안정화.
+
+원격 Beta21 로그의 기존 폴더 입력 오류가 거부 latch를 오염시켜 다음 rm에도 같은 사유를 돌려준 것을 확인했다. typed 입력 오류로 구분하고 인증된 새 인간 지시가 오면 새 독립 검토를 허용한다. 실제 거부/설정/역할/본인 확인·명시 모드는 유지한다. 현재 호출과 전체 작업 위험/경로 범위를 분리하고 요청에 필요한 좁은 내부 rm은 자동 모드 ALLOW/MEDIUM/INSIDE/동의true로 판단하도록 지시. 명령 allowlist 복원 없음. Thinking은 임시 writer로 분리해 본문/검토/도구/다음 턴/종료에 삭제하고 늦은 전송도 정리한다. 기존 게시물 소급 삭제/Pi 내부 세션 재작성은 하지 않는다.
+
+선커밋 계획/코드 후 검증. 최종 로컬673보고=648통과/25조건부 스킵/실패0. 실제 상주14B16K 독립 검토3사례별도 통과(명령 실행 없음); 격리 Pi rm 자식 삭제/형제 보존/승인0회 확인. 전체 통과가 모델 일반 안전성을 보장하지 않으며 실제 Discord/운영 설치/타OS/게시 후 재다운로드 해시는 미실행. 이번 게시 CI는 전체 테스트를 포함한 태그 자동 실행1개로 진행하고 기존 서명 secret, stable/main/latest와 게시 태그/자산을 보존한다.
