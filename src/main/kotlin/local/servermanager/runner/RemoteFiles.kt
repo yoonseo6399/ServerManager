@@ -43,9 +43,9 @@ class RemoteFiles(private val manager:ServerManager) {
         return result.sortedWith(compareBy<FileEntry>{!it.directory}.thenBy {it.name})
     }
     fun size(id:String,path:String):Long=call(id,"STAT",path).path("size").asLong().also {require(it>=0)}
-    fun download(id:String,path:String,out:OutputStream,limit:Long=Long.MAX_VALUE) {
-        val stat=call(id,"STAT",path);val size=stat.path("size").asLong(-1);require(size in 0..limit) {"파일 크기 제한을 초과했습니다"};val revision=stat.path("revision").asText();var offset=0L
-        while(offset<size){val part=call(id,"READ",path,offset,revision=revision);val bytes=java.util.Base64.getDecoder().decode(part.path("data").asText());check(bytes.isNotEmpty() && bytes.size<=RunnerWorkspace.CHUNK && bytes.size<=size-offset);out.write(bytes);offset+=bytes.size}
+    fun download(id:String,path:String,out:OutputStream,limit:Long=Long.MAX_VALUE,log:Boolean=false) {
+        val stat=call(id,if(log)"LOG_STAT" else "STAT",path);val size=stat.path("size").asLong(-1);require(size in 0..limit) {"파일 크기 제한을 초과했습니다"};val revision=stat.path("revision").asText();var offset=0L
+        while(offset<size){val part=call(id,if(log)"LOG_READ" else "READ",path,offset,revision=revision);val bytes=java.util.Base64.getDecoder().decode(part.path("data").asText());check(bytes.isNotEmpty() && bytes.size<=RunnerWorkspace.CHUNK && bytes.size<=size-offset);out.write(bytes);offset+=bytes.size}
     }
     fun text(id:String,path:String):Map<String,String> {
         val out=java.io.ByteArrayOutputStream();download(id,path,out,2L*1024*1024);val bytes=out.toByteArray();require(!bytes.contains(0)) {"바이너리 파일은 다운로드하세요"}
