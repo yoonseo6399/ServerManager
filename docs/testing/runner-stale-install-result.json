@@ -1,0 +1,26 @@
+{
+  "tests": 686,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 29,
+  "passed": 657,
+  "source": "d27abfe",
+  "duration": "2m23s",
+  "cases": [
+    {
+      "class": "local.servermanager.RunnerInstallResultTest",
+      "tests": 2,
+      "failures": 0
+    },
+    {
+      "class": "local.servermanager.FileSyncTest",
+      "tests": 2,
+      "failures": 0
+    },
+    {
+      "class": "local.servermanager.RunnerGatewayTest",
+      "tests": 10,
+      "failures": 0
+    }
+  ]
+}
