@@ -25,6 +25,7 @@ object StrataRuntime {
     @Volatile private var process:Process?=null
     private var ownedChildren:List<ProcessHandle> = emptyList()
     private var launchFiles:StrataLaunchFiles?=null
+    private var activeProfile:Pair<Int,Boolean>?=null
     private var runtimeLock:java.nio.channels.FileLock?=null
     private var lockChannel:java.nio.channels.FileChannel?=null
     @Volatile private var installing=false
@@ -88,10 +89,11 @@ object StrataRuntime {
         val p=ProcessBuilder("/usr/bin/tar","-xzf",archive.toString(),"-C",root.toString()).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start()
         check(p.waitFor(60,TimeUnit.SECONDS) && p.exitValue()==0) {"Strata 구성요소 압축 해제 실패"}
     }
-    @Synchronized fun start():Int {
+    @Synchronized fun start(window:Int=8192,compressed:Boolean=false):Int {
+        require(window in setOf(8192,16384))
         check(supported()) {"Flash-Next 자동 실행은 Apple Silicon Mac에서 지원합니다."}
         check(!installing && installed()) {"관리웹의 Flash-Next 설치를 먼저 실행하세요."}
-        if(process?.isAlive==true){val h=health();check(h!=null) {"Strata 시작 중입니다. 잠시 후 다시 요청하세요."};return h.path("max_context").asInt(8192)}
+        if(process?.isAlive==true){if(activeProfile!=(window to compressed))stop()else {val h=health();check(h!=null && h.path("max_context").asInt()>=window) {"Strata 실행 창을 확인하지 못했습니다."};return h.path("max_context").asInt()}}
         if(process!=null)stop()
         acquireLock()
         try {
@@ -99,9 +101,10 @@ object StrataRuntime {
         java.net.ServerSocket().use {it.bind(java.net.InetSocketAddress("127.0.0.1",18080))}
         privateDir(root.resolve("runtime"));val log=root.resolve("server.log");if(log.exists() && log.fileSize()>10_000_000)Files.move(log,root.resolve("server.previous.log"),java.nio.file.StandardCopyOption.REPLACE_EXISTING)
         val files=StrataLaunchFiles(root.resolve("runtime")).also {launchFiles=it}
-        val p=builder(listOf(control.resolve("bin/strata").toString(),"serve","--config",config.toString(),"--host","127.0.0.1","--port","18080","--parallel","1","--offline","--ready-file",files.ready.toString(),"--shutdown-timeout","15","--output","jsonl")).redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile())).start()
-        process=p;message="Flash-Next 시작 중"
-        repeat(180){if(Thread.currentThread().isInterrupted){stop();throw InterruptedException()};check(p.isAlive) {"Strata 시작 실패 · ${log} 확인"};health()?.let {ownedChildren=p.descendants().toList();message="Flash-Next 실행 중 · SSD 오프로딩 · GPU 작업 공간 4GB";return it.path("max_context").asInt(8192)};Thread.sleep(500)}
+        val runtimeConfig=files.prepareConfig(config,window,compressed)
+        val p=builder(listOf(control.resolve("bin/strata").toString(),"serve","--config",runtimeConfig.toString(),"--host","127.0.0.1","--port","18080","--parallel","1","--offline","--ready-file",files.ready.toString(),"--shutdown-timeout","15","--output","jsonl")).redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile())).start()
+        process=p;activeProfile=window to compressed;message="Flash-Next ${window/1024}K 시작 중"
+        repeat(180){if(Thread.currentThread().isInterrupted){stop();throw InterruptedException()};check(p.isAlive) {"Strata 시작 실패 · ${log} 확인"};health()?.let {ownedChildren=p.descendants().toList();check(it.path("max_context").asInt()>=window) {"Strata가 요청한 ${window/1024}K 창을 적용하지 못했습니다."};message="Flash-Next 실행 중 · ${window/1024}K · ${if(compressed)"회전 Q4 KV(실험)"else "FP16 KV"} · SSD 오프로딩 · GPU 작업 공간 4GB";return it.path("max_context").asInt()};Thread.sleep(500)}
         error("Strata 시작 시간 초과 · $log 확인")
         }catch(e:Exception){try{stop()}catch(cleanup:Exception){e.addSuppressed(cleanup)};if(process==null){clearLaunchFiles();releaseLock()};throw e}
     }
@@ -115,7 +118,7 @@ object StrataRuntime {
             children.asReversed().forEach {child->if(child.isAlive)runCatching {child.onExit().get(5,TimeUnit.SECONDS)}.onFailure {_ ->child.destroyForcibly()}}
             if(p.isAlive)p.waitFor(5,TimeUnit.SECONDS)
             check(!p.isAlive && children.none {it.isAlive}) {"Strata 프로세스 종료를 확인하지 못했습니다. 모델 전환을 중단합니다."}
-            process=null;ownedChildren=emptyList();clearLaunchFiles();releaseLock();message="Flash-Next를 메모리에서 내렸습니다."
+            process=null;activeProfile=null;ownedChildren=emptyList();clearLaunchFiles();releaseLock();message="Flash-Next를 메모리에서 내렸습니다."
         }finally {if(interrupted)Thread.currentThread().interrupt()}
     }
 

@@ -1,0 +1,9 @@
+상태: TurboQuant/긴 문맥 실행 경로 구현 중 · 실모델 시험은 앱 종료 후
+# feat/turboquant-context
+- fix/pi-single-file-diff 17eacb2 위 별도 로컬 브랜치. 앞선 두 수정 포함, 릴리즈/푸시 보류. 단독 작업.
+- 사용자 목표: 27B 64K, Flash-Next 최소16K. Illustrator 종료 전 실모델 시험 금지, 기존 실행 중 모델·OS 메모리 설정 유지.
+- 27B는 Ollama 자체에 없는 TurboQuant를 지원하는 고정 native backend로 분리하고 실험 토글로 선택한다. 꺼짐은 기존 Ollama. Flash-Next는 Strata 고정 엔진의 --kv q4_0 회전 양자화이며 Google TurboQuant와 동일 구현이라고 표시하지 않는다. 켜짐 실패시 조용한 일반 모드 대체 금지.
+- 관리웹 설치 버튼/토글, Discord 32K/64K 선택, 실행 예산과 Pi/실행기 전달 상한·호환성 검사를 함께 수정. 기본8K와 기존설정 유지, 큰 창은 실험/미검증 경고.
+- Strata --max-context를 요청별 임시 실행 설정에 반영하고 원본 설치 config는 수정하지 않는다. 본인 프로세스만 종료/전환하고 상태의 실제 창 검증, 유휴 요청 간 전환만 허용.
+- 지원 확인: TheTom tqp-v0.4.0 macOS Metal 배포물 SHA256 f38d0c68e2db29b705ec3944360296c1f8003e4f920d60e6740f9968f3f93769. --help에 turbo4/ctx-size/flash-attn 지원. Homebrew OpenSSL이 없으면 로딩 실패하므로 사설 설치 폴더의 고정 검증 의존성 필요. 기존 Codex 제공 OpenSSL 경로를 명령 한 번에만 적용한 --help 확인, 모델 로딩 없음.
+- 시험 계획: 코드 먼저 커밋 후 정적/프런트/관련 단위 시험(메모리 여유 범위), 실제 엔진 --help/설정 전달 확인만 한다. 실모델27B64K/Flash16K 로드·긴입력·메모리/스왑/속도/도구·기억 검증은 사용자가 앱 종료를 알린 뒤 실행. 창 설정 허용을 실모델 통과로 표현하지 않는다.

@@ -70,11 +70,11 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
                 SubcommandData("channel","같은 카테고리에 내 비공개 프로젝트 채널 생성").addOption(OptionType.STRING,"project","등록한 프로젝트 이름 (생략하면 기본 홈)",false),
                 SubcommandData("project","기존 폴더를 내 프로젝트의 기본 작업 위치로 등록").addOption(OptionType.STRING,"name","프로젝트 이름",true).addOption(OptionType.STRING,"path","관리 앱 컴퓨터의 폴더 전체 경로",true),
                 SubcommandData("run","이 프로젝트 채널에서 작업 요청").addOptions(OptionData(OptionType.STRING,"prompt","목표와 완료 조건",true).setMaxLength(6000),
-                    models("model","이번 요청의 모델 (생략하면 기본 모델)"),OptionData(OptionType.BOOLEAN,"think","이번 요청의 Thinking (지원 모델만)",false),OptionData(OptionType.INTEGER,"turns","이번 요청의 최대 턴 수 (역할 상한 이내)",false).setRequiredRange(1,100),OptionData(OptionType.INTEGER,"window","이번 요청의 Context window (채널 기본값은 유지)",false).addChoice("8K",8192L).addChoice("16K · 메모리 주의",16384L)),
+                    models("model","이번 요청의 모델 (생략하면 기본 모델)"),OptionData(OptionType.BOOLEAN,"think","이번 요청의 Thinking (지원 모델만)",false),OptionData(OptionType.INTEGER,"turns","이번 요청의 최대 턴 수 (역할 상한 이내)",false).setRequiredRange(1,100),OptionData(OptionType.INTEGER,"window","이번 요청의 Context window (채널 기본값은 유지)",false).addChoice("8K",8192L).addChoice("16K · 메모리 주의",16384L).addChoice("32K · 실험",32768L).addChoice("64K · 실험",65536L)),
                 SubcommandData("context","채널 문맥 조회·초기화·자동 압축 설정").addOptions(
                     OptionData(OptionType.STRING,"action","문맥 작업",true).addChoice("상태","status").addChoice("초기화","reset").addChoice("압축 기준","configure").addChoice("지금 압축","compact"),
-                    OptionData(OptionType.INTEGER,"limit","자동 압축 기준 (실행 창의 입력 예산 이내)",false).setRequiredRange(1024,15600),
-                    OptionData(OptionType.INTEGER,"window","실행 창 (16K는 메모리 압력 증가)",false).addChoice("8K · 기본",8192L).addChoice("16K · 메모리 주의",16384L),
+                    OptionData(OptionType.INTEGER,"limit","자동 압축 기준 (실행 창의 입력 예산 이내)",false).setRequiredRange(1024,64700),
+                    OptionData(OptionType.INTEGER,"window","실행 창 (16K는 메모리 압력 증가)",false).addChoice("8K · 기본",8192L).addChoice("16K · 메모리 주의",16384L).addChoice("32K · 실험",32768L).addChoice("64K · 실험",65536L),
                     OptionData(OptionType.INTEGER,"output","출력 예약 토큰",false).setRequiredRange(512,4096)),
                 SubcommandData("history","모델이 조회할 채널·포럼을 직접 허용·철회").addOptions(
                     OptionData(OptionType.STRING,"action","기록 권한",true).addChoice("허용","allow").addChoice("철회","remove").addChoice("목록","list").addChoice("정보 사용 허용","grant").addChoice("전달 채널 철회","revoke"),
@@ -390,7 +390,7 @@ class DiscordProjectAgent(private val directory:Path,private val identity:Assist
             override fun generate(messages:List<ProjectAgentMessage>,think:Boolean,progress:(QwenProgress)->Unit):String {
                 val pi=PiWire.decode(messages)
                 val main=pi?.path("tools")?.let {it.isArray && it.size()>0} ?: (messages.firstOrNull()?.content?.startsWith("You are 루오노타르")==true)
-                val budget=LocalContextBudget(session.executionWindow,session.outputTokens,requestTimeoutSeconds=chosen.requestTimeoutMinutes*60).let {if(main || pi!=null)it else it.helper()}
+                val budget=LocalContextBudget(session.executionWindow,session.outputTokens,requestTimeoutSeconds=chosen.requestTimeoutMinutes*60,experimentalKvCompression=chosen.experimentalKvCompression && model in setOf("qwen38-27b","qwen38-flash-next")).let {if(main || pi!=null)it else it.helper()}
                 val response=try {QwenRequests.conversationWithBudget(model,messages,think,chosen.runnerId,budget,progress).answer}
                     catch(e:Exception){val warning=LlmMemoryGuard.reason(e);if(warning==null || memoryPermission==null)throw e
                         memoryPermission(warning)

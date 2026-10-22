@@ -97,7 +97,7 @@ class ProjectAgentEngine(private val store:ProjectAgentStore,private val toolFac
                 val thread=Thread.currentThread();work.inferenceThreads.add(thread)
                 try {
                     active();check(exchange.requestMethod=="POST" && exchange.requestURI.path=="/v1/chat/completions" && exchange.requestHeaders.getFirst("Authorization")=="Bearer $token") {"Pi 공급자 인증 실패"}
-                    val bytes=exchange.requestBody.use {it.readNBytes(180001)};require(bytes.size<=180000)
+                    val bytes=exchange.requestBody.use {it.readNBytes(PiWire.MAX_REQUEST_BYTES+1)};require(bytes.size<=PiWire.MAX_REQUEST_BYTES)
                     val q=mapper.readTree(bytes);require(q.path("model").asText()=="local-agent")
                     val main=q.path("tools").isArray && q.path("tools").size()>0
                     if(main){check(actorTurn.incrementAndGet()<=limits.maxTurns) {"모델 턴 한도에 도달했습니다. 다음 메시지로 이어서 요청하세요."};emit(ProjectAgentEvent("thinking",actorTurn.get()))}

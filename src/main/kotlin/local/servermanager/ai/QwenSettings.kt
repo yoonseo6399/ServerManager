@@ -13,23 +13,23 @@ import kotlin.io.path.exists
 import kotlin.io.path.readText
 
 /** [runnerId] null means automatic: the first opted-in runner, else the manager computer. [model] is the default for /local-llm. */
-data class QwenConfig(val runnerId:String?=null,val model:String="14b",val requestTimeoutMinutes:Int=20)
+data class QwenConfig(val runnerId:String?=null,val model:String="14b",val requestTimeoutMinutes:Int=20,val experimentalKvCompression:Boolean=false)
 
 class QwenSettings(private val directory:Path) {
     private val mapper=jacksonObjectMapper()
     private val file=directory.resolve("qwen.json")
     private val executionFile=directory.resolve("qwen-execution.json")
-    fun config():QwenConfig = runCatching {if(file.exists())mapper.readValue<QwenConfig>(file.readText()) else QwenConfig()}.getOrDefault(QwenConfig()).takeIf {valid(it)}.let {base->(base ?: QwenConfig()).copy(requestTimeoutMinutes=runCatching {if(executionFile.exists())mapper.readTree(executionFile.readText()).path("requestTimeoutMinutes").asInt(20).also {require(it in 1..240)}else 20}.getOrDefault(20))}
+    fun config():QwenConfig = runCatching {if(file.exists())mapper.readValue<QwenConfig>(file.readText()) else QwenConfig()}.getOrDefault(QwenConfig()).takeIf {valid(it)}.let {base->(base ?: QwenConfig()).copy(experimentalKvCompression=runCatching {if(executionFile.exists())mapper.readTree(executionFile.readText()).path("experimentalKvCompression").asBoolean(false)else false}.getOrDefault(false),requestTimeoutMinutes=runCatching {if(executionFile.exists())mapper.readTree(executionFile.readText()).path("requestTimeoutMinutes").asInt(20).also {require(it in 1..240)}else 20}.getOrDefault(20))}
     fun valid(c:QwenConfig)=c.requestTimeoutMinutes in 1..240 && c.model in LocalLlm.SIZES && (c.runnerId==null || c.runnerId.matches(Regex("[A-Za-z0-9_-]{1,80}")))
     fun save(c:QwenConfig) {
         require(valid(c)) {"로컬 모델·실행기와 추론 요청 제한(1~240분)을 확인하세요."}
         GeminiKeyPoolStore(directory).writePrivate(file,mapper.writeValueAsString(mapOf("runnerId" to c.runnerId,"model" to c.model)))
-        GeminiKeyPoolStore(directory).writePrivate(executionFile,mapper.writeValueAsString(mapOf("requestTimeoutMinutes" to c.requestTimeoutMinutes)))
+        GeminiKeyPoolStore(directory).writePrivate(executionFile,mapper.writeValueAsString(mapOf("requestTimeoutMinutes" to c.requestTimeoutMinutes,"experimentalKvCompression" to c.experimentalKvCompression)))
     }
 }
 
 data class QwenRunnerView(val id:String,val name:String,val online:Boolean,val capability:String)
-class SaveQwenSettings(val runnerId:String?=null,val model:String="14b",val requestTimeoutMinutes:Int=20)
+class SaveQwenSettings(val runnerId:String?=null,val model:String="14b",val requestTimeoutMinutes:Int=20,val experimentalKvCompression:Boolean=false)
 class QwenRunnerRequest(val runnerId:String="")
 
 @RestController
@@ -50,7 +50,7 @@ class QwenSettingsApi(private val manager:ServerManager,private val registry:Run
     @PutMapping fun save(@RequestBody body:SaveQwenSettings,request:HttpServletRequest,authentication:Authentication):Map<String,Any?> {
         freshDesktop(request)
         body.runnerId?.let {target(authentication.name,it)}
-        val next=QwenConfig(body.runnerId?.takeIf {it.isNotBlank()},body.model,body.requestTimeoutMinutes)
+        val next=QwenConfig(body.runnerId?.takeIf {it.isNotBlank()},body.model,body.requestTimeoutMinutes,body.experimentalKvCompression)
         if(!settings.valid(next)) throw ResponseStatusException(HttpStatus.BAD_REQUEST,"로컬 모델·실행기와 추론 요청 제한(1~240분)을 확인하세요.")
         val before=settings.config()
         settings.save(next)
@@ -58,11 +58,16 @@ class QwenSettingsApi(private val manager:ServerManager,private val registry:Run
         return mapOf("saved" to true,"unloaded" to unloaded)
     }
 
-    private fun admin(user:String,id:String,op:String):Any = if(id.isBlank())when(op){"probe"->LocalLlm().probe();"unload"->LocalLlm().unloadAll();"install-strata"->StrataRuntime.install();else->error("Unknown LLM operation")}else gateway.llmAdmin(target(user,id),op)
+    private fun admin(user:String,id:String,op:String):Any = if(id.isBlank())when(op){"probe"->LocalLlm().probe();"unload"->LocalLlm().unloadAll();"install-strata"->StrataRuntime.install();"install-turboquant"->TurboQuantRuntime.install();else->error("Unknown LLM operation")}else gateway.llmAdmin(target(user,id),op)
     @PostMapping("/probe") fun probe(@RequestBody body:QwenRunnerRequest,authentication:Authentication)=remote {admin(authentication.name,body.runnerId,"probe")}
     @PostMapping("/strata/install") fun installStrata(@RequestBody body:QwenRunnerRequest,request:HttpServletRequest,authentication:Authentication):Any {
         freshDesktop(request)
         return remote {admin(authentication.name,body.runnerId,"install-strata")}
+    }
+
+    @PostMapping("/turboquant/install") fun installTurboQuant(@RequestBody body:QwenRunnerRequest,request:HttpServletRequest,authentication:Authentication):Any {
+        freshDesktop(request)
+        return remote {admin(authentication.name,body.runnerId,"install-turboquant")}
     }
 
     @PostMapping("/unload") fun unload(@RequestBody body:QwenRunnerRequest,request:HttpServletRequest,authentication:Authentication):Any {
