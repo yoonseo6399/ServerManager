@@ -102,7 +102,9 @@ function ConsoleView({id,enabled,hint,source,filters}:{id:string;enabled:boolean
     try{
      const r=await fetchWindow(from,500,searching?query||undefined:undefined);if(!r||scan.current.generation!==generation)return;
      if(searching){const seen=new Set(matches.current.map(e=>e.seq));const add=r.parsed.filter(e=>!seen.has(e.seq));if(add.length)matches.current=[...matches.current,...add];setTotal(r.win.total);if(r.win.next===null)setMatchEnd(r.win.total);else{scan.current.from=r.win.next;setMatchEnd(null);}refresh();}
-     else if(r.parsed.length){for(const e of r.parsed)cache.current.set(e.seq,e);requested.current.add(Math.floor((r.win.total-1)/PAGE));setTotal(r.win.total);refresh();}
+     // A burst can exceed this tail request's limit. Do not mark the file's last chunk as loaded:
+     // it may contain the crash after hundreds of startup lines and was never fetched here.
+     else if(r.parsed.length){for(const e of r.parsed)cache.current.set(e.seq,e);setTotal(r.win.total);refresh();}
     }catch(e){if(alive.current)setError((e as Error).message);}finally{busy.current=false;}
    })();
   },1000);
