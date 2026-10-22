@@ -16,11 +16,13 @@ internal object ProjectAgentFormats {
                     "tool" to mapOf("anyOf" to listOf(mapOf("type" to "null"),tool)),"plan" to mapOf("type" to "array","items" to string(),"maxItems" to 12),
                     "requirements" to mapOf("type" to "array","items" to requirement,"maxItems" to 16)))
         }
-        if(!system.startsWith("Independent command-risk reviewer"))return "json"
+        val requestAware=system.startsWith("Independent request-aware command-risk reviewer")
+        if(!requestAware && !system.startsWith("Independent command-risk reviewer"))return "json"
         fun choice(vararg values:String)=mapOf("type" to "string","enum" to values.toList())
+        val properties=mapOf("action" to choice("ALLOW","ASK","DENY"),"risk" to choice("LOW","MEDIUM","HIGH"),
+            "projectScope" to choice("INSIDE","OUTSIDE","UNKNOWN"),"reason" to mapOf("type" to "string","minLength" to 1,"maxLength" to 1000))+
+            (if(requestAware)mapOf("userAuthorized" to mapOf("type" to "boolean"))else emptyMap())
         return mapOf("type" to "object","additionalProperties" to false,
-            "required" to listOf("action","risk","projectScope","reason"),
-            "properties" to mapOf("action" to choice("ALLOW","ASK","DENY"),"risk" to choice("LOW","MEDIUM","HIGH"),
-                "projectScope" to choice("INSIDE","OUTSIDE","UNKNOWN"),"reason" to mapOf("type" to "string","minLength" to 1,"maxLength" to 1000)))
+            "required" to (listOf("action","risk","projectScope","reason")+(if(requestAware)listOf("userAuthorized")else emptyList())),"properties" to properties)
     }
 }

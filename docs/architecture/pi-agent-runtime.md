@@ -86,3 +86,18 @@ bash의 일반 스크립트 실행은 독립 검토에 진입점의 실제 UTF-8
 Pi에 제한형 `sh`를 더 이상 등록하지 않는다. OWNER의 명령 실행은 native `bash` 하나로 통일하며 `cd`, 연결 명령, git도 같은 독립 위험 검토·정확한 명시 승인·출력 기록 경로를 거친다. READ/EDIT 역할에 임의 Bash 권한을 추가하지 않는다. 내부 레거시 `ProjectAgentShell`은 다른 제한형 검색/이전 테스트 호환용으로 남지만 Pi의 명령 도구가 아니다. 과거 세션에 남은 sh 호출은 유효한 도구 사용 예시가 아님을 안내한다.
 
 제거된 sh 이름으로 호스트를 직접 호출하면 실행 없이 `TOOL_INPUT_ERROR`를 반환한다. 이 입력 오류는 권한 거절로 영구 잠그지 않는다. 실제 독립 검토 DENY·사용자 거절·승인 만료·권한 검사 실패의 요청 내 우회 방지와 프로젝트 밖/UNKNOWN Bash·push/PR의 명시 승인은 유지한다. 일반 입력 검증 실패 전체를 복구 가능으로 바꾸지 않는다.
+
+
+## 사전 요청·전체 도구 출력 제한 (fix/pi-intent-output-budget)
+
+자동 승인에서 위험 등급과 사용자 동의를 분리한다. 인증된 실제 사용자 요청은 `pi-human-intent.json`에 작업·소유자·epoch·설정 revision 기준으로 보관하며 모델 요약에서 허용을 복원하지 않는다. 독립 새 검토가 `userAuthorized:true`로 현재 정확한 작업/대상/효과를 확인하고 백엔드 범위가 INSIDE이면 MEDIUM도 재확인 없이 실행할 수 있다. 완료/새 작업/명시 중단/권한·문맥 변경 뒤의 과거 허용은 재사용하지 않는다. 명시 모드는 계속 확인한다.
+
+유한 literal for-list, 조회 파이프, stderr의 /dev/null·2>&1을 비실행 감사용으로 정규화하며 일반 셸을 평가하지 않는다. Git status/log 등 제한된 조회와 fetch/ff-only pull은 프로젝트 실제 경로·일반 저장소·config·활성 hook 부재를 검사한다. 별도 Git worktree/config/include/filter/hook/명령 옵션·임의 확장/스크립트가 불명확하면 UNKNOWN을 유지한다. 추론 런타임의 Git은 시스템/글로벌 config를 자동 로드하지 않는다. Git fetch/pull은 명시한 요청까지 확인해야 하며 push/PR은 이 예외에 포함하지 않는다. 모든 셸을 완전 해석하는 검사기나 OS sandbox는 아니다.
+
+`/agent setting tool_output_limit:2400` (512..8000자, 기본2400)로 모델에 보내는 비정밀 도구 결과의 발췌 상한을 설정한다. 새 설정은 private `project-agent-output.json`에 저장해 구버전 설정 파일의 rollback 호환을 유지한다. 변경은 진행 요청을 취소하고 다음 요청부터 적용한다. Bash뿐 아니라 목록·검색·프로젝트 생성·포럼 목록 등 모든 나머지 도구에 적용한다. read/edit/write/read_file/edit_file/write_file/read_result/read_attachment/read_chat_history/ask_user는 정확성을 위해 제외하며 각 도구의 기존 paging·안전 한도는 유지한다.
+
+Pi tool_result/context 훅에서 전체 원문을 기존 채널별 결과 보관소로 연결하고 일부 원문+read_result ID만 모델에 전달한다. SDK 기본50KB보다 큰 Bash 출력은 Pi 소유 temp 원본을 읽어 보관한다(1.1MB 초과는 부분 보관을 명시하고 원래 Pi 파일 경로를 제공). 비텍스트/바이너리 출력을 바이트 그대로 보관한다고 주장하지 않는다. 보관24시간·채널별20개와 read_result paging은 기존 정책이다. 원문 첨부 실패가 실행 재시도로 이어지지 않으며 보관 실패에도 모델 문맥으로 긴 원문을 그대로 흘리지 않는다.
+
+원문 첨부는 작업 스레드 또는 같은 비공개 채널에 전송한다. read_result는 별도 작업 임베드를 생성하지 않고 원래 작업 카드에 ‘모델이 결과를 읽는 중…’, 보관 ID와 현재/총 줄 수를 갱신한다. 완료 때 마지막 조회 줄을 표시하며 전체 원문을 모두 읽었다고 주장하지 않는다. 카드 연결은 메모리에서24시간/500개까지 유지한다. 앱 재시작 등으로 원래 카드 연결이 없으면 현재 상태 카드만 갱신하며 새로운 페이지별 임베드는 보내지 않는다. 모델의 실제 추론 턴/비용/최대 턴 한도는 합쳐 숨기지 않는다.
+
+실시간 Discord 출력도 같은 글자 한도로 발췌한다. 한 줄짜리 JSON/로그는 read_result의 start_char로 해당 줄 안에서도 이어 읽으며, 마지막 개행을 별도의 빈 줄로 세지 않는다.

@@ -21,10 +21,10 @@ class PiAgentRuntimeTest {
         return Triple(store,ProjectAgentEngine(store,{ProjectAgentTools(profile.resolve("logs"))},runtime=shared),ProjectAgentLimits(12,tier))
     }
     private class Model(val inputTokens:Int=100,val risk:String="""{"action":"ALLOW","risk":"LOW","projectScope":"INSIDE","reason":"요청한 프로젝트 내부의 작은 변경"}""",val script:(JsonNode)->JsonNode):ProjectAgentInference {
-        private var raw:String?=null;var actorCalls=0;var riskCalls=0;val requests=mutableListOf<JsonNode>()
+        private var raw:String?=null;var actorCalls=0;var riskCalls=0;val riskRequests=mutableListOf<List<ProjectAgentMessage>>();val requests=mutableListOf<JsonNode>()
         override fun generate(messages:List<ProjectAgentMessage>,think:Boolean,progress:(QwenProgress)->Unit):String {
             val q=PiWire.decode(messages)
-            if(q==null){riskCalls++;raw=null;return risk}
+            if(q==null){riskCalls++;riskRequests.add(messages);raw=null;return risk}
             requests.add(q);actorCalls++;val node=script(q);raw=node.toString();return node.path("content").asText("")
         }
         override fun nativeMessage()=raw
@@ -47,7 +47,7 @@ class PiAgentRuntimeTest {
                 else->{assertContains(q.path("messages").toString(),"https://example.invalid/fixture.git");answer("승인 후 원격 설정 확인 완료")}
             }
         }
-        val prefs=store.settings("guild","user",null,null,false)
+        val prefs=store.settings("guild","user",null,null,true)
         engine.use {e->
             e.run("channel","user","Tester","git 상태와 원격 확인",prefs,model,limits,{},{event->events.add(event);if(event.kind=="approval"){asks++;e.approve("channel","user",event.token!!,true){}}})
             val resumed=Model {q->val names=q.path("tools").map {it.path("function").path("name").asText()};assertContains(names,"bash");assertFalse("sh" in names);assertContains(q.path("messages").toString(),"원격 설정 확인 완료");answer("기억합니다")}
@@ -67,6 +67,68 @@ class PiAgentRuntimeTest {
                 assertFailsWith<PiToolInputException> {policy.check("sh",mapper.valueToTree(mapOf("command" to "pwd")))}
             }
         }
+    }
+    @Test fun `native bash output is archived paged and read source remains exact`() {
+        val (store,engine,limits)=setup();val home=Path.of(store.channel("channel")!!.home)
+        val raw=(1..180).joinToString("\r\n") {"row-$it="+"x".repeat(45)}+"\r\n";home.resolve("output.txt").writeText(raw)
+        val prefs=store.settings("guild","user",null,null,false,512);var step=0;var id="";val events=mutableListOf<ProjectAgentEvent>()
+        val model=Model {q->when(step++) {
+            0->call("bash",mapOf("command" to "cat output.txt"))
+            1->{val result=q.path("messages").last {it.path("role").asText()=="tool"}.path("content").asText();assertTrue(result.length<=512);assertContains(result,"read_result");id=Regex("out-[0-9a-f]{16}").find(result)!!.value;call("read_result",mapOf("id" to id,"start_line" to 150,"lines" to 5))}
+            2->{assertContains(q.path("messages").toString(),"row-150");call("read",mapOf("path" to "output.txt"))}
+            else->{val last=q.path("messages").last {it.path("role").asText()=="tool"}.path("content").asText();assertTrue(last.length>512);assertContains(last,"row-180");answer("원문과 이어읽기 확인")}
+        }}
+        engine.use {e->e.run("channel","user","Tester","출력 확인",prefs,model,limits,{},{event->events.add(event);assertNotEquals("approval",event.kind)})}
+        assertEquals(raw,events.single {it.kind=="stored_output"}.output)
+        val page=events.single {it.kind=="result_read"}.readProgress!!;assertEquals(id,page.id);assertEquals(150,page.start);assertEquals(154,page.current);assertEquals(180,page.total)
+        val archived=home.parent.resolve("profile/logs/results/shared/$id.txt");assertContentEquals(raw.toByteArray(),archived.readBytes())
+    }
+    @Test fun `resumed context bounds old bash results with the new user setting`() {
+        val (store,engine,limits)=setup();val home=Path.of(store.channel("channel")!!.home);home.resolve("long.txt").writeText("OLD-RESULT-".repeat(500));var step=0
+        val first=Model {when(step++){0->call("bash",mapOf("command" to "cat long.txt"));else->answer("결과 확인")}}
+        engine.use {e->
+            e.run("channel","user","이전 결과 확인",store.settings("guild","user",null,null,false,8000),first,{},{})
+            val next=Model {q->val results=q.path("messages").filter {it.path("role").asText()=="tool"};assertTrue(results.isNotEmpty());assertTrue(results.all {it.path("content").asText().length<=512});answer("새 제한 적용")}
+            e.run("channel","user","이전 결과 기억해",store.settings("guild","user",null,null,false,512),next,{},{event->assertNotEquals("stored_output",event.kind)})
+        }
+    }
+    @Test fun `explicitly requested medium inside operation needs no second approval in automatic mode`() {
+        val (store,engine,limits)=setup();val home=Path.of(store.channel("channel")!!.home);home.resolve("a.txt").writeText("CONTENT");var step=0
+        val risk="""{"action":"ASK","risk":"MEDIUM","projectScope":"INSIDE","userAuthorized":true,"reason":"현재 사용자가 정확히 요청한 파일 조회"}"""
+        val model=Model(risk=risk) {when(step++){0->call("bash",mapOf("command" to "cat a.txt"));else->answer("완료")}}
+        engine.use {e->e.run("channel","user","a.txt를 조회해",store.settings("guild","user",null,null,false),model,{},{event->assertNotEquals("approval",event.kind)})}
+        assertEquals(1,model.riskCalls)
+    }
+    @Test fun `large native output retains full text beyond upstream default truncation`() {
+        val (store,engine,limits)=setup();val home=Path.of(store.channel("channel")!!.home)
+        val raw=(1..1800).joinToString("\n") {"row-$it="+"x".repeat(55)}+"\n";home.resolve("big.txt").writeText(raw);var step=0;val events=mutableListOf<ProjectAgentEvent>()
+        val model=Model {q->if(step++==0)call("bash",mapOf("command" to "cat big.txt"))else {assertTrue(q.path("messages").last {it.path("role").asText()=="tool"}.path("content").asText().length<=512);answer("원문 보관 확인")}}
+        engine.use {e->e.run("channel","user","큰 출력 확인",store.settings("guild","user",null,null,false,512),model,{},{events.add(it)})}
+        assertEquals(raw,events.single {it.kind=="stored_output"}.output)
+    }
+    @Test fun `explicit pull performs actual fast forward over local HTTP without a second approval`() {
+        val (store,engine,limits)=setup();val home=Path.of(store.channel("channel")!!.home);val seed=temp.resolve("seed").createDirectories();val origin=temp.resolve("origin.git");val working=home.resolve("repo")
+        fun git(cwd:Path,vararg args:String) {val p=ProcessBuilder(listOf("/usr/bin/git","-c","user.name=Fixture","-c","user.email=fixture@example.invalid")+args).directory(cwd.toFile()).redirectErrorStream(true).start();val out=p.inputStream.bufferedReader().readText();assertEquals(0,p.waitFor(),out)}
+        git(seed,"init","-b","main");seed.resolve("data.txt").writeText("BEFORE");git(seed,"add",".");git(seed,"commit","-m","initial")
+        git(temp,"clone","--bare",seed.toString(),origin.toString());git(home,"clone",origin.toString(),working.toString())
+        seed.resolve("data.txt").writeText("AFTER");git(seed,"commit","-am","update");git(seed,"push",origin.toString(),"main");git(origin,"update-server-info")
+        val server=com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress("127.0.0.1",0),0)
+        server.createContext("/") {exchange->try {val file=temp.resolve(exchange.requestURI.path.removePrefix("/")).normalize();if(!file.startsWith(origin)||!file.isRegularFile()){exchange.sendResponseHeaders(404,-1)}else {val bytes=file.readBytes();exchange.sendResponseHeaders(200,bytes.size.toLong());exchange.responseBody.use {it.write(bytes)}}}finally{exchange.close()}}
+        server.start()
+        try {
+            git(working,"remote","set-url","origin","http://127.0.0.1:${server.address.port}/origin.git")
+            var step=0;val model=Model(risk="""{"action":"ASK","risk":"MEDIUM","projectScope":"INSIDE","userAuthorized":true,"reason":"사용자가 해당 저장소의 원격 최신화를 명시 요청함"}""") {if(step++==0)call("bash",mapOf("command" to "cd repo && git pull --ff-only"))else answer("업데이트 완료")}
+            engine.use {e->e.run("channel","user","repo를 원격 최신 파일로 업데이트해줘",store.settings("guild","user",null,null,false),model,{},{event->assertNotEquals("approval",event.kind)})}
+            assertEquals("AFTER",working.resolve("data.txt").readText());assertEquals(1,model.riskCalls)
+            assertEquals(listOf("repo를 원격 최신 파일로 업데이트해줘"),mapper.readTree(model.riskRequests.single().last().content).path("authenticated_human_requests").map {it.asText()})
+        } finally {server.stop(0);engine.close()}
+    }
+    @Test fun `extra tool outputs use the same archive and preview policy`() {
+        val (store,engine,limits)=setup();val home=Path.of(store.channel("channel")!!.home)
+        repeat(80){home.resolve("file-${it.toString().padStart(3,'0')}-"+"long-name".repeat(4)+".txt").writeText("x")};var step=0;val events=mutableListOf<ProjectAgentEvent>()
+        val model=Model {q->if(step++==0)call("list_files",emptyMap<String,Any>())else {val result=q.path("messages").last {it.path("role").asText()=="tool"}.path("content").asText();assertTrue(result.length<=512);assertContains(result,"read_result");answer("목록 확인")}}
+        engine.use {e->e.run("channel","user","목록 조회",store.settings("guild","user",null,null,false,512),model,{},{events.add(it)})}
+        val archived=events.single {it.kind=="stored_output"};assertContains(archived.output!!,"file-079-");assertTrue(archived.output!!.length>512)
     }
     @Test fun `per request window updates Pi budget without mutating channel settings`() {
         val (store,engine,limits)=setup();val model=Model {answer("완료")};val events=mutableListOf<ProjectAgentEvent>()

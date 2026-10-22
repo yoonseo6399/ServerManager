@@ -21,6 +21,12 @@ class ProjectAgentResultsTest {
         assertTrue(tail.contains("300: line-300")) ;assertTrue(tail.contains("끝까지 읽었습니다"))
     }
 
+    @Test fun `a long single line can be continued without silently losing its tail`() {
+        val r=ProjectAgentResults(temp);val id=r.save("c","A".repeat(4000)+"TAIL_MARKER\n")
+        val first=r.read("c",id,1,80);assertContains(first,"start_char:2001");assertFalse(first.contains("끝까지"))
+        val second=r.read("c",id,1,80,2001);assertContains(second,"start_char:4001")
+        val tail=r.read("c",id,1,80,4001);assertContains(tail,"TAIL_MARKER");assertContains(tail,"줄 1-1/1");assertContains(tail,"끝까지")
+    }
     @Test fun `a page never exceeds the context budget`() {
         val results=ProjectAgentResults(temp);val id=results.save("c",text(400))
         assertTrue(results.read("c",id,1,400).length<ProjectAgentResults.PAGE_CHARS+300)
