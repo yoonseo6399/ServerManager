@@ -17,6 +17,17 @@ data class ModContentLink(val filename:String,val version:RinVersion,val file:Ri
 
 /** An explicit, read-only scan. Do not call from periodic status/UI polling. */
 object ModInventory {
+    private data class Stamp(val size:Long,val modified:java.nio.file.attribute.FileTime,val key:Any,val changed:Any)
+    private data class Cached(val stamp:Stamp,val sha256:String,val sha512:String)
+    private val hashes=java.util.concurrent.ConcurrentHashMap<Path,Cached>()
+    class ScanStats {var reused=0;var hashed=0;var bytesRead=0L}
+    private fun stamp(path:Path,attrs:BasicFileAttributes):Stamp? {
+        // Without inode + ctime there is no evidence that restoring mtime kept the same bytes.
+        val key=attrs.fileKey() ?: return null
+        if("unix" !in path.fileSystem.supportedFileAttributeViews())return null
+        val changed=runCatching {Files.getAttribute(path,"unix:ctime",NOFOLLOW_LINKS)}.getOrNull() ?: return null
+        return Stamp(attrs.size(),attrs.lastModifiedTime(),key,changed)
+    }
     private val managedBridge:Pair<String,Long>? by lazy {
         ModInventory::class.java.getResourceAsStream("/sable/servermanager-sable-bridge.jar")?.use {stream->
             val bytes=stream.readNBytes(1024*1024+1);require(bytes.size<=1024*1024)
@@ -25,7 +36,7 @@ object ModInventory {
     }
     private fun hex(bytes:ByteArray)=bytes.joinToString(""){"%02x".format(it)}
     /** Hashes files only. JAR contents are never parsed; dependencies come from [attach]. */
-    fun scan(directory:Path):ModInventorySnapshot {
+    fun scan(directory:Path,stats:ScanStats?=null,onProgress:(Int,Long)->Unit={_,_->}):ModInventorySnapshot {
         val paths=if(!directory.exists())emptyList() else {
             require(directory.isDirectory(NOFOLLOW_LINKS) && !Files.isSymbolicLink(directory))
             Files.list(directory).use {items->
@@ -39,12 +50,26 @@ object ModInventory {
         require(attrs.values.all {it.isRegularFile && it.size() in 1..256L*1024*1024}) {"모드는 256MiB 이하 일반 JAR 파일이어야 합니다"}
         require(attrs.values.sumOf {it.size()}<=8L*1024*1024*1024) {"한 번에 검사할 모드는 합계 8GiB까지입니다"}
         val buffer=ByteArray(1024*1024)
-        val mods=paths.map {p->
-            val before=attrs.getValue(p);val sha256=MessageDigest.getInstance("SHA-256");val sha512=MessageDigest.getInstance("SHA-512")
-            p.inputStream().use {input->var count=0L;while(true) {val n=input.read(buffer);if(n<0)break;count+=n;check(count<=before.size()) {"검사 중 모드 크기가 바뀌었습니다"};sha256.update(buffer,0,n);sha512.update(buffer,0,n)};check(count==before.size())}
+        var checkedBytes=0L
+        val mods=paths.mapIndexed {index,p->
+            val before=attrs.getValue(p);val fingerprint=stamp(p,before);val key=p.toAbsolutePath().normalize()
+            val old=hashes[key]?.takeIf {fingerprint!=null && it.stamp==fingerprint}
+            val digests=if(old!=null) {
+                stats?.let {it.reused++};old.sha256 to old.sha512
+            } else {
+                stats?.let {it.hashed++}
+                val sha256=MessageDigest.getInstance("SHA-256");val sha512=MessageDigest.getInstance("SHA-512")
+                Files.newInputStream(p,NOFOLLOW_LINKS).use {input->var count=0L;while(true) {val n=input.read(buffer);if(n<0)break;count+=n;stats?.let {it.bytesRead+=n};check(count<=before.size()) {"검사 중 모드 크기가 바뀌었습니다"};sha256.update(buffer,0,n);sha512.update(buffer,0,n)};check(count==before.size())}
+                hex(sha256.digest()) to hex(sha512.digest())
+            }
             val after=Files.readAttributes(p,BasicFileAttributes::class.java,NOFOLLOW_LINKS)
-            check(after.isRegularFile && before.size()==after.size() && before.lastModifiedTime()==after.lastModifiedTime() && before.fileKey()==after.fileKey()) {"검사 중 모드가 변경되었습니다. 다시 검사하세요"}
-            InstalledMod(p.name,!p.name.endsWith(".disabled",true),before.size(),hex(sha256.digest()),hex(sha512.digest()))
+            check(after.isRegularFile && before.size()==after.size() && before.lastModifiedTime()==after.lastModifiedTime() && before.fileKey()==after.fileKey() && fingerprint==stamp(p,after)) {"검사 중 모드가 변경되었습니다. 다시 검사하세요"}
+            if(fingerprint!=null && System.currentTimeMillis()-after.lastModifiedTime().toMillis()>2000) {
+                if(hashes.size>=50000)hashes.clear()
+                hashes[key]=Cached(fingerprint,digests.first,digests.second)
+            } else hashes.remove(key)
+            checkedBytes+=before.size();onProgress(index+1,checkedBytes)
+            InstalledMod(p.name,!p.name.endsWith(".disabled",true),before.size(),digests.first,digests.second)
         }
         val revision=MessageDigest.getInstance("SHA-256")
         mods.forEach {revision.update("${it.filename}\u0000${it.enabled}\u0000${it.size}\u0000${it.sha512}\n".toByteArray())}

@@ -15,7 +15,7 @@ object ModFiles {
     /** Only renamed JARs are staged. Other mod files retain their inode and content. */
     fun rename(directory:Path,changes:Map<String,String>,history:Path) {
         require(changes.isNotEmpty() && changes.keys.intersect(changes.values.toSet()).isEmpty())
-        val before=FileInventory.collect(directory).let {(f,d)->RunnerFileManifest(f,d)}
+        val before=FileInventory.collectCached(directory).let {(f,d)->RunnerFileManifest(f,d)}
         require(changes.values.distinct().size==changes.size)
         changes.forEach {(from,to)->
             require(from in before.files && to !in before.files && to !in before.directories)
