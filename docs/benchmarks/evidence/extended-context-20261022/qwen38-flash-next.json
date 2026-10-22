@@ -1,0 +1,87 @@
+{
+  "model" : "qwen38-flash-next",
+  "requestedWindow" : 16384,
+  "compressed" : true,
+  "before" : {
+    "totalBytes" : 25769803776,
+    "usedBytes" : 15367815168,
+    "swapUsedBytes" : 7355760640,
+    "pressure" : "정상",
+    "modelBytes" : null,
+    "modelMetric" : null,
+    "wiredLimitMb" : 20480,
+    "sampledAt" : 1792654797803
+  },
+  "short" : {
+    "text" : "KV_READY",
+    "limited" : false,
+    "seconds" : 4.474664041,
+    "tokens" : 3,
+    "thinking" : "",
+    "inputTokens" : 21,
+    "modelContext" : 16384,
+    "tokensPerSecond" : 9.4,
+    "memory" : {
+      "totalBytes" : 25769803776,
+      "usedBytes" : 25615777792,
+      "swapUsedBytes" : 7355760640,
+      "pressure" : "정상",
+      "modelBytes" : 7547912192,
+      "modelMetric" : "RSS 합계·공유 중복 가능",
+      "wiredLimitMb" : 20480,
+      "sampledAt" : 1792654805278
+    }
+  },
+  "afterShort" : {
+    "totalBytes" : 25769803776,
+    "usedBytes" : 25617924096,
+    "swapUsedBytes" : 7355760640,
+    "pressure" : "정상",
+    "modelBytes" : null,
+    "modelMetric" : null,
+    "wiredLimitMb" : 20480,
+    "sampledAt" : 1792654805292
+  },
+  "long" : {
+    "text" : "KV_MEMORY_b8efe736c6004b48bea01d9ca90e955b",
+    "limited" : false,
+    "seconds" : 1252.950544958,
+    "tokens" : 31,
+    "thinking" : "",
+    "inputTokens" : 8607,
+    "modelContext" : 16384,
+    "tokensPerSecond" : 8.8,
+    "memory" : {
+      "totalBytes" : 25769803776,
+      "usedBytes" : 25333858304,
+      "swapUsedBytes" : 6919553024,
+      "pressure" : "정상",
+      "modelBytes" : 7363575808,
+      "modelMetric" : "RSS 합계·공유 중복 가능",
+      "wiredLimitMb" : 20480,
+      "sampledAt" : 1792656058377
+    }
+  },
+  "expected" : "KV_MEMORY_b8efe736c6004b48bea01d9ca90e955b",
+  "needleMatched" : true,
+  "afterLong" : {
+    "totalBytes" : 25769803776,
+    "usedBytes" : 25336070144,
+    "swapUsedBytes" : 6919553024,
+    "pressure" : "정상",
+    "modelBytes" : null,
+    "modelMetric" : null,
+    "wiredLimitMb" : 20480,
+    "sampledAt" : 1792656058390
+  },
+  "afterCleanup" : {
+    "totalBytes" : 25769803776,
+    "usedBytes" : 15491678208,
+    "swapUsedBytes" : 6919553024,
+    "pressure" : "정상",
+    "modelBytes" : null,
+    "modelMetric" : null,
+    "wiredLimitMb" : 20480,
+    "sampledAt" : 1792656059008
+  }
+}
