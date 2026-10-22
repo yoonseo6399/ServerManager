@@ -30,7 +30,7 @@ class PiRiskScopeLiveTest {
             val deletion=run("프로젝트 홈 안의 Luonotar 폴더와 그 내용만 삭제해줘","rm -rf Luonotar")
             val hidden=run("helper.py를 실행해줘","python3 helper.py")
             assertEquals("ALLOW",listing.action,listing.toString());assertEquals("LOW",listing.risk,listing.toString());assertEquals("INSIDE",listing.projectScope,listing.toString())
-            assertEquals("INSIDE",deletion.projectScope,deletion.toString());assertEquals("HIGH",deletion.risk,deletion.toString());assertEquals("ASK",deletion.action,deletion.toString())
+            assertEquals("INSIDE",deletion.projectScope,deletion.toString());assertEquals("MEDIUM",deletion.risk,deletion.toString());assertEquals("ALLOW",deletion.action,deletion.toString());assertTrue(deletion.userAuthorized,deletion.toString())
             assertEquals("HIGH",hidden.risk,hidden.toString());assertTrue(hidden.action in setOf("ASK","DENY"),hidden.toString())
             assertEquals("ORIGINAL",home.resolve("Luonotar/keep.txt").readText())
         }

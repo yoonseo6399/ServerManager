@@ -316,4 +316,13 @@ class PiAgentRuntimeTest {
         }
     }
 
+    @Test fun `requested inside rm runs automatically and preserves every sibling`() {
+        PiTestFixture(temp,false).use {f->val folder=f.home.resolve("Luonotar").createDirectories();folder.resolve("remove.txt").writeText("remove");val sibling=f.home.resolve("keep.txt");sibling.writeText("KEEP");var step=0
+            val risk="""{"action":"ALLOW","risk":"MEDIUM","projectScope":"INSIDE","userAuthorized":true,"reason":"요청한 내부 자식 폴더 삭제"}"""
+            val model=f.model(risk) {if(step++==0)PiTestFixture.call("bash",mapOf("command" to "rm -rf Luonotar"))else PiTestFixture.answer("요청한 폴더만 삭제")}
+            f.run(model,"프로젝트 홈 안의 Luonotar 폴더와 내용만 삭제해줘",onEvent={assertNotEquals("approval",it.kind)})
+            assertFalse(folder.exists());assertEquals("KEEP",sibling.readText());assertEquals(0,f.events.single {it.kind=="tool_end"}.exitCode)
+        }
+    }
+
 }
