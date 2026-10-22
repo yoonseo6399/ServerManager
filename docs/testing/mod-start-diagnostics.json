@@ -1,0 +1,34 @@
+{
+  "date": "2026-10-22",
+  "sourceCommit": "cd3ae680d0789baf31db10ba9581e3401a6653ed",
+  "backend": {
+    "tests": 690,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 29,
+    "passed": 661,
+    "duration": "2m23s",
+    "command": "./gradlew test bootJar --no-daemon"
+  },
+  "browser": {
+    "passed": 12,
+    "failed": 0,
+    "duration": "22.4s",
+    "cases": "force-disable, force-enable, mods, view-only, live-crash (0/1200 lines, filter off/on)"
+  },
+  "frontendBuild": "TypeScript and Vite passed",
+  "timing": {
+    "host": "manager iMac",
+    "files": 236,
+    "totalMiB": 770.17,
+    "sha256And512ScanSeconds": 5.067,
+    "method": "one read-only Python scan; not a full JVM toggle latency measurement"
+  },
+  "operationalRecovery": {
+    "centralLogBackedUp": true,
+    "runnerRawBytesRecovered": 949296,
+    "minecraftModsChanged": false,
+    "newCodeDeployed": false,
+    "managerRestartedForThisChange": false
+  }
+}
