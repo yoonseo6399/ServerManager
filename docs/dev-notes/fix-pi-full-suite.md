@@ -11,3 +11,4 @@
 - 기준선 전체665개39실패/23스킵 재현. 옛38개+TCP철회1개. 대응표·통과 기준 docs/testing/pi-full-suite.md에 기록. 제품 수정: 역할 값 사전 검증, startup steering 보관/ACK/요청별5개 상한. 이관 후 검증 예정.
 - a7dfa29 선커밋 후 관련 범위 통과. 준비 후6번째 개입 거절 회귀·문서 보완 선커밋 후 전체 재검증 예정.
 - 전체 재실행666개1실패/23스킵: UDP fixture TCP 포트 예약 경합 보완 예정. 현재 원격 Beta21 로그의 existing project 입력 오류→거부 latch 오분류 수정, 인증된 새 개입에서만 재검토 허용, Bash cwd 지시문 및 실제 SDK2회귀 추가. 선커밋 후 관련/전체 재검증.
+- 668개 전체 재실행에서 중계 close의 CHM.keys.toList 단일원소 경쟁 예외1개 확인. 배열 snapshot으로 제품 수정하고 실제 TCP close/관리자부재 검증20회 반복으로 강화. 선커밋 후 전체 검증.

@@ -143,14 +143,20 @@ class DirectRelayTest {
     }
 
     @Test fun `manager outage keeps the established tunnel and reports an explicit reason for new attempts`() {
-        val game=EchoGame().track();val hub=hub();hub.applyPolicy(policy());var managerUp=true
-        val agent=DirectRelayAgent({if(managerUp)RelayEndpoint("127.0.0.1",hub.securePort!!,DirectRelayCrypto.issue(secret,relayId,agentId,1,60_000)) else null},{game.server.localPort},backoffMillis=longArrayOf(50)).track()
-        agent.start();connectedAgent(hub,agent);managerUp=false
-        player(hub).use {assertTrue(readAll(it,6).startsWith("echo:"),"approved traffic continues while the manager is away")}
-        assertEquals(RelayAgentState.CONNECTED,agent.state)
-        hub.close() // relay drops the tunnel; with the manager down the agent must say so rather than quietly reroute
-        await("manager unavailable"){agent.state==RelayAgentState.MANAGER_UNAVAILABLE}
-        assertTrue(agent.reason!!.contains("관리 서버"))
+        // Closing the client and hub concurrently used to race the Kotlin single-item
+        // Collection.toList optimization on ConcurrentHashMap.keys (NoSuchElementException).
+        repeat(20) {
+            val game=EchoGame().track();val hub=hub();hub.applyPolicy(policy());val managerUp=java.util.concurrent.atomic.AtomicBoolean(true)
+            val agent=DirectRelayAgent({if(managerUp.get())RelayEndpoint("127.0.0.1",hub.securePort!!,DirectRelayCrypto.issue(secret,relayId,agentId,1,60_000))else null},{game.server.localPort},backoffMillis=longArrayOf(50)).track()
+            try {
+                agent.start();connectedAgent(hub,agent);managerUp.set(false)
+                player(hub).use {assertTrue(readAll(it,6).startsWith("echo:"),"approved traffic continues while the manager is away")}
+                assertEquals(RelayAgentState.CONNECTED,agent.state)
+                hub.close()
+                await("manager unavailable"){agent.state==RelayAgentState.MANAGER_UNAVAILABLE}
+                assertTrue(agent.reason!!.contains("관리 서버"));assertEquals(0,hub.streamCount())
+            }finally {agent.close();hub.close();game.close()}
+        }
     }
 
     @Test fun `coalesced handshake response and first encrypted frame loses no bytes`() {

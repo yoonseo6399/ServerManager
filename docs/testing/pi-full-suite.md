@@ -40,6 +40,10 @@
 
 82f4859 선커밋 후 PiAgentRuntimeTest28개와 DirectSableTest4개, 총32개 실패/스킵 없이 통과했다. 기존 폴더 충돌이 후속 Bash 검토를 막지 않음, 실제 거부 후 인증된 새 지시만 재검토하게 함, 이전 위험 명령 미실행·새 읽기만 실행을 실제 SDK로 확인했다. exporter --check와 diff --check 통과. 미사용 레거시 model fixture 예시도 제거하고 선커밋한 뒤 전체 테스트를 다시 실행한다.
 
+## 중계 종료 경합 수정과 재검증 계획
+
+두 번째 전체 재실행668개 중1실패/23스킵. 실패 stack은 ConcurrentHashMap.KeyIterator.next → Kotlin Collection.toList → DirectRelayHub.Tunnel.close로, 플레이어가 동시에 사라질 때 단일 원소 최적화가 next()를 호출해 발생한 제품 결함이다. 원문 XML은 ignored build/full-suite-evidence/relay-close-race.xml에 보존했다. tunnel/runner close의 keys.toList를 ConcurrentHashMap의 배열 snapshot으로 바꾸고, manager outage/클라이언트 close/허브 close가 겹치는 실제 TCP 시험을20회 반복해 모든 close가 정상 종료하고 새 연결은 관리 서버 부재 상태가 되는지 검증한다. 테스트의 managerUp도 AtomicBoolean으로 바꿔 다른 스레드의 가시성을 보장한다. 기존 철회/트래픽 경계를 완화하지 않는다. 수정·계획을 선커밋한 뒤 전체를 재실행한다.
+
 ## 최종 결과
 
 진행 중.
