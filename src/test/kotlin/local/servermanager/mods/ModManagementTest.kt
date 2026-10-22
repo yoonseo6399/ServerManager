@@ -95,6 +95,38 @@ class ModManagementTest {
         assertEquals("FAILED",mods.page(id).job?.phase)
         assertContentEquals(bytes,dir.resolve("suspect.jar").readBytes());assertContentEquals(bytes,dir.resolve("suspect.jar.disabled").readBytes())
     }
+    @Test fun `forced deactivation changes only selected files and preserves guards and reversible contents`()=fixture {manager,mods,id->
+        val source=manager.originalServerDir(id);val dir=source.resolve("mods")
+        val original=FileInventory.collect(source);val bytes=dir.resolve("lib.jar").readBytes()
+        val snapshot=mods.page(id).inventory!!
+        val request=ModSelection(snapshot.revision,setOf("lib.jar"),enabled=false,ignoreDependencies=true)
+        assertFailsWith<ModDependencyBlocked>{mods.preview(id,request.copy(ignoreDependencies=false))}
+        val preview=mods.preview(id,request)
+        assertEquals(listOf("lib.jar"),preview.affected);assertTrue(preview.ignoreDependencies)
+        assertTrue(preview.warnings.any {it.contains("서버가 시작되지 않거나 충돌")})
+        assertTrue(preview.warnings.any {it.contains("suspect.jar")})
+        manager.runtime(id).state="RUNNING";assertFails {mods.toggle(id,request)};manager.runtime(id).state="STOPPED"
+        manager.runtime(id).diagnosticActive=true;assertFails {mods.preview(id,request)};manager.runtime(id).diagnosticActive=false
+        assertFails {mods.preview(id,request.copy(revision="stale"))}
+        assertFails {mods.preview(id,request.copy(files=setOf("../outside.jar")))}
+        assertFails {mods.preview(id,request.copy(files=emptySet()))}
+        mods.toggle(id,request);waitJob(mods,id)
+        assertFalse(dir.resolve("lib.jar").exists());assertContentEquals(bytes,dir.resolve("lib.jar.disabled").readBytes())
+        assertTrue(dir.resolve("suspect.jar").exists());assertTrue(dir.resolve("other.jar").exists())
+        assertEquals("untouched",source.resolve("world/region/r.0.0.mca").readText())
+        val fresh=mods.page(id).inventory!!
+        assertEquals(listOf("lib"),fresh.missing["suspect.jar"])
+        assertFails {mods.toggle(id,request)}
+        mods.toggle(id,ModSelection(fresh.revision,setOf("lib.jar.disabled"),enabled=true));waitJob(mods,id)
+        assertEquals(original,FileInventory.collect(source))
+        // A forced disable cannot overwrite an existing disabled file.
+        Files.copy(dir.resolve("lib.jar"),dir.resolve("lib.jar.disabled"));mods.refresh(id);waitJob(mods,id)
+        mods.toggle(id,request.copy(revision=mods.page(id).inventory!!.revision))
+        val deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(10)
+        while(mods.page(id).job?.phase=="WORKING" && System.nanoTime()<deadline)Thread.sleep(20)
+        assertEquals("FAILED",mods.page(id).job?.phase)
+        assertContentEquals(bytes,dir.resolve("lib.jar").readBytes());assertContentEquals(bytes,dir.resolve("lib.jar.disabled").readBytes())
+    }
     @Test fun `inventory is visible before slow metadata finishes and a private jar remains listed`()=fixture {manager,mods,id->
         val entered=java.util.concurrent.CountDownLatch(1);val release=java.util.concurrent.CountDownLatch(1)
         jar(manager.originalServerDir(id).resolve("mods/private.jar"),"private")
