@@ -95,6 +95,7 @@ class WebDavSync(private val manager:ServerManager,private val settings:WebDavSe
         }
     }
     fun syncNow(id:String):CloudManifest {
+        check(!manager.backgroundPending(id)) {"최신 종료 복사본 전송 후 클라우드에 반영할 수 있습니다"}
         check(manager.instance(id).syncEnabled()) {"서버 파일 동기화가 꺼져 있습니다"}
         val runtime=manager.runtime(id)
         val directory=synchronized(runtime) {

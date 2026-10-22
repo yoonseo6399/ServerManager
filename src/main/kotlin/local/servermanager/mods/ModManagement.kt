@@ -157,7 +157,6 @@ class ModManagement(private val manager:ServerManager,private val catalog:Modrin
         }
     }
     fun create(id:String,req:ModSearchRequest)=locked(id) {
-        check(!onRunner(id)) {"원격 모드 켜기·끄기는 지원합니다. 격리 원인 검사는 원격 복사본 검증 지원 후 사용할 수 있습니다"}
         require(session(id)?.phase in setOf(null,"FINISHED")) {"기존 검사를 재개하거나 종료하세요"}
         val snapshot=inventory(id,req.revision);val plan=ModGraph(snapshot).plan(req.suspects,req.keep)
         job(id) {
@@ -167,6 +166,7 @@ class ModManagement(private val manager:ServerManager,private val catalog:Modrin
             manager.diagnosticContext(id,s.id)
             val home=root(id,s).also {it.createDirectories()}
             try {
+                if(onRunner(id))check(ModInventory.scan(manager.originalServerDir(id).resolve("mods")).revision==fresh.revision) {"격리 검사에는 최신 복구본이 필요합니다. 실행기 전송을 완료한 뒤 다시 시도하세요"}
                 var last=0L
                 ModFiles.sandbox(manager.originalServerDir(id),home.resolve("server")){count,bytes->
                     val now=System.nanoTime();if(now-last>250_000_000){jobs[id]=ModJob("COPYING","원본 월드를 제외하고 검사 환경을 복사하고 있습니다",count,bytes);last=now}

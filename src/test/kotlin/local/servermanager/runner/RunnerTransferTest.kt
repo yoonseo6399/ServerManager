@@ -13,7 +13,7 @@ class RunnerTransferTest {
 
     @Test fun `legacy strict runner wire format excludes newly added fields`() {
         val (transfer,_,manager)=fixture();val gateway=mock(RunnerGateway::class.java)
-        `when`(gateway.authorized("runner","session")).thenReturn(true)
+        `when`(gateway.authorized("runner","session")).thenReturn(true);`when`(gateway.permitsInstance("runner","instance")).thenReturn(true)
         while(transfer.preparedInventory("instance")==null)Thread.sleep(5)
         val api=RunnerTransferApi(transfer,gateway,manager)
         var reply=api.begin("instance",RunnerTransferBegin(RunnerFileManifest(emptyMap(),emptySet())),"runner","session")
@@ -44,7 +44,7 @@ class RunnerTransferTest {
 
     @Test fun `slow commit returns pending promptly with quick receipt polling and commits once`() {
         val (transfer,base,manager)=fixture();val gateway=mock(RunnerGateway::class.java)
-        `when`(gateway.authorized("runner","session")).thenReturn(true)
+        `when`(gateway.authorized("runner","session")).thenReturn(true);`when`(gateway.permitsInstance("runner","instance")).thenReturn(true)
         val worker=temp.resolve("async-worker").createDirectory();worker.resolve("new.txt").writeText("new")
         val (files,dirs)=FileInventory.collect(worker)
         val plan=transfer.begin("runner","instance",RunnerFileManifest(files,dirs))
@@ -232,7 +232,7 @@ class RunnerTransferTest {
 
     @Test fun `manifest API responds with retry while background hash holds no transfer lock and denies running or unauthorized access`() {
         val (transfer,base,manager)=fixture();val gateway=mock(RunnerGateway::class.java)
-        `when`(gateway.authorized("runner","session")).thenReturn(true)
+        `when`(gateway.authorized("runner","session")).thenReturn(true);`when`(gateway.permitsInstance("runner","instance")).thenReturn(true)
         val manifest=RunnerFileManifest(mapOf("new" to CloudFile(java.security.MessageDigest.getInstance("SHA-256").digest("new".toByteArray()).joinToString(""){"%02x".format(it)},3)),emptySet())
         val plan=transfer.begin("runner","instance",manifest)
         val entered=java.util.concurrent.CountDownLatch(1);val release=java.util.concurrent.CountDownLatch(1)

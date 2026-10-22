@@ -357,6 +357,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
         return connected(id) && send(id,RunnerMessage("update-request",detail=if(pause) "PAUSE_TRANSFER" else "WHEN_IDLE",command=version,state=if(allowRollback)"STABLE_ROLLBACK" else if(allowPrerelease)"BETA_OK" else null))
     }
     fun connected(id:String)=sessions[id]?.isOpen==true && registry.online(id)
+    fun permitsInstance(id:String,instance:String)=registry.active(id)?.allowedInstanceIds?.contains(instance)==true
     fun authorized(id:String,token:String?):Boolean = token!=null && registry.active(id)!=null && connected(id) &&
         MessageDigest.isEqual((tokens[id] ?: "").toByteArray(),token.toByteArray())
     fun send(id:String,message:RunnerMessage):Boolean {

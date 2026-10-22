@@ -89,7 +89,7 @@ export function ModsPanel({id,loader,state,canManage,onChanged,onConsole}:{id:st
      <div className="actions">
       <button disabled={locked||!selectedEnabled.length} onClick={()=>requestPreview(selectedEnabled,false)}><PowerOff size={15}/> 선택 비활성화{selectedEnabled.length?` (${selectedEnabled.length})`:''}</button>
       <button disabled={locked||!selectedDisabled.length} onClick={()=>requestPreview(selectedDisabled,true)}><Power size={15}/> 선택 활성화{selectedDisabled.length?` (${selectedDisabled.length})`:''}</button>
-      <button className="primary" disabled={locked||running||!!data?.remote||!suspects.size||!!session&&session.phase!=='FINISHED'} onClick={()=>action('/diagnostic',{revision:inv.revision,suspects:[...suspects],keep:[...keep]})}><FlaskConical size={16}/> 의심 {suspects.size}개에서 문제 찾기</button>
+      <button className="primary" disabled={locked||running||!suspects.size||!!session&&session.phase!=='FINISHED'} onClick={()=>action('/diagnostic',{revision:inv.revision,suspects:[...suspects],keep:[...keep]})}><FlaskConical size={16}/> 의심 {suspects.size}개에서 문제 찾기</button>
       <button disabled={working||!(selected.size||suspects.size||keep.size)} onClick={()=>{setSuspects(new Set());setKeep(new Set());setSelected(new Set());}}>선택 초기화</button>
      </div>
     </div>

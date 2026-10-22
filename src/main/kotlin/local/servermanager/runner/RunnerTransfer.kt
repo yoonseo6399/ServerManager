@@ -248,7 +248,7 @@ class RunnerTransferApi(private val transfer:RunnerTransfer,private val gateway:
     private fun taskKey(id:String,runner:String,operation:String,request:String)=TransferTasks.Key(id,runner,manager.profileDir(id).toAbsolutePath().toString(),operation,request)
 
     private fun check(runnerId:String,token:String?,instanceId:String) {
-        if(!gateway.authorized(runnerId,token) || manager.instance(instanceId).runnerId!=runnerId)
+        if(!gateway.authorized(runnerId,token) || manager.instance(instanceId).runnerId!=runnerId || !gateway.permitsInstance(runnerId,instanceId))
             throw ResponseStatusException(HttpStatus.FORBIDDEN,"실행기 연결 또는 서버 배정을 확인하세요")
     }
     @GetMapping("/{instanceId}/capabilities") fun capabilities(@PathVariable instanceId:String,
