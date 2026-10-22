@@ -70,18 +70,18 @@ class Api(private val manager: ServerManager,private val accounts:AuthStore,priv
         }
         return ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore()).body(value)
     }
-    @GetMapping("/instances/{id}/files") fun files(@PathVariable id: String,@RequestParam(defaultValue="") path: String)=if(remoteFiles.remote(id))remoteFiles.files(id,path) else manager.files(id,path)
-    @GetMapping("/instances/{id}/text") fun text(@PathVariable id: String,@RequestParam path: String)=if(remoteFiles.remote(id))remoteFiles.text(id,path) else manager.text(id,path)
-    @PutMapping("/instances/{id}/text") fun write(@PathVariable id: String,@RequestBody req: WriteRequest)=if(remoteFiles.remote(id))remoteFiles.write(id,req.path,req.content.byteInputStream(),req.revision,2L*1024*1024) else manager.write(id,req.path,req.content.toByteArray(),req.revision)
-    @PostMapping("/instances/{id}/folders") fun mkdir(@PathVariable id: String,@RequestBody req: PathRequest)=if(remoteFiles.remote(id))remoteFiles.change(id,"MKDIR",req.path) else manager.mkdir(id,req.path)
-    @PostMapping("/instances/{id}/move") fun move(@PathVariable id: String,@RequestBody req: MoveRequest)=if(remoteFiles.remote(id))remoteFiles.change(id,"MOVE",req.from,req.to) else manager.move(id,req.from,req.to)
-    @DeleteMapping("/instances/{id}/files") fun delete(@PathVariable id: String,@RequestParam path: String)=if(remoteFiles.remote(id))remoteFiles.change(id,"DELETE",path) else manager.delete(id,path)
+    @GetMapping("/instances/{id}/files") fun files(@PathVariable id: String,@RequestParam(defaultValue="") path: String)=if(remoteFiles.filesRemote(id))remoteFiles.files(id,path) else manager.files(id,path)
+    @GetMapping("/instances/{id}/text") fun text(@PathVariable id: String,@RequestParam path: String)=if(remoteFiles.filesRemote(id))remoteFiles.text(id,path) else manager.text(id,path)
+    @PutMapping("/instances/{id}/text") fun write(@PathVariable id: String,@RequestBody req: WriteRequest)=if(remoteFiles.filesRemote(id))remoteFiles.write(id,req.path,req.content.byteInputStream(),req.revision,2L*1024*1024) else manager.write(id,req.path,req.content.toByteArray(),req.revision)
+    @PostMapping("/instances/{id}/folders") fun mkdir(@PathVariable id: String,@RequestBody req: PathRequest)=if(remoteFiles.filesRemote(id))remoteFiles.change(id,"MKDIR",req.path) else manager.mkdir(id,req.path)
+    @PostMapping("/instances/{id}/move") fun move(@PathVariable id: String,@RequestBody req: MoveRequest)=if(remoteFiles.filesRemote(id))remoteFiles.change(id,"MOVE",req.from,req.to) else manager.move(id,req.from,req.to)
+    @DeleteMapping("/instances/{id}/files") fun delete(@PathVariable id: String,@RequestParam path: String)=if(remoteFiles.filesRemote(id))remoteFiles.change(id,"DELETE",path) else manager.delete(id,path)
     @PostMapping("/instances/{id}/upload") fun upload(@PathVariable id: String,@RequestParam(defaultValue="") path: String,@RequestParam file: MultipartFile) {
         val name=Path.of(file.originalFilename ?: "upload.bin").fileName.toString()
-        file.inputStream.use {if(remoteFiles.remote(id))remoteFiles.write(id,if(path.isBlank()) name else "$path/$name",it) else manager.writeStream(id,if(path.isBlank()) name else "$path/$name",it)}
+        file.inputStream.use {if(remoteFiles.filesRemote(id))remoteFiles.write(id,if(path.isBlank()) name else "$path/$name",it) else manager.writeStream(id,if(path.isBlank()) name else "$path/$name",it)}
     }
     @GetMapping("/instances/{id}/download") fun download(@PathVariable id:String,@RequestParam path:String):ResponseEntity<org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody> {
-        val remote=remoteFiles.remote(id);val local=if(remote)null else manager.path(id,path).also {require(it.isRegularFile())}
+        val remote=remoteFiles.filesRemote(id);val local=if(remote)null else manager.path(id,path).also {require(it.isRegularFile())}
         val size=if(remote)remoteFiles.size(id,path) else local!!.fileSize()
         val body=org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody {out->if(remote)remoteFiles.download(id,path,out) else local!!.inputStream().use {it.copyTo(out,64*1024)}}
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_OCTET_STREAM).contentLength(size).header(HttpHeaders.CONTENT_DISPOSITION,org.springframework.http.ContentDisposition.attachment().filename(Path.of(path).fileName.toString(),Charsets.UTF_8).build().toString()).body(body)

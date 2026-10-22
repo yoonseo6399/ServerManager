@@ -531,7 +531,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         processes.entries.filter {it.value !is HostedProcess}.forEach { stop(it.key) }
         processes.values.filter {it !is HostedProcess}.forEach { runCatching { it.waitFor() } }
         installationProcesses.values.forEach {runCatching {it.waitFor()}}
-        if(!updatePauseRequested)home.resolve("instances").takeIf { it.exists() }?.let { root -> Files.list(root).use { paths -> paths.filter { it.resolve("dirty").exists() }.forEach { dir -> uploadStopped(dir.fileName.toString()) } } }
+        if(!updatePauseRequested)home.resolve("instances").takeIf { it.exists() }?.let { root -> Files.list(root).use { paths -> paths.filter { it.resolve("dirty").exists() || it.resolve("stopped-snapshots").takeIf {p->p.exists()}?.listDirectoryEntries()?.any {p->StoppedSnapshots.valid(p.name)}==true }.forEach { dir -> uploadStopped(dir.fileName.toString()) } } }
         tcpRelay?.close();directRelay.close();sable.close();workers.shutdown()
     }
     override fun onOpen(webSocket:WebSocket) { connection.set(webSocket);webSocket.request(1) }
@@ -548,7 +548,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                         "sable-registered" -> message.token?.let {sableRegistrations[it]?.complete(message.state=="OK")}
 
                         "session" -> { sessionToken=message.token;tcpRelay?.close();tcpRelay=if(tcpRelayAllowed)TcpRelayPeer(::send,::sendBinary) else null
-                            send(RunnerMessage("restart-capability",state=if(supervisedRestart)"RESTART_V2" else "OFF",detail=serviceBootId));send(RunnerMessage("update-capability",state=if(updater!=null)"RELEASE_SELECTION_V1" else "OFF",detail=if(updater?.rollbackSupported==true)"ROLLBACK_V1" else null));confirmActivation();hosted?.relaySession() ?: directRelay.onSession();reportUpdateDetail();send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));send(RunnerMessage("llm-capability",state=if(llmAllowed)"OLLAMA_AGENT_V3" else "OFF",detail="CONTEXT_TOOLS_V1",command="STRATA_V1",version="PI_PROVIDER_V1",token="AGENT_SAFETY_PROFILE_V1"));send(RunnerMessage("llm-context-capability",version="KV_CONTEXT_V1"));reportUpdate();recoverStates() }
+                            send(RunnerMessage("workspace-capability",state="LIVE_FILES_V1"));send(RunnerMessage("restart-capability",state=if(supervisedRestart)"RESTART_V2" else "OFF",detail=serviceBootId));send(RunnerMessage("update-capability",state=if(updater!=null)"RELEASE_SELECTION_V1" else "OFF",detail=if(updater?.rollbackSupported==true)"ROLLBACK_V1" else null));confirmActivation();hosted?.relaySession() ?: directRelay.onSession();reportUpdateDetail();send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));send(RunnerMessage("llm-capability",state=if(llmAllowed)"OLLAMA_AGENT_V3" else "OFF",detail="CONTEXT_TOOLS_V1",command="STRATA_V1",version="PI_PROVIDER_V1",token="AGENT_SAFETY_PROFILE_V1"));send(RunnerMessage("llm-context-capability",version="KV_CONTEXT_V1"));reportUpdate();recoverStates() }
                         "relay-config" -> {
                             val port=message.detail?.toIntOrNull()
                             val ok=tcpRelayAllowed && (message.state=="OFF" || port in 1024..65535) && runCatching {tcpRelay?.listen(if(message.state=="ON")port else null);true}.getOrDefault(false)
@@ -666,11 +666,16 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         return mapper.readTree(response.body()).path("batchProtocol").asInt()==1
     }
     private fun encode(value:String)=URLEncoder.encode(value,Charsets.UTF_8)
+    private fun localEdits(id:String)=instanceRoot(id).resolve("local-edits.pending")
     private fun workspaceService(id:String)=workspaces.compute(id) {_,previous->
-        val directory=serverDir(id);if(previous?.matches(directory)==true)previous else {check(previous?.busy()!=true);RunnerWorkspace(directory,if(folders.custom(id))serverDir(id).resolveSibling(".servermanager-files-$id") else instanceRoot(id).resolve("file-history"),instanceRoot(id)) {
-                check(processes[id]?.isAlive!=true && !orphanAlive(id) && !dirty(id).exists()) {"서버를 정상 종료한 뒤 파일을 변경하세요"}
-                if(serverDir(id).resolve("server.properties").exists())folders.checkWorldStopped(id)
-            }}}!!
+        val directory=serverDir(id)
+        if(previous?.matches(directory)==true)previous else {
+            check(previous?.busy()!=true)
+            RunnerWorkspace(directory,if(folders.custom(id))directory.resolveSibling(".servermanager-files-$id") else instanceRoot(id).resolve("file-history"),instanceRoot(id),beforeMutation={token->
+                atomicText(localEdits(id),token ?: UUID.randomUUID().toString())
+            }) {check(!updatePauseRequested) {"업데이트 적용 중입니다"}}
+        }
+    }!!
     /** Ollama runs on this computer only; the manager never gets a way to choose the endpoint or a model tag. */
     private fun llmChat(requestId:String,size:String,prompt:String,think:Boolean) {
         val response=try {
@@ -702,18 +707,28 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         send(response)
     }
     private fun workspace(id:String,requestId:String,raw:String) {
-        val response=try {synchronized(operationLocks.computeIfAbsent(id){Any()}) {
-            var reserved=false
-            try {
-                synchronized(lifecycle){updateCheckpoint();check(preparing.add(id)) {"실행기 작업이 진행 중입니다"};reserved=true}
-                val request=mapper.readValue<WorkspaceRequest>(raw);val instance=request.config
-                require(instance.id==id && instance.runnerId==identity.id && !instance.syncEnabled() && instance.diagnosticSession==null)
-                check(!instanceRoot(id).resolve("folder-import.pending").exists() && id !in uploading) {"기존 파일 인계를 완료하세요"}
-                configs[id]=instance;instanceRoot(id).createDirectories();atomicText(instanceRoot(id).resolve("instance.json"),mapper.writeValueAsString(instance));serverDir(id).createDirectories()
+        val response=try {
+            val request=mapper.readValue<WorkspaceRequest>(raw);val instance=request.config
+            require(instance.id==id && instance.runnerId==identity.id && instance.diagnosticSession==null)
+            val readOnly=request.op in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW","MOD_SCAN")
+            fun execute():RunnerMessage {
+                updateCheckpoint()
+                check(!instanceRoot(id).resolve("folder-import.pending").exists()) {"최초 폴더 가져오기를 완료하세요"}
+                // Never replace an active game's config with a stale read request.
+                configs.putIfAbsent(id,instance);instanceRoot(id).createDirectories();serverDir(id).createDirectories()
                 val result=mapper.writeValueAsString(workspaceService(id).execute(request));require(result.length<=200*1024)
-                RunnerMessage("workspace-result",id,"OK",token=requestId,detail=result)
-            }finally{if(reserved)preparing.remove(id)}
-        }}catch(e:Exception){RunnerMessage("workspace-result",id,"ERROR",token=requestId,detail=e.message?.take(500) ?: "파일 작업 실패")}
+                return RunnerMessage("workspace-result",id,"OK",token=requestId,detail=result)
+            }
+            if(readOnly)execute() else synchronized(operationLocks.computeIfAbsent(id){Any()}) {
+                val result=execute()
+                if(request.op in setOf("WRITE_COMMIT","MKDIR","MOVE","DELETE","MOD_TOGGLE") && instance.syncEnabled() && processes[id]?.isAlive!=true && !orphanAlive(id) && !dirty(id).exists()) {
+                    val snapshot=snapshots(id).capture(serverDir(id),null,null,localEdits(id).takeIf {it.exists()}?.readText(),editOnly=true)
+                    transferResponse(http("POST","/api/runners/transfer/$id/snapshot-ready",HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(snapshot.ready)),"application/json"),"파일 변경 복사본 접수 대기")
+                    workers.submit {uploadSnapshots(id)}
+                }
+                result
+            }
+        }catch(e:Exception){RunnerMessage("workspace-result",id,"ERROR",token=requestId,detail=e.message?.take(500) ?: "파일 작업 실패")}
         send(response)
     }
     private fun installServer(id:String,ticket:String,raw:String) {
@@ -747,8 +762,8 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         try {
             synchronized(lifecycle){updateCheckpoint();preparing.add(id)}
             check(processes[id]?.isAlive!=true) { "이미 실행 중입니다" }
-            check(!dirty(id).exists()) { "이전 실행의 데이터 인계가 완료되지 않았습니다" }
-            check(!instanceRoot(id).resolve("folder-import.pending").exists() && id !in uploading) { "기존 폴더 가져오기가 끝난 뒤 시작하세요" }
+            check(!dirty(id).exists()) { "종료 복사본을 준비 중입니다. 잠시 후 다시 시작하세요" }
+            check(!instanceRoot(id).resolve("folder-import.pending").exists() && (id !in uploading || snapshots(id).list().isNotEmpty())) { "최초 폴더 가져오기를 완료하세요" }
             val instance=mapper.readValue<Instance>(rawConfig)
             require(instance.id==id && instance.runnerId==identity.id)
             configs[id]=instance
@@ -759,12 +774,13 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                 val now=System.nanoTime();if(count>0 && now-lastScan<1_000_000_000)return;lastScan=now
                 send(RunnerMessage("file-progress",id,detail=mapper.writeValueAsString(FolderImportProgress("SCANNING",count,bytes,message="원래 폴더의 외부 변경과 실행 상태를 확인하고 있습니다. 이전에 검사한 파일은 다시 읽지 않습니다",direction="TO_RUNNER",step="원래 폴더 변경 확인",stepNo=1,stepTotal=1))))
             }
-            if(instance.diagnosticSession==null){if(instance.syncEnabled()){scanning(0,0);folders.checkStopped(id,::scanning)}else {if(folders.custom(id))folders.checkWorldStopped(id);folders.recover(id);workspaceService(id).recover()};folders.prepareRuntime(id,instance)}
+            val localPrimary=localEdits(id).exists() || snapshots(id).list().isNotEmpty()
+            if(instance.diagnosticSession==null){if(instance.syncEnabled() && !localPrimary){scanning(0,0);folders.checkStopped(id,::scanning)}else {if(folders.custom(id))folders.checkWorldStopped(id);folders.recover(id);workspaceService(id).recover()};folders.prepareRuntime(id,instance)}
             else {serverDir(id).createDirectories();DeltaTransfer.recover(serverDir(id),diagnosticRoot(id)!!.resolve("transfer-backups"))}
             send(RunnerMessage("state",id,"TRANSFERRING",version(),"서버 파일을 받고 있습니다"))
             // Local consent makes the existing folder authoritative until its first stopped upload.
             // Pulling the newly-created empty central profile here would destroy the original world.
-            if(instance.syncEnabled() && (instance.diagnosticSession!=null || !folders.initial(id)))pull(id)
+            if(instance.syncEnabled() && !localPrimary && (instance.diagnosticSession!=null || !folders.initial(id)))pull(id)
             startProcess(instance) {spawned=true}
         } catch(e:Exception) {
             val state=if(!spawned && processes[id]?.isAlive!=true && !dirty(id).exists())"START_FAILED" else "SYNC_FAILED"
@@ -956,7 +972,66 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         } else report
         return http("POST","/api/runners/transfer/$id/exit",HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(compatible)),"application/json")
     }
+    private fun snapshots(id:String)=StoppedSnapshots(instanceRoot(id).resolve("stopped-snapshots"))
+    private fun backgroundEnabled(id:String):Boolean {
+        if(configs[id]?.runToken==null || configs[id]?.syncEnabled()!=true || diagnosticRoot(id)!=null)return false
+        val response=http("GET","/api/runners/transfer/$id/capabilities")
+        transferResponse(response,"종료 복사본 기능 확인 대기")
+        return mapper.readTree(response.body()).path("stoppedSnapshotProtocol").asInt()>=1
+    }
+    private fun uploadSnapshots(id:String) {
+        if(sessionToken==null)return
+        var reserved=false
+        try {
+            synchronized(operationLocks.computeIfAbsent(id){Any()}) {
+                if(dirty(id).exists() && processes[id]?.isAlive!=true && !orphanAlive(id)) {
+                    val exit=instanceRoot(id).resolve("exit.json").takeIf {it.exists()}?.let {mapper.readValue<RunnerExitReport>(it.readText())}
+                    send(RunnerMessage("file-progress",id,detail=mapper.writeValueAsString(FolderImportProgress("SCANNING",message="종료 복사본 준비 중 · 준비가 끝나면 바로 다시 시작할 수 있습니다"))))
+                    val token=configs[id]?.runToken
+                    val previous=snapshots(id).list().lastOrNull {it.ready.runToken==token}
+                    val captured=previous ?: snapshots(id).capture(serverDir(id),token,exit,localEdits(id).takeIf {it.exists()}?.readText())
+                    transferResponse(http("POST","/api/runners/transfer/$id/snapshot-ready",HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(captured.ready)),"application/json"),"종료 복사본 접수 대기")
+                    // Durable copy is ready before releasing the original folder for a new process.
+                    dirty(id).deleteIfExists()
+                }
+            }
+            if(!reserveUpload(id))return
+            reserved=true
+            while(true) {
+                val snapshot=snapshots(id).list().firstOrNull() ?: break
+                transferResponse(http("POST","/api/runners/transfer/$id/snapshot-ready",HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(snapshot.ready)),"application/json"),"종료 복사본 접수 대기")
+                val receipt=snapshot.path.resolve("upload.pending")
+                val completed=if(receipt.exists()) {
+                    val transfer=receipt.readText().trim();require(UUID.fromString(transfer).toString()==transfer)
+                    val response=awaitTransfer(id,"복사본 반영 확인 대기") {http("GET",protocolPath("/api/runners/transfer/$id/transfer-state?transferId=$transfer"))}
+                    if(mapper.readTree(response.body()).path("state").asText()=="COMPLETE") {
+                        awaitTransfer(id,"복사본 완료 확인 대기") {http("POST",protocolPath("/api/runners/transfer/$id/commit?transferId=$transfer"))};true
+                    } else false
+                } else false
+                if(!completed)uploadFiles(id,null,snapshot.path.resolve("server"),snapshot.path,snapshot.ready.generation)
+                synchronized(operationLocks.computeIfAbsent(id){Any()}) {
+                    val last=snapshots(id).list().size==1
+                    if(last && processes[id]?.isAlive!=true && !orphanAlive(id) && !dirty(id).exists()) {
+                        // A newer live edit must never be erased by completion of an older copy.
+                        val marker=localEdits(id)
+                        if(!marker.exists() || marker.readText()==snapshot.ready.localRevision) {
+                            val manifest=FileInventory.collectCached(serverDir(id)).let {(f,d)->RunnerFileManifest(f,d)}
+                            val copied=FileInventory.collectCached(snapshot.path.resolve("server")).let {(f,d)->RunnerFileManifest(f,d)}
+                            if(manifest==copied){folders.published(id,manifest);marker.deleteIfExists()}
+                        }
+                    }
+                    snapshots(id).remove(snapshot)
+                }
+            }
+        } catch(e:Exception) {
+            // Runtime state belongs to the current game; background failures must not turn it into SYNC_FAILED.
+            send(RunnerMessage("log",id,"warn",version(),"종료 복사본 전송 대기: "+e.message.orEmpty().take(300)))
+            snapshots(id).list().firstOrNull()?.let {s->runCatching {http("POST","/api/runners/transfer/$id/snapshot-progress?generation=${s.ready.generation}",HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(FolderImportProgress("RETRYING",message=e.message.orEmpty().take(300)))),"application/json")}}
+        }finally{if(reserved)uploading.remove(id)}
+    }
     private fun uploadStopped(id:String) {
+        if(snapshots(id).list().isNotEmpty() || runCatching {backgroundEnabled(id)}.getOrDefault(false)){uploadSnapshots(id);return}
+
         if(!dirty(id).exists() || processes[id]?.isAlive==true || orphanAlive(id) || sessionToken==null || !reserveUpload(id))return
         synchronized(operationLocks.computeIfAbsent(id){Any()}) { try {
             if(configs[id]?.syncEnabled()==false) {
@@ -995,16 +1070,16 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         }
         finally { uploading.remove(id) } }
     }
-    private fun uploadFiles(id:String,request:String?) {
+    private fun uploadFiles(id:String,request:String?,source:Path=serverDir(id),receiptRoot:Path=instanceRoot(id),generation:String?=null) {
             var lastProgress=0L
             fun progress(value:FolderImportProgress,force:Boolean=false) {
                 val now=System.nanoTime();if(!force && now-lastProgress<1_000_000_000)return;lastProgress=now
-                send(RunnerMessage(if(request==null)"file-progress" else "import-progress",id,detail=mapper.writeValueAsString(value),token=request))
+                if(generation==null)send(RunnerMessage(if(request==null)"file-progress" else "import-progress",id,detail=mapper.writeValueAsString(value),token=request))
             }
             progress(FolderImportProgress("SCANNING",message="원래 폴더의 파일 목록을 만들고 있습니다. 이전에 검사한 파일은 다시 읽지 않습니다",step="원래 폴더 파일 목록 작성",stepNo=1,stepTotal=3),true)
-            val snapshot=FileInventory.snapshot(serverDir(id))
+            val snapshot=FileInventory.snapshot(source)
             val scanStats=FileInventory.ScanStats()
-            val (files,dirs)=FileInventory.collectCached(serverDir(id),scanStats) {count,bytes->updateCheckpoint()
+            val (files,dirs)=FileInventory.collectCached(source,scanStats) {count,bytes->updateCheckpoint()
                 progress(FolderImportProgress("SCANNING",count,bytes,message="원래 폴더의 파일 목록을 만들고 있습니다. 이전에 검사한 파일은 다시 읽지 않습니다",
                     step="원래 폴더 파일 목록 작성",stepNo=1,stepTotal=3,reused=scanStats.reused.get(),hashed=scanStats.hashed.get()))}
             val manifest=RunnerFileManifest(files,dirs)
@@ -1014,16 +1089,17 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             val resumable=if(capability.statusCode()==404)false else {transferResponse(capability,"이어받기 지원 확인 대기");true}
             val body=mutableMapOf<String,Any>("manifest" to manifest)
             if(request!=null)body["importRequest"]=request
+            if(generation!=null)body["generation"]=generation
             if(resumable)body["resumeProtocol"]=1
-            check(FileInventory.snapshot(serverDir(id))==snapshot) {"파일 검사 중 원본이 변경됐습니다. 받은 파일은 보존했습니다"}
+            check(FileInventory.snapshot(source)==snapshot) {"파일 검사 중 원본이 변경됐습니다. 받은 파일은 보존했습니다"}
             val encoded=mapper.writeValueAsBytes(body)
             val response=awaitTransfer(id,"파일 인계 준비 대기",{
                 progress(FolderImportProgress("SCANNING",files.size,files.values.sumOf {it.size},message="관리 서버가 중앙 파일과 비교해 전송할 파일을 정하고 있습니다. 원본 목록 결과를 재사용합니다",
                     step="관리 서버 비교·전송 계획",stepNo=3,stepTotal=3,reused=scanStats.reused.get(),hashed=scanStats.hashed.get()))
             }) {http("POST",protocolPath("/api/runners/transfer/$id/begin"),HttpRequest.BodyPublishers.ofByteArray(encoded),"application/json")}
-            check(FileInventory.snapshot(serverDir(id))==snapshot) {"전송 대기 중 원본이 변경됐습니다. 원본 파일을 보존하고 확인하세요"}
+            check(FileInventory.snapshot(source)==snapshot) {"전송 대기 중 원본이 변경됐습니다. 원본 파일을 보존하고 확인하세요"}
             val plan=mapper.readValue<RunnerTransferPlan>(response.body())
-            if(request==null)atomicText(instanceRoot(id).resolve("upload.pending"),plan.transferId)
+            if(request==null)atomicText(receiptRoot.resolve("upload.pending"),plan.transferId)
             val total=if(plan.totalFiles>0)plan.totalBytes else plan.changedFiles.sumOf {files.getValue(it).size};val totalFiles=if(plan.totalFiles>0)plan.totalFiles else plan.changedFiles.size
             var uploaded=plan.completedBytes;var completed=plan.completedFiles
             val progressLock=Any()
@@ -1036,13 +1112,13 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                 if(fast && group.all {files.getValue(it).size<=TransferBatch.SMALL_FILE}) {
                     val parts=group.map {path->
                         val offset=plan.offsets[path] ?: 0L
-                        FileInventory.safePath(serverDir(id),path).inputStream().use {input->input.skipNBytes(offset);TransferPart(path,offset,input.readNBytes(TransferBatch.SMALL_FILE+1))}
+                        FileInventory.safePath(source,path).inputStream().use {input->input.skipNBytes(offset);TransferPart(path,offset,input.readNBytes(TransferBatch.SMALL_FILE+1))}
                     }
                     updateCheckpoint()
                     transferResponse(http("PUT","/api/runners/transfer/$id/batch?transferId=${plan.transferId}",HttpRequest.BodyPublishers.ofByteArray(TransferBatch.encode(parts)),"application/octet-stream"),"묶음 전송 대기")
                     advanced(parts.sumOf {it.bytes.size.toLong()},parts.size)
                 } else group.forEach {path->
-                    val file=FileInventory.safePath(serverDir(id),path)
+                    val file=FileInventory.safePath(source,path)
                     file.inputStream().use {input->
                         var offset=plan.offsets[path] ?: 0L
                         require(offset in 0..files.getValue(path).size);input.skipNBytes(offset)
@@ -1055,14 +1131,14 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             }
             if(request!=null) {
                 folders.checkWorldStopped(id)
-                check(FileInventory.snapshot(serverDir(id))==snapshot) { "가져오는 동안 원래 파일이 변경됐습니다. 중앙 파일은 교체하지 않았습니다. 서버가 정지됐는지 확인하고 다시 시도하세요" }
+                check(FileInventory.snapshot(source)==snapshot) { "가져오는 동안 원래 파일이 변경됐습니다. 중앙 파일은 교체하지 않았습니다. 서버가 정지됐는지 확인하고 다시 시도하세요" }
             }
             progress(FolderImportProgress("VERIFYING",completed,uploaded,totalFiles,total,"관리 서버에서 해시 검증·반영 중입니다. 대용량 폴더는 시간이 걸릴 수 있습니다"),true)
             awaitTransfer(id,"서버 파일 반영 확인 대기",{
                 progress(FolderImportProgress("VERIFYING",completed,uploaded,totalFiles,total,"중앙 검증·반영 중 · 받은 파일은 재전송하지 않습니다"))
             }) {http("POST",protocolPath("/api/runners/transfer/$id/commit?transferId=${plan.transferId}"))}
-            instanceRoot(id).resolve("upload.pending").deleteIfExists()
-            if(diagnosticRoot(id)==null)folders.published(id,manifest)
+            if(generation==null)receiptRoot.resolve("upload.pending").deleteIfExists()
+            if(generation==null && diagnosticRoot(id)==null)folders.published(id,manifest)
     }
     private fun stop(id:String):Boolean=synchronized(lifecycle) {
         val process=processes[id] ?: return false
@@ -1118,6 +1194,10 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             uptimeSeconds=sample.uptimeSeconds,playerCount=players?.count,players=players?.names))
     }
     private fun recoverStates() {
+        home.resolve("instances").takeIf {it.exists()}?.listDirectoryEntries()?.filter {it.isDirectory() && it.resolve("stopped-snapshots").isDirectory()}?.forEach {dir->
+            if(snapshots(dir.name).list().isNotEmpty())workers.submit {uploadSnapshots(dir.name)}
+        }
+
         processes.forEach { (id,process)->report(id,process) }
         home.resolve("instances").takeIf { it.exists() }?.let { root -> Files.list(root).use { dirs -> dirs.filter { it.isDirectory() && it.resolve("dirty").exists() && processes[it.fileName.toString()]?.isAlive!=true }.forEach { dir ->
             val id=dir.fileName.toString()

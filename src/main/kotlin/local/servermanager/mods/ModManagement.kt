@@ -25,10 +25,12 @@ data class ModDiagnostic(val id:String,val snapshot:ModInventorySnapshot,val pla
 data class ModVerdict(val trial:Int,val verdict:String,val note:String="")
 data class ModJob(val phase:String,val message:String,val files:Int=0,val bytes:Long=0)
 data class ModDiagnosticView(val id:String,val phase:String,val round:Int,val plan:ModSearchPlan,val trials:List<ModTrial>,val findings:List<List<String>>,val error:String?)
-data class ModPage(val inventory:ModInventorySnapshot?,val inventoryRevision:String?,val job:ModJob?,val diagnostic:ModDiagnosticView?,val next:SearchStep?,val active:Boolean)
+data class ModPage(val inventory:ModInventorySnapshot?,val inventoryRevision:String?,val job:ModJob?,val diagnostic:ModDiagnosticView?,val next:SearchStep?,val active:Boolean,val remote:Boolean=false,val editable:Boolean=false)
 
 @Service
 class ModManagement(private val manager:ServerManager,private val catalog:ModrinthCatalog) {
+    private val remote=RemoteFiles(manager)
+    private fun onRunner(id:String)=manager.instance(id).runnerId!=null
     private val mapper=jacksonObjectMapper()
     private val executor=Executors.newFixedThreadPool(2)
     private val locks=ConcurrentHashMap<String,Any>()
@@ -51,7 +53,7 @@ class ModManagement(private val manager:ServerManager,private val catalog:Modrin
     private fun save(id:String,s:ModDiagnostic){val json=mapper.writeValueAsString(s);require(json.toByteArray().size<16*1024*1024) {"검사 이력이 너무 큽니다. 현재 검사를 종료하세요"};atomicText(stateFile(id),json);sessions[id]=s;published[id]=mapper.readValue(json)}
     private fun root(id:String,s:ModDiagnostic)=base(id).resolve("diagnostics").resolve(s.id)
     private fun loader(id:String)=manager.instance(id).loader.lowercase().also {require(it in setOf("fabric","forge","neoforge")) {"Fabric·Forge·NeoForge 모드 서버에서 사용할 수 있습니다"}}
-    private fun files(id:String,onProgress:(Int,Long)->Unit={_,_->})=ModInventory.scan(manager.originalServerDir(id).resolve("mods").also {loader(id)},onProgress=onProgress)
+    private fun files(id:String,onProgress:(Int,Long)->Unit={_,_->}):ModInventorySnapshot {loader(id);return if(onRunner(id))remote.mods(id) else ModInventory.scan(manager.originalServerDir(id).resolve("mods"),onProgress=onProgress)}
     /** Dependencies are fetched from Modrinth once per file hash and saved with the server. */
     private fun scan(id:String,retryMissing:Boolean=false,publishRaw:Boolean=false):ModInventorySnapshot {
         val snapshot=files(id)
@@ -64,7 +66,7 @@ class ModManagement(private val manager:ServerManager,private val catalog:Modrin
         val s=published[id] ?: if(sessions[id]!=null)null else locked(id){session(id)?.let {mapper.readValue<ModDiagnostic>(mapper.writeValueAsString(it)).also {copy->published[id]=copy}}}
         val inventory=inventories[id] ?: s?.snapshot
         val view=s?.let {ModDiagnosticView(it.id,it.phase,it.round,it.plan,it.trials,it.findings,it.error)}
-        return ModPage(if(includeInventory)inventory else null,inventory?.let {inventoryTokens.computeIfAbsent(id){java.util.UUID.randomUUID().toString()}},jobs[id],view,s?.let {next(it)},manager.runtime(id).diagnosticActive)
+        return ModPage(if(includeInventory)inventory else null,inventory?.let {inventoryTokens.computeIfAbsent(id){java.util.UUID.randomUUID().toString()}},jobs[id],view,s?.let {next(it)},manager.runtime(id).diagnosticActive,onRunner(id),if(onRunner(id))remote.available(id) else !manager.modsViewOnly(id))
     }
     private fun next(s:ModDiagnostic):SearchStep {
         val all=s.plan.groups.map {it.id}-s.excluded.toSet()
@@ -82,9 +84,16 @@ class ModManagement(private val manager:ServerManager,private val catalog:Modrin
             finally {manager.releaseMods(id)}
         }} catch(e:Exception){manager.releaseMods(id);throw e}
     }
+    private fun editJob(id:String,action:()->Unit) {
+        if(!onRunner(id)){job(id,action=action);return}
+        check(jobs[id]?.phase !in setOf("WORKING","VERIFYING","APPLYING","REFRESHING")) {"다른 모드 작업이 진행 중입니다"}
+        check(remote.available(id)) {"원격 모드 변경에는 실행기 업데이트가 필요합니다"}
+        jobs[id]=ModJob("WORKING","원격 모드 파일을 확인합니다")
+        executor.submit {try {action();jobs[id]=ModJob("COMPLETE","실행기 원본에 반영했습니다 · 실행 중 모드는 다음 시작부터 적용")}catch(e:Exception){jobs[id]=ModJob("FAILED",e.message?.take(500) ?: "원격 모드 작업 실패")}}
+    }
     fun refresh(id:String)=locked(id) {
         loader(id)
-        if(manager.modsViewOnly(id))viewJob(id) else job(id,manager.runtime(id).diagnosticActive){publishInventory(id,scan(id,true,true))}
+        if(onRunner(id) || manager.modsViewOnly(id))viewJob(id) else job(id,manager.runtime(id).diagnosticActive){publishInventory(id,scan(id,true,true))}
     }
     /** Read-only listing while the server is busy: nothing is reserved, so every edit stays blocked by the normal reservation checks. */
     private fun viewJob(id:String) {
@@ -98,7 +107,7 @@ class ModManagement(private val manager:ServerManager,private val catalog:Modrin
     fun link(id:String,req:ModLinkRequest)=locked(id) {
         check(!manager.runtime(id).diagnosticActive) {"진행 중인 검사를 먼저 종료하세요"}
         val snapshot=inventory(id,req.revision);require(snapshot.mods.any {it.filename==req.filename})
-        job(id) {
+        editJob(id) {
             check(files(id).revision==req.revision) {"모드 파일이 변경되었습니다"}
             catalog.link(base(id).resolve("mod-sources.json"),snapshot,req.filename,req.link)
             publishInventory(id,scan(id))
@@ -122,12 +131,18 @@ class ModManagement(private val manager:ServerManager,private val catalog:Modrin
     }
     fun toggle(id:String,req:ModSelection)=locked(id) {
         val preview=preview(id,req)
-        job(id) {
+        editJob(id) {
             jobs[id]=ModJob("VERIFYING","변경된 모드 파일을 확인합니다")
             val fresh=files(id){count,bytes->jobs[id]=ModJob("VERIFYING","모드 변경 여부를 확인합니다 · 변경 없는 파일은 저장된 해시 재사용",count,bytes)}
             check(fresh.revision==req.revision) {"검사 후 파일이 변경됐습니다. 다시 불러오세요"}
             val changes=preview.affected.associateWith {if(req.enabled)it.dropLast(9) else "$it.disabled"}
             check(changes.values.none {target->fresh.mods.any {it.filename.equals(target,true)}}) {"같은 이름의 파일이 이미 있어 변경할 수 없습니다"}
+            if(onRunner(id)) {
+                jobs[id]=ModJob("APPLYING","실행기의 실제 모드 파일을 변경합니다 · 다음 서버 시작부터 적용")
+                remote.toggleMods(id,req.copy(files=preview.affected.toSet()))
+                publishInventory(id,ModInventory.attach(files(id),ModSourceLookup(ModSources.load(base(id).resolve("mod-sources.json")),emptyList())))
+                return@editJob
+            }
             val guard=base(id).resolve("import.pending");check(!guard.exists());atomicText(guard,"mod-toggle")
             try {
                 jobs[id]=ModJob("APPLYING","선택한 모드 ${changes.size}개의 상태와 복구 기록을 반영합니다")
@@ -142,6 +157,7 @@ class ModManagement(private val manager:ServerManager,private val catalog:Modrin
         }
     }
     fun create(id:String,req:ModSearchRequest)=locked(id) {
+        check(!onRunner(id)) {"원격 모드 켜기·끄기는 지원합니다. 격리 원인 검사는 원격 복사본 검증 지원 후 사용할 수 있습니다"}
         require(session(id)?.phase in setOf(null,"FINISHED")) {"기존 검사를 재개하거나 종료하세요"}
         val snapshot=inventory(id,req.revision);val plan=ModGraph(snapshot).plan(req.suspects,req.keep)
         job(id) {

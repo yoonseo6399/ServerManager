@@ -9,7 +9,7 @@ type Mod={filename:string;enabled:boolean;size:number;sha256:string;warning:stri
 type Snapshot={revision:string;mods:Mod[];warnings:string[];dependencyFiles:string[];dependencyReasons:Record<string,string[]>;blockedReasons?:Record<string,string>;missing?:Record<string,string[]>;projects?:Record<string,{id:string;slug:string;title:string}>};
 type Trial={number:number;round:number;groups:string[];disabled:string[];started:boolean;verdict:string|null;note:string;createdAt:string};
 type Session={id:string;phase:string;round:number;error:string|null;plan:{groups:{id:string;files:string[]}[];fixed:string[];protectedSuspects:string[]};trials:Trial[];findings:string[][]};
-type Page={inventoryRevision:string|null;inventory:Snapshot|null;job:{phase:string;message:string;files:number;bytes:number}|null;diagnostic:Session|null;next:{status:string;groups:string[];message:string}|null;active:boolean};
+type Page={remote?:boolean;editable?:boolean;inventoryRevision:string|null;inventory:Snapshot|null;job:{phase:string;message:string;files:number;bytes:number}|null;diagnostic:Session|null;next:{status:string;groups:string[];message:string}|null;active:boolean};
 type Preview={revision:string;enabled:boolean;selected:string[];affected:string[];warnings?:string[];ignoreDependencies?:boolean};
 type Filter='all'|'enabled'|'disabled'|'missing'|'unknown'|'client';
 const verdictLabel:Record<string,string>={PASS:'성공 · 문제 없음',FAIL:'실패 · 원래 문제 재현',INVALID:'판정 불가'};
@@ -31,7 +31,7 @@ export function ModsPanel({id,loader,state,canManage,onChanged,onConsole}:{id:st
  const running=busyStates.includes(state),stopped=!running;
  const wasRunning=useRef(running);
  useEffect(()=>{if(wasRunning.current&&!running&&canManage&&inv&&!working)api(endpoint+'/refresh','POST').then(()=>load()).catch(e=>setError(e.message));wasRunning.current=running;},[running]);
- const locked=working||running||!canManage||!!data?.active;
+ const locked=working||(!data?.editable&&running)||!!data?.remote&&!data?.editable||!canManage||!!data?.active;
  const dependencies=new Set(inv?.dependencyFiles||[]);
  const mods=inv?.mods||[],missing=inv?.missing||{};
  const matches:Record<Filter,(m:Mod)=>boolean>={all:()=>true,enabled:m=>m.enabled,disabled:m=>!m.enabled,missing:m=>!!missing[m.filename]?.length,unknown:m=>!m.source,client:m=>!!m.source?.clientOnly};
@@ -48,7 +48,7 @@ export function ModsPanel({id,loader,state,canManage,onChanged,onConsole}:{id:st
  if(!['Fabric','Forge','NeoForge'].includes(loader))return <section className="settings-panel"><h2>모드 관리</h2><p>Fabric·Forge·NeoForge 서버에서 사용할 수 있습니다.</p></section>;
  return <section className="mods-panel">
   <div className="mods-heading"><div><h2>모드 관리와 문제 모드 찾기</h2><p>Modrinth에서 확인한 의존성으로 모드를 켜고 끄고, 의심 모드를 골라 문제 원인을 좁혀보세요.</p></div></div>
-  {running&&<p className="notice" role="status">서버가 실행 중이라 모드를 볼 수만 있습니다. 변경하려면 서버를 정지하세요.</p>}
+  {data?.remote?<p className="notice" role="status">실행기의 실제 mods 폴더를 관리합니다. 실행·전송 중에도 변경할 수 있으며 적용은 다음 서버 시작부터입니다.</p>:running&&<p className="notice" role="status">로컬 서버 실행 중에는 조회만 가능합니다.</p>}
   {error&&<div className="alert error-banner" role="alert">{error}<button onClick={()=>setError('')}>닫기</button></div>}
   {blockedToggle&&<div className="mod-force-notice" role="alert"><span>{blockedToggle.enabled?'활성화':'비활성화'} 불가 · {blockedToggle.reason}</span><button className="mod-force" disabled={locked||blockedToggle.revision!==inv?.revision} onClick={()=>requestPreview(blockedToggle.files,blockedToggle.enabled,true)}>{blockedToggle.enabled?'의존성 무시하고 그냥 켜기':'의존성 무시하고 강제로 끄기'}</button><button onClick={()=>setBlockedToggle(null)}>닫기</button></div>}
   <div className="actions"><button disabled={working||!canManage} onClick={()=>action('/refresh')}>모드 목록 다시 불러오기</button></div>
@@ -89,11 +89,11 @@ export function ModsPanel({id,loader,state,canManage,onChanged,onConsole}:{id:st
      <div className="actions">
       <button disabled={locked||!selectedEnabled.length} onClick={()=>requestPreview(selectedEnabled,false)}><PowerOff size={15}/> 선택 비활성화{selectedEnabled.length?` (${selectedEnabled.length})`:''}</button>
       <button disabled={locked||!selectedDisabled.length} onClick={()=>requestPreview(selectedDisabled,true)}><Power size={15}/> 선택 활성화{selectedDisabled.length?` (${selectedDisabled.length})`:''}</button>
-      <button className="primary" disabled={locked||!suspects.size||!!session&&session.phase!=='FINISHED'} onClick={()=>action('/diagnostic',{revision:inv.revision,suspects:[...suspects],keep:[...keep]})}><FlaskConical size={16}/> 의심 {suspects.size}개에서 문제 찾기</button>
+      <button className="primary" disabled={locked||running||!!data?.remote||!suspects.size||!!session&&session.phase!=='FINISHED'} onClick={()=>action('/diagnostic',{revision:inv.revision,suspects:[...suspects],keep:[...keep]})}><FlaskConical size={16}/> 의심 {suspects.size}개에서 문제 찾기</button>
       <button disabled={working||!(selected.size||suspects.size||keep.size)} onClick={()=>{setSuspects(new Set());setKeep(new Set());setSelected(new Set());}}>선택 초기화</button>
      </div>
     </div>
-    {running&&<p className="muted" role="status">서버 실행·인계 중에는 모드 목록 갱신과 변경이 잠깁니다.</p>}
+    {data?.remote&&!data.editable&&<p className="muted" role="status">원격 모드 변경을 지원하는 실행기를 온라인으로 연결하세요.</p>}
     <div className="mod-list">{visible.map(m=>{const s=m.source,required=dependencies.has(m.filename),blocked=inv.blockedReasons?.[m.filename]||(required?`필수 의존성입니다. 사용 중: ${(inv.dependencyReasons?.[m.filename]||[]).join(', ')}`:null),users=inv.dependencyReasons?.[m.filename]||[],missing=inv.missing?.[m.filename]||[],needs=(s?.dependencies||[]).filter(d=>d.type==='required');return <article key={m.filename} className={'mod-card'+(m.enabled?'':' off')+(selected.has(m.filename)?' selected':'')}>
      <input className="mod-card-check" aria-label={`${m.filename} 선택`} type="checkbox" disabled={locked} checked={selected.has(m.filename)} onChange={e=>change(setSelected,m.filename,e.target.checked)}/>
      {s?.iconUrl?<img className="mod-icon" src={s.iconUrl} alt="" loading="lazy" referrerPolicy="no-referrer"/>:<div className="mod-icon placeholder" aria-hidden="true">{(s?.title||m.filename).slice(0,1).toUpperCase()}</div>}
