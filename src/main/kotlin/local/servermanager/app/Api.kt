@@ -86,12 +86,14 @@ class Api(private val manager: ServerManager,private val accounts:AuthStore,priv
         val body=org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody {out->if(remote)remoteFiles.download(id,path,out) else local!!.inputStream().use {it.copyTo(out,64*1024)}}
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_OCTET_STREAM).contentLength(size).header(HttpHeaders.CONTENT_DISPOSITION,org.springframework.http.ContentDisposition.attachment().filename(Path.of(path).fileName.toString(),Charsets.UTF_8).build().toString()).body(body)
     }
-    @GetMapping("/instances/{id}/logs") fun logs(@PathVariable id: String): ResponseEntity<FileSystemResource> {
+    @GetMapping("/instances/{id}/logs") fun logs(@PathVariable id:String):ResponseEntity<org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody> {
         manager.instance(id)
-        val file=manager.root.resolve(id).resolve("console.log")
-        require(file.exists()) { "아직 로그가 없습니다" }
-        return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).header(HttpHeaders.CONTENT_DISPOSITION,"attachment; filename=console.log").body(FileSystemResource(file))
+        val remote=remoteFiles.remote(id)
+        val local=if(remote)null else LogFiles(manager.profileDir(id)).file("console.log")
+        val body=org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody {out->if(remote)remoteFiles.download(id,"console.log",out,log=true) else local!!.inputStream().use {it.copyTo(out)}}
+        return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).header(HttpHeaders.CONTENT_DISPOSITION,"attachment; filename=console.log").body(body)
     }
+
 }
 
 @RestControllerAdvice

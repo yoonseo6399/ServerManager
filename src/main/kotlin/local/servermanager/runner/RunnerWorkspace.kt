@@ -57,7 +57,7 @@ class RunnerWorkspace(private val base:Path,private val history:Path,private val
     fun matches(directory:Path)=base==directory
     @Synchronized fun busy()=uploads.values.any {System.currentTimeMillis()-it.at<=15*60*1000}
     @Synchronized fun execute(req:WorkspaceRequest):Any {
-        val readOnly=req.op in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW","MOD_SCAN")
+        val readOnly=req.op in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW","LOG_STAT","LOG_READ","MOD_SCAN")
         if(!readOnly){stopped();beforeMutation(req.mutationToken)}
         uploads.entries.removeIf { (_,u)->if(System.currentTimeMillis()-u.at>15*60*1000){u.temporary.deleteIfExists();true}else false }
         if(!readOnly)recover()
@@ -78,6 +78,15 @@ class RunnerWorkspace(private val base:Path,private val history:Path,private val
                 val changes=selection.files.associateWith {if(selection.enabled)it.dropLast(9) else "$it.disabled"}
                 require(changes.values.none {to->snapshot.mods.any {it.filename.equals(to,true)}}) {"같은 이름의 모드가 이미 있습니다"}
                 ModFiles.rename(directory,changes,history.resolve("mod-backups"));modListing=null;emptyMap<String,String>()
+            }
+            "LOG_STAT" -> {val file=LogFiles(logDirectory,base).file(req.path);mapOf("size" to file.fileSize(),"revision" to revision(file))}
+            "LOG_READ" -> {
+                val file=LogFiles(logDirectory,base).file(req.path);val rev=revision(file)
+                check(req.revision==null || req.revision==rev) {"로그 파일이 변경되었습니다. 다시 다운로드하세요"}
+                require(req.offset in 0..file.fileSize())
+                val bytes=Files.newInputStream(file,LinkOption.NOFOLLOW_LINKS).use {it.skipNBytes(req.offset);it.readNBytes(CHUNK)}
+                check(revision(file)==rev) {"로그 파일이 변경되었습니다. 다시 다운로드하세요"}
+                mapOf("data" to java.util.Base64.getEncoder().encodeToString(bytes),"revision" to rev)
             }
             "LOG_LIST" -> LogFiles(logDirectory,base).list()
             "LOG_PAGE" -> LogFiles(logDirectory,base).page(req.path,req.offset,100,req.revision)

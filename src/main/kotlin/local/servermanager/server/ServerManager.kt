@@ -216,7 +216,7 @@ class ServerManager {
     fun remoteWorkspace(id:String,request:WorkspaceRequest):com.fasterxml.jackson.databind.JsonNode {
         val i=instance(id);check(i.runnerId!=null) {"실행기를 선택하세요"}
         check(!i.syncEnabled() || remoteController?.supportsLiveFiles(i)==true) {"원격 파일·모드 관리에는 실행기를 새 버전으로 업데이트하세요"}
-        return (remoteController ?: error("실행기 연결이 없습니다")).workspace(i.copy(),request.copy(config=i.copy(),mutationToken=if(liveFilesAvailable(id) && request.op !in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW","MOD_SCAN"))root.resolve(id).resolve("runner-edits.pending").takeIf {it.exists()}?.readText() else null))
+        return (remoteController ?: error("실행기 연결이 없습니다")).workspace(i.copy(),request.copy(config=i.copy(),mutationToken=if(liveFilesAvailable(id) && request.op !in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW","LOG_STAT","LOG_READ","MOD_SCAN"))root.resolve(id).resolve("runner-edits.pending").takeIf {it.exists()}?.readText() else null))
     }
     @Synchronized fun setFileSync(id:String,enabled:Boolean):Map<String,Any?> {
         val r=runtime(id);synchronized(r){
@@ -248,7 +248,7 @@ class ServerManager {
     }
     fun view(id: String): Map<String, Any?> {
         val i = instance(id); val r = runtime(id)
-        val result=synchronized(r) { mapOf("config" to i.copy(), "state" to r.state, "pid" to (if(i.runnerId!=null) r.remotePid else r.process?.takeIf { it.isAlive }?.pid()), "resources" to r.resources?.takeIf { (i.runnerId!=null || r.process?.isAlive == true) && (i.runnerId!=null || it.pid == r.process?.pid()) }, "players" to r.players?.takeIf { r.state=="RUNNING" && java.time.Duration.between(Instant.parse(it.sampledAt),Instant.now()).seconds<30 }, "directory" to (if(i.syncEnabled())serverDir(id).toString() else r.folderSource?.get("path") ?: "현재 실행기의 원본 서버 폴더"), "eulaAccepted" to eulaAccepted(id),"activityVersion" to r.activityVersion,"diagnosticActive" to r.diagnosticActive,"modBusy" to (r.modBusy||r.remoteFileBusy),"liveFiles" to liveFilesAvailable(id),"backgroundSync" to backgroundPending(id)) }
+        val result=synchronized(r) { mapOf("config" to i.copy(), "state" to r.state, "pid" to (if(i.runnerId!=null) r.remotePid else r.process?.takeIf { it.isAlive }?.pid()), "resources" to r.resources?.takeIf { (i.runnerId!=null || r.process?.isAlive == true) && (i.runnerId!=null || it.pid == r.process?.pid()) }, "players" to r.players?.takeIf { r.state=="RUNNING" && java.time.Duration.between(Instant.parse(it.sampledAt),Instant.now()).seconds<30 }, "directory" to (if(i.runnerId==null)serverDir(id).toString() else r.folderSource?.get("path") ?: "현재 실행기의 원본 서버 폴더"), "eulaAccepted" to eulaAccepted(id),"activityVersion" to r.activityVersion,"diagnosticActive" to r.diagnosticActive,"modBusy" to (r.modBusy||r.remoteFileBusy),"liveFiles" to liveFilesAvailable(id),"backgroundSync" to backgroundPending(id)) }
         val transfer=synchronized(r) {mapOf("folderSource" to r.folderSource,"folderImport" to r.folderImport?.let(r.transferMeter::view),"fileTransfer" to r.fileTransfer?.let(r.transferMeter::view))}
         return result+transfer+mapOf("shutdownWatchdog" to (r.stopMonitor?.status() ?: r.remoteStopProgress),"forceStopSupported" to (i.runnerId==null || remoteController?.supportsForceStop(i)==true),"playerQueryMessage" to r.playerQueryMessage?.takeIf {r.state=="RUNNING"},"sableUdp" to remoteController?.sableStatus(i),"powerSaving" to powerStatus?.invoke(id),"autoRestart" to autoRestartStatus?.invoke(id))
     }
@@ -428,7 +428,8 @@ class ServerManager {
         require(instance(id).runnerId==runner && instance(id).syncEnabled() && ready.exit?.crashReport.let {it==null || CrashReports.validName(it)})
         require(StoppedSnapshots.valid(ready.generation));val r=runtime(id)
         synchronized(r) {
-            val old=snapshotSync(id) ?: SnapshotSync(runner);check(old.runner==runner)
+            val stored=snapshotSync(id);check(stored==null || stored.runner==runner || stored.pending.isEmpty())
+            val old=stored?.takeIf {it.runner==runner} ?: SnapshotSync(runner)
             if(ready.generation in old.seen)return
             val token=root.resolve(id).resolve("remote-run")
             check(if(ready.editOnly) {

@@ -37,6 +37,7 @@ class LogFiles(private val directory: Path,private val serverDirectory:Path=dire
         require(Files.isRegularFile(p,LinkOption.NOFOLLOW_LINKS)) { "로그 파일이 없습니다" }
         return p
     }
+    fun file(name:String):Path=resolve(name)
     fun list():List<Entry> {
         val names=mutableListOf("console.log")
         for(sub in listOf("server/logs","server/crash-reports")) {

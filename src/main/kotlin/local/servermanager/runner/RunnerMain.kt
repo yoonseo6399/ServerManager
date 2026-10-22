@@ -710,12 +710,13 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         val response=try {
             val request=mapper.readValue<WorkspaceRequest>(raw);val instance=request.config
             require(instance.id==id && instance.runnerId==identity.id && instance.diagnosticSession==null)
-            val readOnly=request.op in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW","MOD_SCAN")
+            val readOnly=request.op in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW","LOG_STAT","LOG_READ","MOD_SCAN")
             fun execute():RunnerMessage {
                 updateCheckpoint()
                 check(!instanceRoot(id).resolve("folder-import.pending").exists()) {"최초 폴더 가져오기를 완료하세요"}
                 // Never replace an active game's config with a stale read request.
                 configs.putIfAbsent(id,instance);instanceRoot(id).createDirectories();serverDir(id).createDirectories()
+                if(!readOnly && !instanceRoot(id).resolve("instance.json").exists())atomicText(instanceRoot(id).resolve("instance.json"),mapper.writeValueAsString(configs.getValue(id)))
                 val result=mapper.writeValueAsString(workspaceService(id).execute(request));require(result.length<=200*1024)
                 return RunnerMessage("workspace-result",id,"OK",token=requestId,detail=result)
             }
