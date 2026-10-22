@@ -31,10 +31,10 @@ class ModGraph(snapshot:ModInventorySnapshot) {
         while(pending.isNotEmpty())requirements.getValue(pending.removeFirst()).forEach {if(result.add(it))pending.add(it)}
         return result
     }
-    fun disable(files:Set<String>):Set<String> {
+    fun disable(files:Set<String>,ignoreDependencies:Boolean=false):Set<String> {
         require(files.isNotEmpty() && files.all {it in active}) {"비활성화할 활성 모드를 선택하세요"}
         val blocked=files.intersect(dependencyFiles)
-        require(blocked.isEmpty()) {"필수 의존성 모드는 비활성화할 수 없습니다: "+blocked.sorted().joinToString(" · "){"$it (사용 중: ${dependencyReasons.getValue(it).joinToString()})"}}
+        if(!ignoreDependencies && blocked.isNotEmpty())throw ModDependencyBlocked("필수 의존성 모드는 비활성화할 수 없습니다: "+blocked.sorted().joinToString(" · "){"$it (사용 중: ${dependencyReasons.getValue(it).joinToString()})"})
         // Mods Modrinth could not identify only produce a warning; their own dependencies are simply unknown.
         // Unrelated pre-existing missing dependencies must not prevent removing a leaf mod.
         return files

@@ -107,9 +107,16 @@ class ModManagement(private val manager:ServerManager,private val catalog:Modrin
     fun preview(id:String,req:ModSelection):ModTogglePreview=locked(id) {
         check(!manager.runtime(id).diagnosticActive) {"진행 중인 검사를 먼저 중단하세요"}
         val snapshot=inventory(id,req.revision);require(req.files.isNotEmpty())
-        require(!req.ignoreDependencies || req.enabled) {"의존성 무시는 활성화할 때만 사용할 수 있습니다"}
         val graph=ModGraph(snapshot)
-        val (files,warnings)=if(!req.enabled)graph.disable(req.files) to (graph.unknown-req.files).sorted().let {u->if(u.isEmpty())emptyList() else listOf("Modrinth에서 찾지 못한 모드 ${u.size}개는 의존성을 확인하지 못해, 이 변경이 그 모드에 영향을 줄 수 있습니다: "+u.take(8).joinToString())}
+        val (files,warnings)=if(!req.enabled)graph.disable(req.files,req.ignoreDependencies) to buildList {
+            if(req.ignoreDependencies) {
+                add("의존성 검사를 무시하고 선택한 모드만 강제로 끕니다. 이 모드를 필요로 하는 다른 모드는 그대로 유지되므로 서버가 시작되지 않거나 충돌할 수 있습니다.")
+                val users=req.files.flatMap {graph.dependencyReasons[it].orEmpty()}.toSet()-req.files
+                if(users.isNotEmpty())add("필수 의존성이 없어지는 모드: "+users.sorted().joinToString())
+            }
+            val unknown=(graph.unknown-req.files).sorted()
+            if(unknown.isNotEmpty())add("Modrinth에서 찾지 못한 모드 ${unknown.size}개는 의존성을 확인하지 못해, 이 변경이 그 모드에 영향을 줄 수 있습니다: "+unknown.take(8).joinToString())
+        }
             else ModGraph.enable(snapshot,req.files,req.ignoreDependencies)
         ModTogglePreview(req.revision,req.enabled,req.files.sorted(),files.sorted(),warnings,req.ignoreDependencies)
     }
