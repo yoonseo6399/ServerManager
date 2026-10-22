@@ -19,7 +19,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import kotlin.io.path.*
 
-data class Instance(val id: String, var name: String, val loader: String = "NeoForge", val minecraft: String = "1.21.1", var loaderVersion: String, var port: Int, var memoryMb: Int, var javaPath: String, var runnerId:String?=null, @get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) val diagnosticSession:String?=null, @get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) val fileSyncEnabled:Boolean?=null) {fun syncEnabled()=fileSyncEnabled!=false}
+data class Instance(val id: String, var name: String, val loader: String = "NeoForge", val minecraft: String = "1.21.1", var loaderVersion: String, var port: Int, var memoryMb: Int, var javaPath: String, var runnerId:String?=null, @get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) val diagnosticSession:String?=null, @get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) val fileSyncEnabled:Boolean?=null, @get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) val runToken:String?=null) {fun syncEnabled()=fileSyncEnabled!=false}
 data class CreateRequest(val name: String, val loaderVersion: String, val port: Int = 25565, val memoryMb: Int = 2048, val javaPath: String = System.getProperty("java.home") + "/bin/java", val loader:String="NeoForge",val minecraft:String="1.21.1")
 data class Event(val seq: Long, val time: String, val kind: String, val text: String)
 data class FileEntry(val name: String, val path: String, val directory: Boolean, val size: Long)
@@ -28,6 +28,7 @@ data class ServerSignal(val instanceId:String, val kind:String, val detail:Strin
 interface RemoteController {
     fun workspace(instance:Instance,request:WorkspaceRequest):com.fasterxml.jackson.databind.JsonNode {error("실행기를 업데이트하세요")}
     fun supportsWorkspace(instance:Instance):Boolean=false
+    fun supportsLiveFiles(instance:Instance):Boolean=false
     fun install(instance:Instance,requestId:String) {error("실행기를 업데이트하세요")}
     fun start(instance:Instance)
     fun stop(instance:Instance)
@@ -202,12 +203,20 @@ class ServerManager {
     }
     fun <T> withRemoteFiles(id:String,write:Boolean=true,action:()->T):T {
         val r=runtime(id)
-        synchronized(r){if(write)checkIdle(r) else {check(!r.remoteFileBusy) {"다른 파일 요청을 처리 중입니다"};checkTransferReady(id)};r.remoteFileBusy=true}
+        synchronized(r){
+            check(!r.remoteFileBusy && !r.modBusy && !r.recoveringFiles && !r.diagnosticActive) {"다른 파일 작업 또는 복구가 진행 중입니다"}
+            check(r.state !in setOf("DELETED","INSTALLING","IMPORTING")) {"설치·가져오기가 끝난 뒤 변경하세요"}
+            check(!folderImportMarker(id).exists()) {"최초 폴더 가져오기가 진행 중입니다"}
+            r.remoteFileBusy=true
+            if(write && instance(id).syncEnabled())atomicText(root.resolve(id).resolve("runner-edits.pending"),UUID.randomUUID().toString())
+        }
         try{return action()}finally{r.remoteFileBusy=false}
     }
+    fun liveFilesAvailable(id:String)=instance(id).runnerId!=null && remoteController?.supportsLiveFiles(instance(id))==true
     fun remoteWorkspace(id:String,request:WorkspaceRequest):com.fasterxml.jackson.databind.JsonNode {
-        val i=instance(id);check(!i.syncEnabled() && i.runnerId!=null) {"동기화 OFF 서버의 실행기 파일만 직접 접근할 수 있습니다"}
-        return (remoteController ?: error("실행기 연결이 없습니다")).workspace(i.copy(),request.copy(config=i.copy()))
+        val i=instance(id);check(i.runnerId!=null) {"실행기를 선택하세요"}
+        check(!i.syncEnabled() || remoteController?.supportsLiveFiles(i)==true) {"원격 파일·모드 관리에는 실행기를 새 버전으로 업데이트하세요"}
+        return (remoteController ?: error("실행기 연결이 없습니다")).workspace(i.copy(),request.copy(config=i.copy(),mutationToken=if(liveFilesAvailable(id) && request.op !in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW","MOD_SCAN"))root.resolve(id).resolve("runner-edits.pending").takeIf {it.exists()}?.readText() else null))
     }
     @Synchronized fun setFileSync(id:String,enabled:Boolean):Map<String,Any?> {
         val r=runtime(id);synchronized(r){
@@ -239,7 +248,7 @@ class ServerManager {
     }
     fun view(id: String): Map<String, Any?> {
         val i = instance(id); val r = runtime(id)
-        val result=synchronized(r) { mapOf("config" to i.copy(), "state" to r.state, "pid" to (if(i.runnerId!=null) r.remotePid else r.process?.takeIf { it.isAlive }?.pid()), "resources" to r.resources?.takeIf { (i.runnerId!=null || r.process?.isAlive == true) && (i.runnerId!=null || it.pid == r.process?.pid()) }, "players" to r.players?.takeIf { r.state=="RUNNING" && java.time.Duration.between(Instant.parse(it.sampledAt),Instant.now()).seconds<30 }, "directory" to (if(i.syncEnabled())serverDir(id).toString() else r.folderSource?.get("path") ?: "현재 실행기의 원본 서버 폴더"), "eulaAccepted" to eulaAccepted(id),"activityVersion" to r.activityVersion,"diagnosticActive" to r.diagnosticActive,"modBusy" to (r.modBusy||r.remoteFileBusy)) }
+        val result=synchronized(r) { mapOf("config" to i.copy(), "state" to r.state, "pid" to (if(i.runnerId!=null) r.remotePid else r.process?.takeIf { it.isAlive }?.pid()), "resources" to r.resources?.takeIf { (i.runnerId!=null || r.process?.isAlive == true) && (i.runnerId!=null || it.pid == r.process?.pid()) }, "players" to r.players?.takeIf { r.state=="RUNNING" && java.time.Duration.between(Instant.parse(it.sampledAt),Instant.now()).seconds<30 }, "directory" to (if(i.syncEnabled())serverDir(id).toString() else r.folderSource?.get("path") ?: "현재 실행기의 원본 서버 폴더"), "eulaAccepted" to eulaAccepted(id),"activityVersion" to r.activityVersion,"diagnosticActive" to r.diagnosticActive,"modBusy" to (r.modBusy||r.remoteFileBusy),"liveFiles" to liveFilesAvailable(id),"backgroundSync" to backgroundPending(id)) }
         val transfer=synchronized(r) {mapOf("folderSource" to r.folderSource,"folderImport" to r.folderImport?.let(r.transferMeter::view),"fileTransfer" to r.fileTransfer?.let(r.transferMeter::view))}
         return result+transfer+mapOf("shutdownWatchdog" to (r.stopMonitor?.status() ?: r.remoteStopProgress),"forceStopSupported" to (i.runnerId==null || remoteController?.supportsForceStop(i)==true),"playerQueryMessage" to r.playerQueryMessage?.takeIf {r.state=="RUNNING"},"sableUdp" to remoteController?.sableStatus(i),"powerSaving" to powerStatus?.invoke(id),"autoRestart" to autoRestartStatus?.invoke(id))
     }
@@ -266,7 +275,7 @@ class ServerManager {
             require(req.loaderVersion == i.loaderVersion && req.loader==i.loader && req.minecraft==i.minecraft) { "설치된 로더 버전 변경은 새 인스턴스로 진행하세요" }
             require(remoteController?.sharedGamePort()!=null || instances.values.none { it.id != id && it.port == req.port }) { "다른 인스턴스가 사용하는 포트입니다" }
             i.name=req.name; i.port=req.port; i.memoryMb=req.memoryMb; i.javaPath=req.javaPath
-            if(i.syncEnabled())writeProperties(i); save(i)
+            if(i.syncEnabled() && i.runnerId==null)writeProperties(i); save(i)
         }
         return view(id)
     }
@@ -359,7 +368,7 @@ class ServerManager {
         }
     }
     fun checkTransferReady(id:String) {check(!runtime(id).modBusy) {"모드 작업이 진행 중입니다"};check(!runtime(id).recoveringFiles) {"중단된 파일 반영을 복구하고 있습니다. 완료 후 다시 시도하세요"}}
-    private fun checkIdle(r: RuntimeState,allowDiagnostic:Boolean=false) {check(!r.remoteFileBusy) {"실행기 파일 요청을 처리 중입니다"}; check(!r.modBusy) {"모드 작업이 진행 중입니다"};check(!r.cloudSyncActive) {"클라우드 동기화가 진행 중입니다"};check(allowDiagnostic || !r.diagnosticActive) {"모드 검사 패널에서 먼저 검사를 일시 중단하거나 종료하세요"}; check(!r.recoveringFiles) {"파일 복구가 끝난 뒤 다시 시도하세요"};check(r.state!="DELETED") { "삭제된 서버입니다" }; check(r.process?.isAlive != true && r.state !in listOf("INSTALLING","STARTING","RUNNING","STOPPING","IMPORTING","TRANSFERRING","SYNCING","SYNC_FAILED","UNKNOWN")) { "서버가 실행 중이거나 작업 중입니다" } }
+    private fun checkIdle(r: RuntimeState,allowDiagnostic:Boolean=false,allowBackground:Boolean=false) {if(!allowBackground)check(runtimes.entries.none {it.value===r && backgroundPending(it.key)}) {"종료 복사본 전송 중입니다. 같은 실행기에서 시작·원격 파일 변경은 가능합니다"};check(!r.remoteFileBusy) {"실행기 파일 요청을 처리 중입니다"}; check(!r.modBusy) {"모드 작업이 진행 중입니다"};check(!r.cloudSyncActive) {"클라우드 동기화가 진행 중입니다"};check(allowDiagnostic || !r.diagnosticActive) {"모드 검사 패널에서 먼저 검사를 일시 중단하거나 종료하세요"}; check(!r.recoveringFiles) {"파일 복구가 끝난 뒤 다시 시도하세요"};check(r.state!="DELETED") { "삭제된 서버입니다" }; check(r.process?.isAlive != true && r.state !in listOf("INSTALLING","STARTING","RUNNING","STOPPING","IMPORTING","TRANSFERRING","SYNCING","SYNC_FAILED","UNKNOWN")) { "서버가 실행 중이거나 작업 중입니다" } }
     private fun folderImportMarker(id:String)=root.resolve(id).resolve("folder-import.pending")
     @Synchronized fun importRemoteFolder(id:String,enableSync:Boolean=false) {
         val i=instance(id);val r=runtime(id)
@@ -407,6 +416,55 @@ class ServerManager {
     fun folderImportProgress(id:String,runner:String,request:String,progress:FolderImportProgress) {
         val r=runtime(id);synchronized(r){checkFolderImport(id,runner,request);r.folderImport=progress.validated();r.transferMeter.observe(progress);r.state="IMPORTING"}
     }
+    private fun snapshotState(id:String)=root.resolve(id).resolve("snapshot-sync.json")
+    private data class SnapshotSync(val runner:String,val pending:List<String> = emptyList(),val seen:List<String> = emptyList(),val revisions:Map<String,String?> = emptyMap())
+    private fun snapshotSync(id:String):SnapshotSync?=snapshotState(id).takeIf {it.exists()}?.let {require(!Files.isSymbolicLink(it) && it.fileSize()<1024*1024);mapper.readValue<SnapshotSync>(it.readText())}
+    fun backgroundPending(id:String)=snapshotSync(id)?.pending?.isNotEmpty()==true || root.resolve(id).resolve("runner-edits.pending").exists()
+    fun checkSnapshot(id:String,runner:String,generation:String) {
+        require(StoppedSnapshots.valid(generation));val state=snapshotSync(id)
+        check(state?.runner==runner && state.pending.firstOrNull()==generation) {"종료 복사본의 전송 순서가 다릅니다"}
+    }
+    fun snapshotReady(id:String,runner:String,ready:SnapshotReady) {
+        require(instance(id).runnerId==runner && instance(id).syncEnabled() && ready.exit?.crashReport.let {it==null || CrashReports.validName(it)})
+        require(StoppedSnapshots.valid(ready.generation));val r=runtime(id)
+        synchronized(r) {
+            val old=snapshotSync(id) ?: SnapshotSync(runner);check(old.runner==runner)
+            if(ready.generation in old.seen)return
+            val token=root.resolve(id).resolve("remote-run")
+            check(if(ready.editOnly) {
+                val edits=root.resolve(id).resolve("runner-edits.pending")
+                ready.localRevision!=null && edits.takeIf {it.exists()}?.readText()==ready.localRevision && !root.resolve(id).resolve("remote-lease").exists()
+            } else ready.runToken!=null && token.takeIf {it.exists()}?.readText()==ready.runToken && root.resolve(id).resolve("remote-lease").exists()) {"현재 실행에 해당하는 종료 복사본만 접수합니다"}
+            check(old.pending.size<32)
+            atomicText(snapshotState(id),mapper.writeValueAsString(old.copy(pending=old.pending+ready.generation,seen=(old.seen+ready.generation).takeLast(1024),revisions=old.revisions+(ready.generation to ready.localRevision))))
+            if(ready.editOnly){r.fileTransfer=FolderImportProgress("UPLOADING",message="실행기 파일 변경을 중앙 복구본에 백그라운드 반영 중");return}
+            val requested=r.remoteStopRequested
+            val exit=ServerExit(ready.exit?.code,requested,if(requested)r.stopReason ?: "MANUAL" else "UNEXPECTED",ready.exit?.crashReport)
+            root.resolve(id).resolve("remote-lease").deleteIfExists();token.deleteIfExists();root.resolve(id).resolve("remote-exit.json").deleteIfExists()
+            r.lastExit=exit;r.exitReport=null;r.remotePid=null;r.resources=null;r.players=null;r.remoteStopRequested=false;r.state="STOPPED"
+            r.remoteWorkerReady=true;r.remoteCloudReady=true
+            r.fileTransfer=FolderImportProgress("UPLOADING",message="종료 복사본을 백그라운드 전송 중 · 현재 실행기에서 다시 시작 가능")
+            r.event("system","종료 복사본 준비 완료 · 현재 실행기에서 다시 시작할 수 있습니다")
+            signal(id,"stop",exit.summary()+" 종료 복사본을 백그라운드 전송합니다.",exit,if(!requested)r.discordError.recent() else null)
+            remoteController?.completed(instance(id))
+        }
+        resumeRemoteRestart(id)
+    }
+    fun snapshotCommitted(id:String,runner:String,generation:String) {
+        val r=runtime(id);synchronized(r) {
+            val state=snapshotSync(id) ?: error("종료 복사본 기록이 없습니다");require(state.runner==runner && instance(id).runnerId==runner)
+            if(generation !in state.pending && generation in state.seen)return
+            checkSnapshot(id,runner,generation)
+            val next=state.copy(pending=state.pending.drop(1),revisions=state.revisions-generation);
+            val edits=root.resolve(id).resolve("runner-edits.pending")
+            if(edits.exists() && state.revisions[generation]==edits.readText() && !r.remoteFileBusy)edits.deleteIfExists()
+            atomicText(snapshotState(id),mapper.writeValueAsString(next))
+            if(next.pending.isEmpty())r.fileTransfer=(r.fileTransfer ?: FolderImportProgress("COMPLETE")).copy(phase="COMPLETE",message="종료 복사본 전송 완료 · 현재 게임 실행 상태 유지")
+        }
+    }
+    fun snapshotProgress(id:String,runner:String,generation:String,progress:FolderImportProgress) {
+        val r=runtime(id);synchronized(r){checkSnapshot(id,runner,generation);r.fileTransfer=progress.validated();r.transferMeter.observe(progress)}
+    }
     fun fileTransferProgress(id:String,runner:String,progress:FolderImportProgress) {
         val r=runtime(id);synchronized(r) {
             if(instance(id).runnerId!=runner || r.state !in setOf("TRANSFERRING","SYNCING","SYNC_FAILED","UNKNOWN") || !root.resolve(id).resolve("remote-lease").exists())return
@@ -434,7 +492,7 @@ class ServerManager {
     @Synchronized private fun startInternal(id: String,session:String?,actor:StartActor) {
         val i=instance(id); val r=runtime(id)
         synchronized(r) {
-            checkIdle(r,true);check(if(r.diagnosticActive)session!=null && session==r.diagnosticSession else session==null) {"모드 검사 패널에서 다음 시도를 준비하고 시작하세요"}; require(r.state != "IMPORT_FAILED") { "실패한 팩은 시작할 수 없습니다. 원본 mrpack에서 다시 가져오세요" }; require(eulaAccepted(id)) { "Minecraft EULA에 먼저 동의하세요" }
+            checkIdle(r,true,true);check(if(r.diagnosticActive)session!=null && session==r.diagnosticSession else session==null) {"모드 검사 패널에서 다음 시도를 준비하고 시작하세요"}; require(r.state != "IMPORT_FAILED") { "실패한 팩은 시작할 수 없습니다. 원본 mrpack에서 다시 가져오세요" }; require(eulaAccepted(id)) { "Minecraft EULA에 먼저 동의하세요" }
             r.activityVersion++;r.stopReason=null;r.idleCheckPending=false;r.idleRequestId=null;r.startActor=actor;r.restartActor=null
             r.discordError.clear();r.exitError=null;r.exitErrorCaptured=false;r.startNotified=false;r.exitReport=null;r.lastExit=null;r.remoteCloudReady=false;r.remoteWorkerReady=false
             r.fileTransfer=null;r.transferAuthoritative=false;r.transferMeter.reset()
@@ -444,7 +502,9 @@ class ServerManager {
                 atomicText(root.resolve(id).resolve("start-actor.json"),mapper.writeValueAsString(actor))
                 root.resolve(id).resolve("remote-lease").writeText(i.runnerId!!)
                 r.remoteStopRequested=false;r.remoteRestartRequested=false;r.state="TRANSFERRING";r.players=null;r.resources=null
-                try { controller.start(i.copy(diagnosticSession=r.diagnosticSession)) } catch(e:Exception) { root.resolve(id).resolve("remote-lease").deleteIfExists();r.state="STOPPED";throw e }
+                val runToken=if(controller.supportsLiveFiles(i))UUID.randomUUID().toString() else null
+                if(runToken!=null)atomicText(root.resolve(id).resolve("remote-run"),runToken)
+                try { controller.start(i.copy(diagnosticSession=r.diagnosticSession,runToken=runToken)) } catch(e:Exception) { root.resolve(id).resolve("remote-lease").deleteIfExists();r.state="STOPPED";throw e }
                 r.event("system","실행기 ${i.runnerId}로 서버 데이터를 인계하고 있습니다")
                 return
             }

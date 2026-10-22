@@ -17,12 +17,12 @@ import java.util.UUID
 import kotlin.io.path.*
 
 data class RunnerFileManifest(val files:Map<String,CloudFile>,val directories:Set<String>)
-data class RunnerTransferBegin(val manifest:RunnerFileManifest,val importRequest:String?=null,val resumeProtocol:Int=0)
+data class RunnerTransferBegin(val manifest:RunnerFileManifest,val importRequest:String?=null,val resumeProtocol:Int=0,val generation:String?=null)
 data class RunnerTransferPlan(val transferId:String,val changedFiles:Set<String>,val offsets:Map<String,Long> = emptyMap(),val completedFiles:Int=0,val completedBytes:Long=0,val totalFiles:Int=0,val totalBytes:Long=0)
-private data class StoredTransfer(val protocol:Int=1,val runnerId:String,val instanceId:String,val context:String,val manifest:RunnerFileManifest,val before:RunnerFileManifest,val importRequest:String?,val createdAt:Long=System.currentTimeMillis())
-private data class TransferReceipt(val runnerId:String,val instanceId:String,val context:String,val importRequest:String?)
+private data class StoredTransfer(val generation:String?=null,val protocol:Int=1,val runnerId:String,val instanceId:String,val context:String,val manifest:RunnerFileManifest,val before:RunnerFileManifest,val importRequest:String?,val createdAt:Long=System.currentTimeMillis())
+private data class TransferReceipt(val runnerId:String,val instanceId:String,val context:String,val importRequest:String?,val generation:String?=null)
 private data class PendingTransfer(val id:String,val runnerId:String,val instanceId:String,val manifest:RunnerFileManifest,val changed:Set<String>,val folder:Path,
-    val before:RunnerFileManifest,val importRequest:String?=null,
+    val before:RunnerFileManifest,val importRequest:String?=null,val generation:String?=null,
     val progress:MutableMap<String,Long> = mutableMapOf(),var bytes:Long=0,var files:Int=0,
     val totalBytes:Long=changed.sumOf {manifest.files.getValue(it).size})
 
@@ -32,13 +32,13 @@ class RunnerTransfer(private val manager:ServerManager,private val registry:Runn
     private val pending=java.util.concurrent.ConcurrentHashMap<String,PendingTransfer>()
     private fun record(folder:Path)=folder.resolveSibling("${folder.name}.pending.json")
     private fun store(transfer:PendingTransfer) {
-        val encoded=mapper.writeValueAsString(StoredTransfer(runnerId=transfer.runnerId,instanceId=transfer.instanceId,context=manager.profileDir(transfer.instanceId).toAbsolutePath().toString(),manifest=transfer.manifest,before=transfer.before,importRequest=transfer.importRequest))
+        val encoded=mapper.writeValueAsString(StoredTransfer(generation=transfer.generation,runnerId=transfer.runnerId,instanceId=transfer.instanceId,context=manager.profileDir(transfer.instanceId).toAbsolutePath().toString(),manifest=transfer.manifest,before=transfer.before,importRequest=transfer.importRequest))
         require(encoded.toByteArray().size<=64*1024*1024);atomicText(record(transfer.folder),encoded)
     }
     private fun compatibleTicket(old:String?,current:String?)=old==current || old!=null && current!=null
-    private fun restore(id:String,runner:String,manifest:RunnerFileManifest,before:RunnerFileManifest,request:String?):PendingTransfer? {
+    private fun restore(id:String,runner:String,manifest:RunnerFileManifest,before:RunnerFileManifest,request:String?,generation:String?):PendingTransfer? {
         pending.values.firstOrNull {it.instanceId==id}?.let {previous->
-            check(previous.runnerId==runner && compatibleTicket(previous.importRequest,request) && previous.manifest==manifest && previous.before==before) {"중단된 전송의 실행기·요청·원본 파일 목록이 다릅니다. 원본 변경 여부를 확인하세요"}
+            check(previous.generation==generation && previous.runnerId==runner && compatibleTicket(previous.importRequest,request) && previous.manifest==manifest && previous.before==before) {"중단된 전송의 실행기·요청·원본 파일 목록이 다릅니다. 원본 변경 여부를 확인하세요"}
             val saved=mapper.readValue<StoredTransfer>(record(previous.folder).toFile())
             check(saved.context==manager.profileDir(id).toAbsolutePath().toString()) {"전송 작업 폴더가 변경됐습니다"}
             return if(previous.importRequest==request)previous else previous.copy(importRequest=request).also {store(it);pending[it.id]=it}
@@ -51,10 +51,10 @@ class RunnerTransfer(private val manager:ServerManager,private val registry:Runn
         if(records.isNotEmpty()) {
             val file=records.single();require(!Files.isSymbolicLink(file) && file.fileSize()<=64L*1024*1024)
             val saved=mapper.readValue<StoredTransfer>(file.toFile())
-            check(saved.protocol==1 && saved.instanceId==id && saved.runnerId==runner && saved.context==manager.profileDir(id).toAbsolutePath().toString() && compatibleTicket(saved.importRequest,request) && saved.manifest==manifest && saved.before==before) {"중단된 전송과 실행기·파일 목록이 다릅니다. 받은 파일은 보존했습니다"}
+            check(saved.generation==generation && saved.protocol==1 && saved.instanceId==id && saved.runnerId==runner && saved.context==manager.profileDir(id).toAbsolutePath().toString() && compatibleTicket(saved.importRequest,request) && saved.manifest==manifest && saved.before==before) {"중단된 전송과 실행기·파일 목록이 다릅니다. 받은 파일은 보존했습니다"}
             val transferId=file.name.removeSuffix(".pending.json");require(UUID.fromString(transferId).toString()==transferId)
             val folder=root.resolve(transferId);require(folder.isDirectory() && !Files.isSymbolicLink(folder))
-            return PendingTransfer(transferId,runner,id,manifest,manifest.files.filter {(p,f)->before.files[p]!=f}.keys,folder,before,request).also {if(saved.importRequest!=request)store(it);pending[it.id]=it}
+            return PendingTransfer(transferId,runner,id,manifest,manifest.files.filter {(p,f)->before.files[p]!=f}.keys,folder,before,request,generation).also {if(saved.importRequest!=request)store(it);pending[it.id]=it}
         }
         // Older managers did not persist a descriptor. Adopt exactly one cache only for
         // the current authenticated, still-pending original-folder import ticket.
@@ -62,7 +62,7 @@ class RunnerTransfer(private val manager:ServerManager,private val registry:Runn
         if(legacy.isEmpty())return null
         check(request!=null && legacy.size==1) {"이전 버전의 미완료 파일이 있습니다. 기존 가져오기 요청으로 재개하세요"}
         val folder=legacy.single();require(UUID.fromString(folder.name).toString()==folder.name && !Files.isSymbolicLink(folder))
-        return PendingTransfer(folder.name,runner,id,manifest,manifest.files.filter {(p,f)->before.files[p]!=f}.keys,folder,before,request).also {store(it);pending[it.id]=it}
+        return PendingTransfer(folder.name,runner,id,manifest,manifest.files.filter {(p,f)->before.files[p]!=f}.keys,folder,before,request,generation).also {store(it);pending[it.id]=it}
     }
     private fun receipt(id:String,transfer:String):Path {
         require(UUID.fromString(transfer).toString()==transfer)
@@ -83,26 +83,31 @@ class RunnerTransfer(private val manager:ServerManager,private val registry:Runn
         require(data.runnerId==runner && data.instanceId==id && data.context==manager.profileDir(id).toAbsolutePath().toString())
         "PENDING"
     }
-    private val locks=java.util.concurrent.ConcurrentHashMap<String,Any>()
-    private fun <T> locked(id:String,action:()->T):T=synchronized(locks.computeIfAbsent(id){Any()}) {action()}
+    private val locks=java.util.concurrent.ConcurrentHashMap<String,java.util.concurrent.locks.ReentrantReadWriteLock>()
+    private val fileLocks=java.util.concurrent.ConcurrentHashMap<String,Any>()
+    private fun lock(id:String)=locks.computeIfAbsent(id){java.util.concurrent.locks.ReentrantReadWriteLock(true)}
+    private fun <T> locked(id:String,action:()->T):T {val gate=lock(id).writeLock();gate.lock();try{return action()}finally{gate.unlock()}}
+    private fun <T> shared(id:String,action:()->T):T {val gate=lock(id).readLock();gate.lock();try{return action()}finally{gate.unlock()}}
+
     private fun history(id:String)=manager.profileDir(id).resolve("runner-backups")
     private fun report(transfer:PendingTransfer,phase:String,message:String="") {
         val preparing=phase=="SCANNING"
         val value=FolderImportProgress(phase,transfer.files,transfer.bytes,transfer.changed.size,transfer.totalBytes,message,
             step=if(preparing)"관리 서버 비교·전송 계획" else "",stepNo=if(preparing)3 else 0,stepTotal=if(preparing)3 else 0)
-        if(transfer.importRequest!=null)manager.folderImportProgress(transfer.instanceId,transfer.runnerId,transfer.importRequest,value)
+        if(transfer.generation!=null)manager.snapshotProgress(transfer.instanceId,transfer.runnerId,transfer.generation,value)
+        else if(transfer.importRequest!=null)manager.folderImportProgress(transfer.instanceId,transfer.runnerId,transfer.importRequest,value)
         else manager.fileTransferProgress(transfer.instanceId,transfer.runnerId,value)
     }
     private val inventories=VerifiedInventory()
     private val inventoryEpoch=java.util.concurrent.ConcurrentHashMap<String,Long>()
     @jakarta.annotation.PreDestroy fun close(){inventories.close()}
     private fun invalidateInventory(id:String){inventoryEpoch.merge(id,1L,Long::plus);inventories.invalidate(id)}
-    fun preparedInventory(id:String):RunnerFileManifest? {
+    fun preparedInventory(id:String,background:Boolean=false):RunnerFileManifest? {
         fun context():String {
             manager.checkTransferReady(id)
             val r=manager.runtime(id)
             synchronized(r) {
-                check(r.state !in setOf("STARTING","RUNNING","STOPPING") && r.process?.isAlive!=true) {"서버를 종료한 뒤 파일 목록을 검증하세요"}
+                check(background && manager.instance(id).runnerId!=null || r.state !in setOf("STARTING","RUNNING","STOPPING") && r.process?.isAlive!=true) {"서버를 종료한 뒤 파일 목록을 검증하세요"}
                 return "${manager.serverDir(id).toRealPath()}|${r.activityVersion}|${inventoryEpoch[id]}"
             }
         }
@@ -113,8 +118,9 @@ class RunnerTransfer(private val manager:ServerManager,private val registry:Runn
         val (files,dirs)=FileInventory.collectCached(manager.serverDir(id))
         RunnerFileManifest(files,dirs)
     }
-    fun begin(runnerId:String,instanceId:String,manifest:RunnerFileManifest,importRequest:String?=null,resumeProtocol:Int=0,prepared:RunnerFileManifest?=null):RunnerTransferPlan=locked(instanceId) {
+    fun begin(runnerId:String,instanceId:String,manifest:RunnerFileManifest,importRequest:String?=null,resumeProtocol:Int=0,prepared:RunnerFileManifest?=null,generation:String?=null):RunnerTransferPlan=locked(instanceId) {
         require(manager.instance(instanceId).runnerId==runnerId && registry.active(runnerId)?.allowedInstanceIds?.contains(instanceId)==true)
+        if(generation!=null){require(importRequest==null);manager.checkSnapshot(instanceId,runnerId,generation)}
         if(importRequest!=null)manager.checkFolderImport(instanceId,runnerId,importRequest)
         else check(!manager.root.resolve(instanceId).resolve("folder-import.pending").exists()) { "기존 폴더 가져오기 작업이 진행 중입니다" }
         manager.checkTransferReady(instanceId)
@@ -129,22 +135,23 @@ class RunnerTransfer(private val manager:ServerManager,private val registry:Runn
             for(file in cacheRoot.listDirectoryEntries("*.pending.json")) {
                 require(!Files.isSymbolicLink(file) && file.fileSize()<=64L*1024*1024)
                 val saved=mapper.readValue<StoredTransfer>(file.toFile());val transferId=file.name.removeSuffix(".pending.json")
-                if(saved.runnerId==runnerId && compatibleTicket(saved.importRequest,importRequest) && saved.manifest==manifest && saved.context==manager.profileDir(instanceId).toAbsolutePath().toString()) {
+                if(saved.generation==generation && saved.runnerId==runnerId && compatibleTicket(saved.importRequest,importRequest) && saved.manifest==manifest && saved.context==manager.profileDir(instanceId).toAbsolutePath().toString()) {
                     // Delta application may have finished before a process interruption
                     // prevented its receipt. The full central manifest was just verified.
-                    atomicText(receipt(instanceId,transferId),mapper.writeValueAsString(TransferReceipt(runnerId,instanceId,saved.context,importRequest)))
-                    if(manager.root.resolve(instanceId).resolve("remote-lease").exists())manager.remoteCommitted(instanceId,runnerId,importRequest)
+                    atomicText(receipt(instanceId,transferId),mapper.writeValueAsString(TransferReceipt(runnerId,instanceId,saved.context,importRequest,generation)))
+                    if(generation!=null)manager.snapshotCommitted(instanceId,runnerId,generation)
+                    else if(manager.root.resolve(instanceId).resolve("remote-lease").exists())manager.remoteCommitted(instanceId,runnerId,importRequest)
                     pending.remove(transferId);cacheRoot.resolve(transferId).toFile().deleteRecursively();file.deleteIfExists()
                     return@locked RunnerTransferPlan(transferId,emptySet())
                 }
             }
         }
         require(resumeProtocol in 0..1)
-        val previous=restore(instanceId,runnerId,manifest,old,importRequest)
+        val previous=restore(instanceId,runnerId,manifest,old,importRequest,generation)
         val transfer=previous ?: run {
             val id=UUID.randomUUID().toString()
             val folder=manager.root.resolve(instanceId).resolve("runner-transfer").resolve(id).also {it.createDirectories()}
-            PendingTransfer(id,runnerId,instanceId,manifest,changed,folder,old,importRequest).also {store(it);pending[id]=it}
+            PendingTransfer(id,runnerId,instanceId,manifest,changed,folder,old,importRequest,generation).also {store(it);pending[id]=it}
         }
         report(transfer,"SCANNING",if(previous!=null)"이미 받은 파일의 크기를 확인하고 중단된 위치부터 이어받을 준비를 하고 있습니다" else "전송할 파일과 임시 저장 위치를 준비하고 있습니다")
         transfer.progress.clear();transfer.bytes=0;transfer.files=0
@@ -169,36 +176,28 @@ class RunnerTransfer(private val manager:ServerManager,private val registry:Runn
         report(transfer,"UPLOADING",if(previous!=null)"이어받기 · 받은 파일과 청크를 재사용합니다" else "변경 파일을 전송하고 있습니다")
         RunnerTransferPlan(transfer.id,remaining,if(resumeProtocol==1)remaining.associateWith {transfer.progress.getValue(it)} else emptyMap(),transfer.files,transfer.bytes,changed.size,transfer.totalBytes)
     }
-    fun upload(runnerId:String,instanceId:String,transferId:String,path:String,offset:Long,bytes:ByteArray)=locked(instanceId) {
-        val transfer=pending[transferId] ?: error("파일 인계가 만료되었습니다")
+    fun upload(runnerId:String,instanceId:String,transferId:String,path:String,offset:Long,bytes:ByteArray)=shared(instanceId) {
+        val transfer=pending[transferId] ?: error("먼저 전송을 재개하세요")
         require(transfer.runnerId==runnerId && transfer.instanceId==instanceId)
         transfer.importRequest?.let {manager.checkFolderImport(instanceId,runnerId,it)}
         require(path in transfer.changed && bytes.size in 1..4*1024*1024)
-        val file=transfer.manifest.files.getValue(path)
-        val progress=transfer.progress[path] ?: 0L
-        check(offset==progress && offset+bytes.size<=file.size) { "파일 청크 순서가 맞지 않습니다" }
-        val target=FileInventory.safePath(transfer.folder,path)
-        target.parent.createDirectories()
-        FileChannel.open(target,CREATE,WRITE).use { channel -> channel.position(offset);val remaining=ByteBuffer.wrap(bytes);while(remaining.hasRemaining())channel.write(remaining) }
-        transfer.progress[path]=offset+bytes.size
-        transfer.bytes+=bytes.size
-        if(offset+bytes.size==file.size)transfer.files++
-        report(transfer,"UPLOADING")
+        synchronized(fileLocks.computeIfAbsent("$transferId/$path"){Any()}) {
+            val file=transfer.manifest.files.getValue(path)
+            val progress=synchronized(transfer){transfer.progress[path] ?: 0L}
+            check(offset==progress && offset+bytes.size<=file.size) {"파일 청크 순서가 맞지 않습니다"}
+            val target=FileInventory.safePath(transfer.folder,path);target.parent.createDirectories()
+            FileChannel.open(target,CREATE,WRITE).use {channel->channel.position(offset);val remaining=ByteBuffer.wrap(bytes);while(remaining.hasRemaining())channel.write(remaining)}
+            synchronized(transfer){transfer.progress[path]=offset+bytes.size;transfer.bytes+=bytes.size;if(offset+bytes.size==file.size)transfer.files++;report(transfer,"UPLOADING")}
+        }
     }
-    fun batch(runner:String,id:String,transferId:String,bytes:ByteArray)=locked(id) {
+    fun batch(runner:String,id:String,transferId:String,bytes:ByteArray)=shared(id) {
         val parts=TransferBatch.decode(bytes)
         val transfer=pending[transferId] ?: error("먼저 전송을 재개하세요")
         require(transfer.runnerId==runner && transfer.instanceId==id)
-        transfer.importRequest?.let {manager.checkFolderImport(id,runner,it)}
-        parts.forEach {part->
-            require(part.path in transfer.changed)
-            FileInventory.safePath(transfer.folder,part.path)
-            val file=transfer.manifest.files.getValue(part.path)
-            require(part.offset==(transfer.progress[part.path] ?: 0) && part.bytes.size>0 && part.offset+part.bytes.size==file.size && file.size<=TransferBatch.SMALL_FILE)
-        }
+        parts.forEach {part->require(part.path in transfer.changed && part.bytes.isNotEmpty() && transfer.manifest.files.getValue(part.path).size<=TransferBatch.SMALL_FILE)}
         parts.forEach {upload(runner,id,transferId,it.path,it.offset,it.bytes)}
     }
-    fun batchFiles(id:String,paths:List<String>):ByteArray=locked(id) {
+    fun batchFiles(id:String,paths:List<String>):ByteArray=shared(id) {
         require(paths.size in 1..TransferBatch.MAX_FILES && paths.distinct().size==paths.size)
         var total=8L
         val files=paths.map {path->val file=manager.path(id,path);require(file.isRegularFile() && file.fileSize()<=TransferBatch.SMALL_FILE);total+=file.fileSize()+path.toByteArray().size+16;require(total<=TransferBatch.MAX_BYTES);path to file}
@@ -207,25 +206,27 @@ class RunnerTransfer(private val manager:ServerManager,private val registry:Runn
     fun commit(runnerId:String,instanceId:String,transferId:String)=locked(instanceId) {
         if(transferState(runnerId,instanceId,transferId)=="COMPLETE") {
             val done=mapper.readValue<TransferReceipt>(receipt(instanceId,transferId).toFile())
-            if(manager.root.resolve(instanceId).resolve("remote-lease").exists())manager.remoteCommitted(instanceId,runnerId,done.importRequest)
+            if(done.generation!=null)manager.snapshotCommitted(instanceId,runnerId,done.generation)
+            else if(manager.root.resolve(instanceId).resolve("remote-lease").exists())manager.remoteCommitted(instanceId,runnerId,done.importRequest)
             return@locked
         }
         val transfer=pending[transferId] ?: error("관리 서버 재시작 후에는 먼저 파일 목록으로 전송을 재개하세요")
         require(transfer.runnerId==runnerId && transfer.instanceId==instanceId)
-        fun checkRequest() {transfer.importRequest?.let {manager.checkFolderImport(instanceId,runnerId,it)}}
+        fun checkRequest() {transfer.generation?.let {manager.checkSnapshot(instanceId,runnerId,it)};transfer.importRequest?.let {manager.checkFolderImport(instanceId,runnerId,it)}}
         checkRequest()
         invalidateInventory(instanceId)
         report(transfer,"VERIFYING","변경 파일을 검증하고 반영하고 있습니다")
         DeltaTransfer.apply(manager.serverDir(instanceId),transfer.folder,transfer.before,transfer.manifest,history(instanceId),::checkRequest)
         val done=receipt(instanceId,transferId)
-        atomicText(done,mapper.writeValueAsString(TransferReceipt(runnerId,instanceId,manager.profileDir(instanceId).toAbsolutePath().toString(),transfer.importRequest)))
+        atomicText(done,mapper.writeValueAsString(TransferReceipt(runnerId,instanceId,manager.profileDir(instanceId).toAbsolutePath().toString(),transfer.importRequest,transfer.generation)))
         pending.remove(transferId)
+        fileLocks.keys.removeIf {it.startsWith("$transferId/")}
         transfer.folder.toFile().deleteRecursively();record(transfer.folder).deleteIfExists()
         done.parent.listDirectoryEntries("*.json").sortedByDescending {it.getLastModifiedTime()}.drop(20).forEach {it.deleteIfExists()}
         invalidateInventory(instanceId)
-        manager.remoteCommitted(instanceId,runnerId,transfer.importRequest)
+        if(transfer.generation!=null)manager.snapshotCommitted(instanceId,runnerId,transfer.generation) else manager.remoteCommitted(instanceId,runnerId,transfer.importRequest)
     }
-    fun chunk(instanceId:String,path:String,offset:Long):ByteArray=locked(instanceId) {
+    fun chunk(instanceId:String,path:String,offset:Long):ByteArray=shared(instanceId) {
         val source=manager.path(instanceId,path)
         require(source.isRegularFile() && offset>=0 && offset<=source.fileSize())
         val bytes=ByteArray(minOf(4L*1024*1024,source.fileSize()-offset).toInt())
@@ -248,7 +249,7 @@ class RunnerTransferApi(private val transfer:RunnerTransfer,private val gateway:
     }
     @GetMapping("/{instanceId}/capabilities") fun capabilities(@PathVariable instanceId:String,
         @RequestHeader("X-SM-Runner-Id") runnerId:String,@RequestHeader("X-SM-Session",required=false) token:String?):Map<String,Int> {
-        check(runnerId,token,instanceId);return mapOf("resumeProtocol" to 1,"batchProtocol" to 1,"parallel" to TransferBatch.PARALLEL,"exitReasonProtocol" to 1,"asyncTransferProtocol" to 2)
+        check(runnerId,token,instanceId);return mapOf("resumeProtocol" to 1,"batchProtocol" to 1,"parallel" to TransferBatch.PARALLEL,"exitReasonProtocol" to 1,"asyncTransferProtocol" to 2,"stoppedSnapshotProtocol" to 1)
     }
     @PutMapping("/{instanceId}/batch") fun batch(@PathVariable instanceId:String,@RequestParam transferId:String,req:jakarta.servlet.http.HttpServletRequest,
         @RequestHeader("X-SM-Runner-Id") runnerId:String,@RequestHeader("X-SM-Session",required=false) token:String?):Map<String,Boolean> {
@@ -257,6 +258,14 @@ class RunnerTransferApi(private val transfer:RunnerTransfer,private val gateway:
     @PostMapping("/{instanceId}/files") fun files(@PathVariable instanceId:String,req:jakarta.servlet.http.HttpServletRequest,
         @RequestHeader("X-SM-Runner-Id") runnerId:String,@RequestHeader("X-SM-Session",required=false) token:String?):ResponseEntity<ByteArray> {
         check(runnerId,token,instanceId);val bytes=req.inputStream.readNBytes(1024*1024+1);require(bytes.size<=1024*1024);val paths=jacksonObjectMapper().readValue<List<String>>(bytes);return ResponseEntity.ok().header("Cache-Control","no-store").body(transfer.batchFiles(instanceId,paths))
+    }
+    @PostMapping("/{instanceId}/snapshot-progress") fun snapshotProgress(@PathVariable instanceId:String,@RequestParam generation:String,@RequestBody progress:FolderImportProgress,
+        @RequestHeader("X-SM-Runner-Id") runnerId:String,@RequestHeader("X-SM-Session",required=false) token:String?):Map<String,Boolean> {
+        check(runnerId,token,instanceId);manager.snapshotProgress(instanceId,runnerId,generation,progress);return mapOf("ok" to true)
+    }
+    @PostMapping("/{instanceId}/snapshot-ready") fun snapshotReady(@PathVariable instanceId:String,@RequestBody ready:SnapshotReady,
+        @RequestHeader("X-SM-Runner-Id") runnerId:String,@RequestHeader("X-SM-Session",required=false) token:String?):Map<String,Boolean> {
+        check(runnerId,token,instanceId);manager.snapshotReady(instanceId,runnerId,ready);return mapOf("ok" to true)
     }
     @PostMapping("/{instanceId}/exit") fun exited(@PathVariable instanceId:String,@RequestBody report:RunnerExitReport,
         @RequestHeader("X-SM-Runner-Id") runnerId:String,@RequestHeader("X-SM-Session",required=false) token:String?):Map<String,Boolean> {
@@ -275,7 +284,7 @@ class RunnerTransferApi(private val transfer:RunnerTransfer,private val gateway:
     @GetMapping("/{instanceId}/manifest") fun manifest(@PathVariable instanceId:String,@RequestHeader("X-SM-Runner-Id") runnerId:String,@RequestHeader("X-SM-Session",required=false) token:String?,@RequestParam(defaultValue="1") protocol:Int=1):ResponseEntity<*> {
         check(runnerId,token,instanceId)
         if(tasks.busy(instanceId))return pending(protocol)
-        val manifest=transfer.preparedInventory(instanceId) ?: return pending(protocol)
+        val manifest=transfer.preparedInventory(instanceId,request.generation!=null) ?: return pending(protocol)
         return ResponseEntity.ok().header("Cache-Control","no-store").body(manifest)
     }
     @GetMapping("/{instanceId}/file") fun file(@PathVariable instanceId:String,@RequestParam path:String,@RequestParam offset:Long,
@@ -292,12 +301,12 @@ class RunnerTransferApi(private val transfer:RunnerTransfer,private val gateway:
         val key=taskKey(instanceId,runnerId,"begin",hash)
         val plan=tasks.poll(key,consume=true) {
             val deadline=System.nanoTime()+java.util.concurrent.TimeUnit.MINUTES.toNanos(30)
-            var prepared=transfer.preparedInventory(instanceId)
+            var prepared=transfer.preparedInventory(instanceId,request.generation!=null)
             while(prepared==null) {
                 check(System.nanoTime()<deadline) {"중앙 파일 검증 대기 시간이 초과됐습니다"}
-                Thread.sleep(1000);prepared=transfer.preparedInventory(instanceId)
+                Thread.sleep(1000);prepared=transfer.preparedInventory(instanceId,request.generation!=null)
             }
-            transfer.begin(runnerId,instanceId,request.manifest,request.importRequest,request.resumeProtocol,prepared)
+            transfer.begin(runnerId,instanceId,request.manifest,request.importRequest,request.resumeProtocol,prepared,request.generation)
         } ?: return pending(protocol)
         // Older runner ObjectMappers reject unknown fields. Their wire shape must
         // stay exact even though the manager internally restores full counters.

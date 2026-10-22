@@ -6,14 +6,15 @@ import java.nio.file.*
 import java.util.UUID
 import kotlin.io.path.*
 
-data class WorkspaceRequest(val op:String,val config:Instance,val path:String="",val to:String="",val offset:Long=0,val data:String?=null,val revision:String?=null,val uploadId:String?=null)
+data class WorkspaceRequest(val op:String,val config:Instance,val path:String="",val to:String="",val offset:Long=0,val data:String?=null,val revision:String?=null,val uploadId:String?=null,@get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) val mutationToken:String?=null)
 
 /** All paths are resolved against a locally granted folder, never a path supplied by the manager. */
-class RunnerWorkspace(private val base:Path,private val history:Path,private val logDirectory:Path=base.parent,private val stopped:()->Unit) {
+class RunnerWorkspace(private val base:Path,private val history:Path,private val logDirectory:Path=base.parent,private val beforeMutation:(String?)->Unit={},private val stopped:()->Unit) {
     companion object {const val CHUNK=64*1024;const val MAX=256L*1024*1024}
     private val mapper=jacksonObjectMapper()
     private data class Upload(val path:String,val temporary:Path,val revision:String?,var bytes:Long=0,val at:Long=System.currentTimeMillis())
     private val uploads=mutableMapOf<String,Upload>()
+    private var modListing:ModInventorySnapshot?=null
     private fun path(relative:String):Path {
         require(relative.length<=4096 && !relative.contains('\\') && !relative.contains('\u0000') && !relative.contains(':')) {"잘못된 경로입니다"}
         val root=base.toRealPath();require(!Files.isSymbolicLink(base))
@@ -56,11 +57,28 @@ class RunnerWorkspace(private val base:Path,private val history:Path,private val
     fun matches(directory:Path)=base==directory
     @Synchronized fun busy()=uploads.values.any {System.currentTimeMillis()-it.at<=15*60*1000}
     @Synchronized fun execute(req:WorkspaceRequest):Any {
-        if(req.op !in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW"))stopped()
+        val readOnly=req.op in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW","MOD_SCAN")
+        if(!readOnly){stopped();beforeMutation(req.mutationToken)}
         uploads.entries.removeIf { (_,u)->if(System.currentTimeMillis()-u.at>15*60*1000){u.temporary.deleteIfExists();true}else false }
-        recover()
+        if(!readOnly)recover()
         val p=path(req.path)
         return when(req.op) {
+            "MOD_SCAN" -> {
+                val snapshot=if(req.offset==0L)ModInventory.scan(path("mods")).also {modListing=it} else modListing ?: error("모드 목록을 다시 불러오세요")
+                require(req.offset in 0..snapshot.mods.size.toLong())
+                check(req.revision==null || req.revision==snapshot.revision) {"모드 목록이 변경되었습니다"}
+                val end=minOf(snapshot.mods.size,req.offset.toInt()+50)
+                mapOf("revision" to snapshot.revision,"mods" to snapshot.mods.subList(req.offset.toInt(),end),"next" to if(end<snapshot.mods.size)end else null)
+            }
+            "MOD_TOGGLE" -> {
+                val selection=mapper.readValue<ModSelection>(req.data ?: error("변경할 모드를 선택하세요"))
+                val directory=path("mods");val snapshot=ModInventory.scan(directory)
+                check(selection.revision==snapshot.revision) {"모드 파일이 변경되었습니다. 다시 불러오세요"}
+                require(selection.files.isNotEmpty() && selection.files.all {f->snapshot.mods.any {it.filename==f && it.enabled!=selection.enabled}})
+                val changes=selection.files.associateWith {if(selection.enabled)it.dropLast(9) else "$it.disabled"}
+                require(changes.values.none {to->snapshot.mods.any {it.filename.equals(to,true)}}) {"같은 이름의 모드가 이미 있습니다"}
+                ModFiles.rename(directory,changes,history.resolve("mod-backups"));modListing=null;emptyMap<String,String>()
+            }
             "LOG_LIST" -> LogFiles(logDirectory,base).list()
             "LOG_PAGE" -> LogFiles(logDirectory,base).page(req.path,req.offset,100,req.revision)
             "LOG_WINDOW" -> LogFiles(logDirectory,base).window(req.path,req.offset,(req.data?.toIntOrNull() ?: 300).coerceIn(1,100),req.to.takeIf {it.isNotEmpty()})

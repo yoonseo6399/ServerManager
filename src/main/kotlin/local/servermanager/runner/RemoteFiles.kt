@@ -8,9 +8,23 @@ import java.io.OutputStream
 @Service
 class RemoteFiles(private val manager:ServerManager) {
     private val mapper=jacksonObjectMapper()
-    fun remote(id:String)=!manager.instance(id).syncEnabled()
+    fun remote(id:String)=!manager.instance(id).syncEnabled() || available(id)
+    fun filesRemote(id:String)=manager.instance(id).runnerId!=null
+    fun available(id:String)=manager.liveFilesAvailable(id)
     private fun call(id:String,op:String,path:String="",offset:Long=0,data:String?=null,revision:String?=null,uploadId:String?=null,to:String="")=
         manager.remoteWorkspace(id,WorkspaceRequest(op,manager.instance(id).copy(),path,to,offset,data,revision,uploadId))
+    fun mods(id:String):ModInventorySnapshot {
+        val mods=mutableListOf<InstalledMod>();var offset=0L;var revision:String?=null
+        do {
+            val page=call(id,"MOD_SCAN",offset=offset,revision=revision);val current=page.path("revision").asText()
+            check(revision==null || revision==current);revision=current
+            mods+=page.path("mods").map {mapper.treeToValue(it,InstalledMod::class.java)};check(mods.size<=2000)
+            val next=page.path("next");if(next.isNull || next.isMissingNode)break
+            check(next.asLong()>offset);offset=next.asLong()
+        }while(true)
+        return ModInventorySnapshot(revision ?: error("모드 목록이 없습니다"),mods,emptyList())
+    }
+    fun toggleMods(id:String,request:ModSelection)=manager.withRemoteFiles(id) {call(id,"MOD_TOGGLE",data=mapper.writeValueAsString(request));Unit}
     fun logFiles(id:String):List<LogFiles.Entry> = call(id,"LOG_LIST").map {mapper.treeToValue(it,LogFiles.Entry::class.java)}
     fun logPage(id:String,path:String,offset:Long,revision:String?):LogFiles.Page=mapper.treeToValue(call(id,"LOG_PAGE",path,offset,revision=revision),LogFiles.Page::class.java)
     fun logWindow(id:String,path:String,from:Long,limit:Int,query:String?):LogFiles.Window=mapper.treeToValue(call(id,"LOG_WINDOW",path,from,data=limit.toString(),to=query.orEmpty()),LogFiles.Window::class.java)
