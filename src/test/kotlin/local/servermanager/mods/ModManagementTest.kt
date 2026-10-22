@@ -91,7 +91,7 @@ class ModManagementTest {
         snapshot=mods.page(id).inventory!!
         mods.toggle(id,ModSelection(snapshot.revision,selected,true,true))
         val deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(10)
-        while(mods.page(id).job?.phase=="WORKING" && System.nanoTime()<deadline)Thread.sleep(20)
+        while(mods.page(id).job?.phase !in setOf("COMPLETE","FAILED") && System.nanoTime()<deadline)Thread.sleep(20)
         assertEquals("FAILED",mods.page(id).job?.phase)
         assertContentEquals(bytes,dir.resolve("suspect.jar").readBytes());assertContentEquals(bytes,dir.resolve("suspect.jar.disabled").readBytes())
     }
@@ -123,7 +123,7 @@ class ModManagementTest {
         Files.copy(dir.resolve("lib.jar"),dir.resolve("lib.jar.disabled"));mods.refresh(id);waitJob(mods,id)
         mods.toggle(id,request.copy(revision=mods.page(id).inventory!!.revision))
         val deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(10)
-        while(mods.page(id).job?.phase=="WORKING" && System.nanoTime()<deadline)Thread.sleep(20)
+        while(mods.page(id).job?.phase !in setOf("COMPLETE","FAILED") && System.nanoTime()<deadline)Thread.sleep(20)
         assertEquals("FAILED",mods.page(id).job?.phase)
         assertContentEquals(bytes,dir.resolve("lib.jar").readBytes());assertContentEquals(bytes,dir.resolve("lib.jar.disabled").readBytes())
     }
@@ -141,6 +141,23 @@ class ModManagementTest {
             release.countDown();waitJob(isolated,id)
             assertEquals(4,isolated.page(id).inventory!!.mods.size);assertTrue(isolated.page(id).inventory!!.warnings.any {it.contains("offline")})
         } finally {release.countDown();isolated.close()}
+    }
+    @Test fun `toggle never retries unavailable metadata after the user already loaded the inventory`()=fixture {manager,_,id->
+        var calls=0
+        val api=object:ModrinthLookup {
+            override fun versionsFromHashes(hashes:List<String>):Map<String,RinVersion> {calls++;throw java.io.IOException("offline")}
+            override fun projects(ids:Collection<String>)=emptyList<RinProject>()
+        }
+        val isolated=ModManagement(manager,ModrinthCatalog(api))
+        try {
+            isolated.refresh(id);waitJob(isolated,id);assertEquals(1,calls)
+            val request=ModSelection(isolated.page(id).inventory!!.revision,setOf("other.jar"))
+            val bytes=manager.originalServerDir(id).resolve("mods/other.jar").readBytes()
+            isolated.toggle(id,request);waitJob(isolated,id)
+            assertEquals(1,calls,"A local rename must not wait for a second failed HTTP lookup")
+            assertContentEquals(bytes,manager.originalServerDir(id).resolve("mods/other.jar.disabled").readBytes())
+            assertTrue(isolated.page(id).inventory!!.mods.any {it.filename=="other.jar.disabled"})
+        } finally {isolated.close()}
     }
     @Test fun `isolated manual search keeps original world requires verdict and supports pause resume correction and logs`()=fixture {manager,mods,id->
         val source=manager.originalServerDir(id);val original=FileInventory.collect(source)

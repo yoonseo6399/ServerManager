@@ -51,7 +51,7 @@ class ModManagement(private val manager:ServerManager,private val catalog:Modrin
     private fun save(id:String,s:ModDiagnostic){val json=mapper.writeValueAsString(s);require(json.toByteArray().size<16*1024*1024) {"검사 이력이 너무 큽니다. 현재 검사를 종료하세요"};atomicText(stateFile(id),json);sessions[id]=s;published[id]=mapper.readValue(json)}
     private fun root(id:String,s:ModDiagnostic)=base(id).resolve("diagnostics").resolve(s.id)
     private fun loader(id:String)=manager.instance(id).loader.lowercase().also {require(it in setOf("fabric","forge","neoforge")) {"Fabric·Forge·NeoForge 모드 서버에서 사용할 수 있습니다"}}
-    private fun files(id:String)=ModInventory.scan(manager.originalServerDir(id).resolve("mods").also {loader(id)})
+    private fun files(id:String,onProgress:(Int,Long)->Unit={_,_->})=ModInventory.scan(manager.originalServerDir(id).resolve("mods").also {loader(id)},onProgress=onProgress)
     /** Dependencies are fetched from Modrinth once per file hash and saved with the server. */
     private fun scan(id:String,retryMissing:Boolean=false,publishRaw:Boolean=false):ModInventorySnapshot {
         val snapshot=files(id)
@@ -123,13 +123,18 @@ class ModManagement(private val manager:ServerManager,private val catalog:Modrin
     fun toggle(id:String,req:ModSelection)=locked(id) {
         val preview=preview(id,req)
         job(id) {
-            val fresh=files(id);check(fresh.revision==req.revision) {"검사 후 파일이 변경됐습니다. 다시 불러오세요"}
+            jobs[id]=ModJob("VERIFYING","변경된 모드 파일을 확인합니다")
+            val fresh=files(id){count,bytes->jobs[id]=ModJob("VERIFYING","모드 변경 여부를 확인합니다 · 변경 없는 파일은 저장된 해시 재사용",count,bytes)}
+            check(fresh.revision==req.revision) {"검사 후 파일이 변경됐습니다. 다시 불러오세요"}
             val changes=preview.affected.associateWith {if(req.enabled)it.dropLast(9) else "$it.disabled"}
             check(changes.values.none {target->fresh.mods.any {it.filename.equals(target,true)}}) {"같은 이름의 파일이 이미 있어 변경할 수 없습니다"}
             val guard=base(id).resolve("import.pending");check(!guard.exists());atomicText(guard,"mod-toggle")
             try {
+                jobs[id]=ModJob("APPLYING","선택한 모드 ${changes.size}개의 상태와 복구 기록을 반영합니다")
                 ModFiles.rename(manager.originalServerDir(id).resolve("mods"),changes,base(id).resolve("mod-backups"))
-                guard.deleteIfExists();publishInventory(id,scan(id))
+                jobs[id]=ModJob("REFRESHING","저장된 모드 정보로 목록을 갱신합니다 · 외부 조회 없음")
+                val updated=ModInventory.attach(files(id),ModSourceLookup(ModSources.load(base(id).resolve("mod-sources.json")),emptyList()))
+                guard.deleteIfExists();publishInventory(id,updated)
             } catch(e:Exception) {
                 // Rollback is durable; leave the old-version-compatible start guard if recovery fails.
                 DeltaTransfer.recover(manager.originalServerDir(id).resolve("mods"),base(id).resolve("mod-backups"));guard.deleteIfExists();throw e
