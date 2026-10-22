@@ -57,6 +57,7 @@ internal class CoalescedMessageEdits<T>(private val send:(T,()->Unit)->Unit,
         if(terminal)return
         next=value;terminal=finished;schedule()
     }
+    @Synchronized fun cancel(){next=null;terminal=true}
     @Synchronized private fun schedule(){if(!scheduled && !inFlight && next!=null){scheduled=true;val wait=(intervalMillis-TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-last)).coerceAtLeast(0);scheduler.schedule(::drain,wait,TimeUnit.MILLISECONDS)}}
     private fun drain(){
         val value=synchronized(this){scheduled=false;if(inFlight)return;val v=next ?: return;next=null;inFlight=true;last=System.nanoTime();v}

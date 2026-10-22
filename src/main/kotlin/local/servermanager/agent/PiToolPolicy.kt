@@ -10,18 +10,30 @@ internal class PiToolInputException(message:String):IllegalArgumentException(mes
 /** Application authorization only. Native read/edit/write/bash remain Pi implementations. */
 internal class PiToolPolicy(private val profile:Path,private val home:Path,private val tools:ProjectAgentTools,private val tier:String,private val outputTemp:Path?=null) {
     private val mapper=jacksonObjectMapper()
-    data class Checked(val guard:ProjectAgentPlan,val display:ProjectAgentPlan,val native:Boolean,val bashAudit:PiBashAudit.Result?=null,val executableEvidence:PiExecutableEvidence.Report?=null)
+    data class Checked(val guard:ProjectAgentPlan,val display:ProjectAgentPlan,val native:Boolean,val executableEvidence:PiExecutableEvidence.Report?=null)
     private fun canonical(path:Path):Path {var existing=path.toAbsolutePath().normalize();val suffix=mutableListOf<String>();while(!Files.exists(existing,LinkOption.NOFOLLOW_LINKS)){suffix.add(existing.fileName.toString());existing=existing.parent ?: error("경로 확인 실패")};return suffix.asReversed().fold(existing.toRealPath()){a,b->a.resolve(b)}}
     fun check(name:String,args:JsonNode):Checked {
         require(args.isObject && args.toString().length<=100000)
         if(name=="sh")throw PiToolInputException(if(tier==AgentAccess.OWNER)"sh 도구는 제거되었습니다. 명령 실행은 bash를 사용하세요. 아직 명령을 실행하거나 권한을 판단하지 않았습니다."else "sh 도구는 제거되었습니다. 이 역할에는 임의 bash 실행 권한이 없습니다. read/list_files/search 도구를 사용하세요.")
         if(name=="bash")require(tier==AgentAccess.OWNER) {"친구 역할은 임의 셸 명령을 실행할 수 없습니다."}
         if(name in setOf("write","edit"))require(tier!=AgentAccess.READ) {"읽기 전용 역할은 파일을 수정할 수 없습니다."}
-        if(args.has("path")) {
-            val raw=args.path("path").asText();require(raw.isNotBlank() && raw.length<=2000 && !raw.contains('\u0000'))
-            val target=canonical(home.resolve(raw));val actualProfile=profile.toRealPath();val root=if(actualProfile.fileName.toString()=="agent" && actualProfile.parent?.fileName?.toString()=="security")actualProfile.parent else actualProfile;val project=home.toRealPath()
-            check(name=="read" && outputTemp!=null && target.startsWith(canonical(outputTemp)) || !target.startsWith(root) || project.startsWith(root) && project!=root && target.startsWith(project)) {"관리 앱의 인증·설정·Pi 상태 폴더는 모델 파일 도구에서 접근할 수 없습니다."}
-            require(target.none {ProjectAgentShell.isSecret(it.toString()) || it.toString() in setOf(".release-keys","private.der")}) {"비밀 값이 포함될 수 있는 파일은 Pi 파일 도구에서 읽거나 변경할 수 없습니다."}
+        // OWNER native operations are reviewed by the independent model, not a static
+        // shell/path allowlist. Role/identity checks remain application authorization.
+        if(tier==AgentAccess.OWNER && name in setOf("read","edit","write","bash")) {
+            val command=args.path("command").asText()
+            val path=args.path("path").asText()
+            if(name=="bash")require(command.isNotBlank() && command.length<=12000 && !command.contains('\u0000'))
+            else require(path.isNotBlank() && path.length<=2000 && !path.contains('\u0000'))
+            val cwd=home.toRealPath()
+            val target=if(name=="bash")null else runCatching {canonical(home.resolve(path))}.getOrElse {home.resolve(path).toAbsolutePath().normalize()}
+            val description=when(name) {
+                "bash"->"Pi bash\nOS 셸 명령: $command"
+                "read"->"Pi read\n파일 읽기: $path"
+                "write"->"파일 쓰기 · $path\n새 파일 또는 전체 덮어쓰기 · ${args.path("content").asText().length}자 · 실행 후 diff와 ‘자세히’로 전후 원문을 확인합니다."
+                else->"파일 부분 수정 · $path\n실행 후 변경 diff를 표시합니다.\n수정 내용: ${args.path("edits").toString().take(12000)}"
+            }
+            val plan=ProjectAgentPlan(ProjectAgentTool(name,args),cwd.toString(),description,name=="read",scope=if(target==null)"UNKNOWN"else if(target.startsWith(cwd))"INSIDE"else "OUTSIDE",resolvedTargets=target?.let {listOf(it.toString())} ?: emptyList())
+            return Checked(plan,plan,true,if(name=="bash")PiExecutableEvidence.inspect(home,profile,command)else null)
         }
         if(name=="ask_user") {
             require(args.path("question").isTextual && args.path("question").asText().length in 1..1000)
@@ -36,7 +48,7 @@ internal class PiToolPolicy(private val profile:Path,private val home:Path,priva
             "bash"->ProjectAgentTool("run_command",mapper.valueToTree(mapOf("command" to args.path("command").asText(),"timeout_seconds" to args.path("timeout").asLong(900))))
             else->ProjectAgentTool(name,args)
         }
-        if(name=="search")require(!profile.toRealPath().startsWith(home.toRealPath())) {"관리 앱 데이터가 포함된 상위 폴더에서는 광역 검색을 허용하지 않습니다. 하위 프로젝트를 지정하세요."}
+        if(name=="search" && tier!=AgentAccess.OWNER)require(!profile.toRealPath().startsWith(home.toRealPath())) {"관리 앱 데이터가 포함된 상위 폴더에서는 광역 검색을 허용하지 않습니다. 하위 프로젝트를 지정하세요."}
         val guard=tools.plan(home,mapped)
         val native=name in setOf("read","write","edit","bash")
         val description=when(name) {
@@ -44,12 +56,14 @@ internal class PiToolPolicy(private val profile:Path,private val home:Path,priva
             "edit"->"파일 부분 수정 · ${args.path("path").asText()}\n원문과 일치하는 구간만 변경합니다. 실행 후 공통 diff를 표시합니다.\n"+guard.description+"\n수정 내용: ${args.path("edits").toString().take(12000)}"
             else->if(native)"Pi $name\n"+guard.description else guard.description
         }
-        val audit=if(name=="bash")PiBashAudit.inspect(home,args.path("command").asText())else null
-        val display=guard.copy(tool=ProjectAgentTool(name,args),description=description+(audit?.let {"\n경로 검사: ${it.reason}"} ?: ""),scope=audit?.scope ?: guard.scope,readOnly=audit?.readOnly ?: guard.readOnly,resolvedTargets=audit?.targets ?: guard.resolvedTargets)
-        val evidence=if(name=="bash" && audit==null)PiExecutableEvidence.inspect(home,profile,args.path("command").asText())else null
-        return Checked(guard,display,native,audit,evidence)
+        val display=guard.copy(tool=ProjectAgentTool(name,args),description=description)
+        return Checked(guard,display,native)
     }
-    fun verify(checked:Checked){tools.verify(home,checked.guard);if(checked.executableEvidence!=null)check(PiExecutableEvidence.inspect(home,profile,checked.display.tool.arguments.path("command").asText())==checked.executableEvidence) {"실행 파일 내용·진입점이 위험 검토/승인 이후 바뀌었습니다. 실행하지 않고 다시 검토해야 합니다."};if(checked.bashAudit!=null)check(PiBashAudit.inspect(home,checked.display.tool.arguments.path("command").asText())==checked.bashAudit) {"승인 이후 Bash 경로·파일 상태가 바뀌었습니다. 다시 검토하세요."}}
+    fun verify(checked:Checked){
+        // Native OWNER calls already passed independent review/user consent. Do not
+        // reinterpret their shell syntax, scope, fingerprints or file names here.
+        if(!checked.native || tier!=AgentAccess.OWNER)tools.verify(home,checked.guard)
+    }
     companion object {
         fun extras(tier:String):List<Map<String,Any>> {
             fun str()=mapOf("type" to "string")
