@@ -479,7 +479,7 @@ internal class DiscordProjectAgentDisplay(private val channel:TextChannel,privat
             "ledger"->render("턴 ${tn(event.turn)} · 📋 ${event.text.take(200)}")
             "steer"->render("턴 ${tn(event.turn)} · 🧭 개입 반영: ${event.text.take(120).replace('\n',' ')}")
             "thinking"->{
-                usage=event.usage
+                event.usage?.let {usage=it}
                 if(actorTurn!=event.turn){retireStatus()?.delete()?.queue({}, {});actorTurn=event.turn;latestStatus="모델 응답 대기";statusSlot()}
                 render("모델 응답 대기")
             }

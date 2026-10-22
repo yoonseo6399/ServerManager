@@ -70,13 +70,13 @@ class QwenDisplayTest {
         val s=Screen();val display=DiscordProjectAgentDisplay(s.channel,s.main,"request","14b","run",5)
         val plan=ProjectAgentPlan(ProjectAgentTool("read",com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().createObjectNode().put("path","a.txt")),"/fixture","read a.txt",true)
         val risk=ProjectAgentRisk("ALLOW","LOW","요청한 조회","INSIDE")
-        display.emit(ProjectAgentEvent("thinking",1));val slot=s.rows.last();val count=s.rows.size
+        display.emit(ProjectAgentEvent("thinking",1));display.emit(ProjectAgentEvent("usage",1,usage=QwenUsage(tokensPerSecond=13.5)));val slot=s.rows.last();val count=s.rows.size
         display.emit(ProjectAgentEvent("approval",1,plan=plan,risk=risk,token="t",callId="c"));assertEquals(count,s.rows.size);assertContains(slot.card!!.title!!,"승인 대기")
         display.emit(ProjectAgentEvent("tool_start",1,plan=plan,risk=risk,callId="c"));assertEquals(count,s.rows.size);assertContains(slot.card!!.title!!,"도구 실행 중")
         display.emit(ProjectAgentEvent("tool_end",1,"종료 코드 0",plan,risk,callId="c"));s.waitFor {slot.card!!.title!!.contains("초")}
         val completed=slot.card
         display.emit(ProjectAgentEvent("thinking",2));assertEquals(count+1,s.rows.size);assertTrue(s.rows.last().card!!.title!!.startsWith("상태창 · 턴 2"))
-        Thread.sleep(40);assertEquals(completed,slot.card,"Delayed status updates must not overwrite the tool card")
+        s.waitFor {s.top.card?.footer?.text?.contains("13.5 tok/s")==true};Thread.sleep(40);assertEquals(completed,slot.card,"Delayed status updates must not overwrite the tool card")
         display.emit(ProjectAgentEvent("done",2,"완료"));s.waitFor {!s.rows.last().buttons}
     }
     @Test fun `question card keeps selected answer and requester including full custom text`() {
