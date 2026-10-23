@@ -4,6 +4,7 @@ async function fixture(page:Page,fail=false){let posts=0,boot='old',phase='IDLE'
  if(p==='/api/auth/session')body={bootId:boot,appVersion:'fixture',user:{id:'owner',name:'Owner',owner:true,permissions:{}},csrf:'x',origin:url.origin,setupRequired:false};
  else if(p==='/api/instances')body=[];
  else if(p==='/api/runners')body=[{id:'runner',name:'Runner',registeredBy:'owner',canGrant:true,platform:'MAC',version:'0.7.0-beta.24',online:true,enabled:true,allowedInstanceIds:[],restartSupported:runnerSupported,...(runnerPhase?{restart:{stage:runnerPhase,message:'재시작 상태 시험'}}:{})}];
+ else if(p==='/api/runners/runner/update-status')body={available:false,components:[],log:[]};
  else if(p==='/api/runners/runner/restart'){runnerPosts++;runnerPhase='RESTARTING';body={accepted:true};}
  else if(p==='/api/admin/service-restart'){
   if(route.request().method()==='POST'){posts++;phase='REQUESTED';body={supported:true,bootId:'old',stage:phase,canRestart:true};if(!fail)boot='new';}
