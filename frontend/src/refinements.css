@@ -39,3 +39,5 @@ aside{background:#172026;border-right-color:#2b373d}.workspace{border-radius:10p
 .editor strong{overflow-wrap:anywhere}.editor textarea{font-size:13px}.editor footer span{font-size:12px}
 .file-feedback{padding:20px;overflow-wrap:anywhere}.file-feedback button{margin:8px}
 @media(max-width:700px){.file-list{padding:0 10px}.file-head,.file-row{grid-template-columns:minmax(0,1fr) 54px 104px;gap:3px}.file-actions{gap:2px}.file-actions button,.file-actions a{min-width:34px;min-height:40px}.native-dialog{padding:20px}.editor footer{flex-wrap:wrap}}
+.mobile-settings-toggle{display:none}.management-nav{display:flex;flex-direction:column}
+@media(max-width:700px){.mobile-settings-toggle{display:flex;margin-top:10px;width:100%}.management-nav:not(.expanded){display:none}.management-nav{margin-top:6px}}

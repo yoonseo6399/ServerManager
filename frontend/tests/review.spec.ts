@@ -12,7 +12,8 @@ async function fixture(page:Page){
   else if(p==='/api/version-catalog')body={versions:['21.1.264']};
   else if(p.endsWith('/files'))body=[{name:'config.txt',path:'config.txt',directory:false,size:8},{name:'sub',path:'sub',directory:true,size:0}];
   else if(p.endsWith('/text'))body={content:'original',revision:'r1'};
-  else if(p.includes('/logs'))body=[];
+  else if(p.endsWith('/log-window'))body={lines:[],total:0,from:1,next:null};
+  else if(p.endsWith('/log-files')||p.includes('/logs'))body=[];
   else if(p==='/api/runners')body=[];
   else if(p.endsWith('/runner-options'))body={runners:[],selected:null};
   await route.fulfill({json:body});
@@ -135,3 +136,33 @@ test('busy create dialog stays open on Escape and browser back',async({page})=>{
  await page.getByRole('button',{name:'서버 만들기',exact:true}).click();const dialog=page.getByRole('dialog');await dialog.getByRole('button',{name:'서버 만들기',exact:true}).click();await expect(dialog).toHaveAttribute('aria-busy','true');
  await page.keyboard.press('Escape');await expect(dialog).toBeVisible();await page.goBack();await expect(dialog).toBeVisible();release();await expect(dialog).toHaveCount(0);
 });
+
+test('discarding draft enters folder with exactly one confirmation',async({page})=>{
+ await edit(page);let count=0;page.on('dialog',async d=>{count++;await d.accept();});await page.getByRole('button',{name:'sub',exact:true}).click();
+ await expect(page.getByRole('textbox',{name:'파일 내용'})).toHaveCount(0);expect(count).toBe(1);
+});
+
+test('returning through history restores the original server editor',async({page})=>{
+ await files(page);await page.getByRole('button',{name:'config.txt',exact:true}).click();await expect(page.getByRole('textbox',{name:'파일 내용'})).toHaveValue('original');
+ await page.getByRole('button',{name:/서버 B Vanilla/}).click();await expect(page.getByRole('heading',{name:/서버 B/})).toBeVisible();await expect.poll(()=>page.evaluate(()=>history.state?.view?.selected)).toBe('B');await page.goBack();
+ await expect(page.getByRole('heading',{name:/서버 A/})).toBeVisible();await expect(page.getByRole('textbox',{name:'파일 내용'})).toHaveValue('original');
+});
+
+test('text decoding rejection offers original download and retry',async({page})=>{
+ await files(page);await page.route('**/text?*',r=>r.fulfill({status:400,json:{message:'UTF-8 텍스트로 읽을 수 없어 편집을 중단했습니다.'}}));await page.getByRole('button',{name:'config.txt',exact:true}).click();
+ await expect(page.getByRole('link',{name:'원본 다운로드'})).toHaveAttribute('href','/api/instances/A/download?path=config.txt');await expect(page.getByRole('button',{name:'파일 다시 읽기'})).toBeVisible();
+});
+
+test('partial upload reports exact completed count',async({page})=>{
+ await files(page);let count=0;await page.route('**/upload?*',r=>{count++;return r.fulfill(count===1?{body:''}:{status:500,json:{message:'disk full'}});});
+ await page.getByLabel('업로드할 파일').setInputFiles([{name:'one.txt',mimeType:'text/plain',buffer:Buffer.from('1')},{name:'two.txt',mimeType:'text/plain',buffer:Buffer.from('2')}]);
+ await expect(page.getByRole('alert')).toContainText('1/2개 업로드 완료');await expect(page.getByRole('button',{name:'업로드',exact:true})).toBeEnabled();
+});
+
+test('desktop and mobile edit layout evidence',async({page})=>{
+ await edit(page);await page.screenshot({path:'test-results/review-desktop.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});await page.locator('.editor').scrollIntoViewIfNeeded();await page.screenshot({path:'test-results/review-mobile.png',fullPage:true});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});
+
+ test('mobile management menu is collapsible and keyboard reachable',async({page})=>{await page.setViewportSize({width:390,height:844});await fixture(page);await expect(page.getByRole('button',{name:'내 계정',exact:true})).toBeHidden();await page.getByRole('button',{name:'관리 메뉴 펼치기'}).click();await expect(page.getByRole('button',{name:'내 계정',exact:true})).toBeVisible();await page.getByRole('button',{name:'관리 메뉴 접기'}).click();await expect(page.getByRole('button',{name:'내 계정',exact:true})).toBeHidden();});
