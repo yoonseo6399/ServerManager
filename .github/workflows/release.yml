@@ -54,6 +54,19 @@ jobs:
           python3 -c 'import os,base64,pathlib; pathlib.Path(os.environ["UPDATE_SIGNING_KEY_FILE"]).write_bytes(base64.b64decode(os.environ["UPDATE_SIGNING_KEY"],validate=True))'
           python3 scripts/prepare-release.py
           rm -f "$UPDATE_SIGNING_KEY_FILE"
+      - name: Create release tag after validated manual build
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          tag="v$(cat VERSION)"
+          existing="$(git ls-remote origin "refs/tags/$tag" | cut -f1)"
+          if [[ -n "$existing" ]]; then
+            test "$existing" = "$(git rev-parse HEAD)" || { echo "Refusing to replace an existing version tag"; exit 1; }
+          else
+            git tag "$tag"
+            git push origin "refs/tags/$tag"
+          fi
+          # checkout's GITHUB_TOKEN creates the tag without starting another push workflow.
+          # Manual skip_full_tests therefore remains the sole build for this release.
       - name: Publish immutable version assets
         env:
           GH_TOKEN: ${{ github.token }}

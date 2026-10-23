@@ -729,3 +729,10 @@ Beta23 통합 검증도684보고=655통과/29조건부 미실행/실패0(2m20s).
 Beta23 최초 CI39746909392가683완료/2실패/28스킵으로 게시 전 중단. TCP 연결거부 ConnectException하위타입기대를 SocketException(connect자체, timeout거부)으로 보완. Python AST시험 시작여유15초/실행SIGALRM3초 분리 및 실패출력, 최초원인은미확정. 테스트 실패FULL진단/새실측 UP-TO-DATE캐시금지. 관련20개/전체655통과29스킵/TCP철회3회 통과 후 미게시태그만갱신하여 전체CI재시도.
 
 사용자링크Windows CI39749229293/job119725290135: prepare-youtube-source.py62행고정POM/modulechecksum실패. core.autocrlf true+core.eol crlf로기존규칙4개변환/불일치재현. .gitattributes메타데이터LF고정후4개pin일치/변조거부. 원문/버전/pin불변. 미게시release재시도중단후이수정포함최종CI진행.
+
+
+## 2026-10-23 — 0.7.0-beta.24 원격 원본 관리와 배경 전송
+
+Beta23 기반에 fix/mod-start-diagnostics(edf33e2), fix/mod-toggle-speed, feat/remote-service-restart, feat/live-remote-files, feat/log-blocks와 feat/operations-controls 통합 검증을 포함한다. 온라인 실행기 원본 파일·모드·로그를 사용하고 실행·전송 상태로 파일 수정을 막지 않는다. 정지 COW/일반 복사본의 run token·세대 큐·완료 영수증으로 새 게임과 중앙 배경 반영을 분리한다. 병렬 파일 전송·강한 해시 재사용·토글 후 로컬 메타데이터 갱신, owner/등록자 fresh-passkey 재시작 및 boot 확인, 모바일/StackTrace/logger/Mixin 로그와 최신 crash 안내. 구형 실행기는 업데이트를 요구하며 실패 시 중앙 파일 편집으로 대체하지 않는다. 격리 진단은 동기화가 확인된 정지 복구본만 쓴다.
+
+관련 backend 고유79:78통과/1조건부미실행, browser19통과, frontend/bootJar. 실제 HTTP500 이어받기 중 새 게임·원본 보존, 현재 GameHostSpawn/Readiness 후 추가 Java0. 읽기 전용 실제 모드234/804135748B scan986ms→3ms/재읽기0. Java 잔여물은 구버전 테스트 호스트로 분리했으며 운영 프로세스는 유지했다. 전체 suite/다른OS/실제Discord/다중장비 새 경로/전원차단은 미실행. 자세한 증거 docs/testing/operations-controls.md/json. 사용자가 전체 테스트 생략 및 릴리즈를 지시했으므로 workflow_dispatch skip_full_tests=true를 사용하고 성공한 수동 빌드가 GITHUB_TOKEN으로 새 immutable tag를 만든다(중복 push suite 방지). 서명·패키지·bootstrap·공개 게시 결과는 CI에서 확인한다. Stable main/latest와 게시 자산을 보존하고 게시 후 재다운로드 해시 검사는 하지 않는다.
