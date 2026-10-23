@@ -8,7 +8,7 @@ import java.io.OutputStream
 @Service
 class RemoteFiles(private val manager:ServerManager) {
     private val mapper=jacksonObjectMapper()
-    fun remote(id:String)=!manager.instance(id).syncEnabled() || available(id)
+    fun remote(id:String)=manager.instance(id).runnerId!=null
     fun filesRemote(id:String)=manager.instance(id).runnerId!=null
     fun available(id:String)=manager.liveFilesAvailable(id)
     private fun call(id:String,op:String,path:String="",offset:Long=0,data:String?=null,revision:String?=null,uploadId:String?=null,to:String="")=

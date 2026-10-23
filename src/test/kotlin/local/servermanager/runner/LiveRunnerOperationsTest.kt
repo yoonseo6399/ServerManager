@@ -91,6 +91,13 @@ class LiveRunnerOperationsTest {
         assertFails {manager.snapshotReady(cfg.id,"runner",SnapshotReady(generation(2),token,null,null))}
         assertFails {manager.snapshotCommitted(cfg.id,"other",ready.generation)}
     }
+    @Test fun `active legacy run gains a stable generation token without restarting its process`()=managerFixture {manager,cfg->
+        manager.start(cfg.id);manager.root.resolve(cfg.id).resolve("remote-run").deleteExisting()
+        manager.remoteState(cfg.id,"runner","RUNNING");manager.runtime(cfg.id).remotePid=1234
+        assertNull(manager.remoteRunToken(cfg.id,"other",1234));assertNull(manager.remoteRunToken(cfg.id,"runner",9999))
+        val token=manager.remoteRunToken(cfg.id,"runner",1234)!!;assertEquals(token,manager.remoteRunToken(cfg.id,"runner",1234));assertEquals("RUNNING",manager.runtime(cfg.id).state)
+        manager.snapshotReady(cfg.id,"runner",SnapshotReady(generation(1),token,RunnerExitReport(0),null));assertEquals("STOPPED",manager.runtime(cfg.id).state)
+    }
     @Test fun `multiple stops and pending edits are ordered and stale mirrors cannot erase new edits`()=managerFixture {manager,cfg->
         val root=manager.root.resolve(cfg.id)
         fun stopCopy(n:Int):SnapshotReady {

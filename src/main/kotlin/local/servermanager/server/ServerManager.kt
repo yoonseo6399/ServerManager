@@ -424,6 +424,14 @@ class ServerManager {
         require(StoppedSnapshots.valid(generation));val state=snapshotSync(id)
         check(state?.runner==runner && state.pending.firstOrNull()==generation) {"종료 복사본의 전송 순서가 다릅니다"}
     }
+    /** Adopt an already-running hosted game after a controller upgrade without touching its process. */
+    fun remoteRunToken(id:String,runner:String,pid:Long):String? {
+        val r=runtime(id);synchronized(r) {
+            if(instance(id).runnerId!=runner || pid<=0 || r.remotePid!=pid || r.state !in setOf("STARTING","RUNNING","STOPPING") || !root.resolve(id).resolve("remote-lease").exists())return null
+            val file=root.resolve(id).resolve("remote-run")
+            return if(file.exists())file.readText().also {require(UUID.fromString(it).toString()==it)} else UUID.randomUUID().toString().also {atomicText(file,it)}
+        }
+    }
     fun snapshotReady(id:String,runner:String,ready:SnapshotReady) {
         require(instance(id).runnerId==runner && instance(id).syncEnabled() && ready.exit?.crashReport.let {it==null || CrashReports.validName(it)})
         require(StoppedSnapshots.valid(ready.generation) && (ready.exit?.reason==null || ready.exit.reason in setOf("IDLE","STOP_TIMEOUT")));val r=runtime(id)
