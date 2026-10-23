@@ -302,6 +302,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
                 else if(event.state=="STOPPED") manager.remoteWorkerReady(instanceId,id)
                 else event.state?.let { manager.remoteState(instanceId,id,it,event.detail) }
                 manager.remoteMetrics(instanceId,id,event.pid,event.cpuPercent,event.rssMb,event.uptimeSeconds,event.playerCount,event.players)
+                if(id in liveFileRunners && event.pid!=null)manager.remoteRunToken(instanceId,id,event.pid)?.let {token->send(id,RunnerMessage("run-token",instanceId=instanceId,pid=event.pid,token=token))}
                 // A manager restart loses in-memory listeners while Minecraft may
                 // remain alive on its runner. Restore only from this authenticated
                 // session's current, authorized running generation; never send start.

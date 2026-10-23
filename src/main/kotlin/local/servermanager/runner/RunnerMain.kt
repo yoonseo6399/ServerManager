@@ -566,6 +566,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                         "restart-request" -> restartRequested(message.token)
                         "llm-request" -> submitLlm(message)
                         "llm-cancel" -> message.token?.let {llmTasks.remove(it)?.cancel(true)}
+                        "run-token" -> if(message.instanceId!=null && message.pid!=null && message.token!=null)adoptRunToken(message.instanceId,message.pid,message.token)
                         "workspace" -> if(message.instanceId!=null && message.token!=null && message.detail!=null)workers.submit {workspace(message.instanceId,message.token,message.detail)}
                         "install" -> if(message.instanceId!=null && message.token!=null && message.detail!=null)workers.submit {installServer(message.instanceId,message.token,message.detail)}
                         "start" -> if(message.instanceId!=null && message.detail!=null) workers.submit { beginStart(message.instanceId,message.detail) }
@@ -666,6 +667,14 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         return mapper.readTree(response.body()).path("batchProtocol").asInt()==1
     }
     private fun encode(value:String)=URLEncoder.encode(value,Charsets.UTF_8)
+    private fun adoptRunToken(id:String,pid:Long,token:String) {
+        require(UUID.fromString(token).toString()==token)
+        val process=processes[id] ?: return
+        if(!process.isAlive || process.pid()!=pid)return
+        configs.computeIfPresent(id){_,cfg->
+            if(cfg.runToken==token)cfg else cfg.copy(runToken=token).also {atomicText(instanceRoot(id).resolve("instance.json"),mapper.writeValueAsString(it))}
+        }
+    }
     private fun localEdits(id:String)=instanceRoot(id).resolve("local-edits.pending")
     private fun workspaceService(id:String)=workspaces.compute(id) {_,previous->
         val directory=serverDir(id)
