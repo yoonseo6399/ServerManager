@@ -468,7 +468,7 @@ class ServerManager {
             checkSnapshot(id,runner,generation)
             val next=state.copy(pending=state.pending.drop(1),revisions=state.revisions-generation);
             val edits=root.resolve(id).resolve("runner-edits.pending")
-            if(edits.exists() && state.revisions[generation]==edits.readText() && !r.remoteFileBusy)edits.deleteIfExists()
+            if(edits.exists() && state.revisions[generation]==edits.readText())edits.deleteIfExists()
             atomicText(snapshotState(id),mapper.writeValueAsString(next))
             if(next.pending.isEmpty() && !root.resolve(id).resolve("remote-lease").exists() && !backgroundPending(id))signal(id,"snapshot","최신 종료 복사본 반영 완료")
             if(next.pending.isEmpty())r.fileTransfer=(r.fileTransfer ?: FolderImportProgress("COMPLETE")).copy(phase="COMPLETE",message="종료 복사본 전송 완료 · 현재 게임 실행 상태 유지")

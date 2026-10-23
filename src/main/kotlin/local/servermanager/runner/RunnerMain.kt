@@ -675,6 +675,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             if(cfg.runToken==token)cfg else cfg.copy(runToken=token).also {atomicText(instanceRoot(id).resolve("instance.json"),mapper.writeValueAsString(it))}
         }
     }
+    private fun settledEditRevision(id:String)=if(workspaces[id]?.busy()==true)null else localEdits(id).takeIf {it.exists()}?.readText()
     private fun localEdits(id:String)=instanceRoot(id).resolve("local-edits.pending")
     private fun workspaceService(id:String)=workspaces.compute(id) {_,previous->
         val directory=serverDir(id)
@@ -1002,7 +1003,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                     send(RunnerMessage("file-progress",id,detail=mapper.writeValueAsString(FolderImportProgress("SCANNING",message="종료 복사본 준비 중 · 준비가 끝나면 바로 다시 시작할 수 있습니다"))))
                     val token=configs[id]?.runToken
                     val previous=snapshots(id).list().lastOrNull {it.ready.runToken==token}
-                    val captured=previous ?: snapshots(id).capture(serverDir(id),token,exit,localEdits(id).takeIf {it.exists()}?.readText())
+                    val captured=previous ?: snapshots(id).capture(serverDir(id),token,exit,settledEditRevision(id))
                     transferResponse(http("POST","/api/runners/transfer/$id/snapshot-ready",HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(captured.ready)),"application/json"),"종료 복사본 접수 대기")
                     // Durable copy is ready before releasing the original folder for a new process.
                     dirty(id).deleteIfExists()
