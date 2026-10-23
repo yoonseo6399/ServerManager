@@ -736,3 +736,10 @@ Beta23 최초 CI39746909392가683완료/2실패/28스킵으로 게시 전 중단
 Beta23 기반에 fix/mod-start-diagnostics(edf33e2), fix/mod-toggle-speed, feat/remote-service-restart, feat/live-remote-files, feat/log-blocks와 feat/operations-controls 통합 검증을 포함한다. 온라인 실행기 원본 파일·모드·로그를 사용하고 실행·전송 상태로 파일 수정을 막지 않는다. 정지 COW/일반 복사본의 run token·세대 큐·완료 영수증으로 새 게임과 중앙 배경 반영을 분리한다. 병렬 파일 전송·강한 해시 재사용·토글 후 로컬 메타데이터 갱신, owner/등록자 fresh-passkey 재시작 및 boot 확인, 모바일/StackTrace/logger/Mixin 로그와 최신 crash 안내. 구형 실행기는 업데이트를 요구하며 실패 시 중앙 파일 편집으로 대체하지 않는다. 격리 진단은 동기화가 확인된 정지 복구본만 쓴다.
 
 관련 backend 고유81:80통과/1조건부미실행, browser19통과, frontend/bootJar. 실제 HTTP500 이어받기 중 새 게임·원본 보존, 현재 GameHostSpawn/Readiness 후 추가 Java0. 읽기 전용 실제 모드234/804135748B scan986ms→3ms/재읽기0. Java 잔여물은 구버전 테스트 호스트로 분리했으며 운영 프로세스는 유지했다. 전체 suite/다른OS/실제Discord/다중장비 새 경로/전원차단은 미실행. 자세한 증거 docs/testing/operations-controls.md/json. 사용자가 전체 테스트 생략 및 릴리즈를 지시했으므로 workflow_dispatch skip_full_tests=true를 사용하고 성공한 수동 빌드가 GITHUB_TOKEN으로 새 immutable tag를 만든다(중복 push suite 방지). 서명·패키지·bootstrap·공개 게시 결과는 CI에서 확인한다. Stable main/latest와 게시 자산을 보존하고 게시 후 재다운로드 해시 검사는 하지 않는다.
+
+
+## 2026-10-23 — 0.7.0-beta.25 리뷰 개선
+
+Beta24 기반 fix/review-improvements eefdfe7 통합(solo). R1~R8/B1 수정, A1은 파일 UI/공통 Dialog/텍스트 디코딩/팩 보관 정책 분리. 파일 조회 세대/서버별 수명, dirty/busy 이탈 방지, 충돌·부분 업로드·재인증 복구, 키보드 모달·모바일 관리 메뉴. 권한 파일 오류 시 거부, strict UTF-8, 만료 업로드 수거/8개 상한, 일반 스냅샷 복사 공간 검사. 기존 OWNER 모델 검토 설계 유지.
+
+사전 backend42/UI27 실패0, TS/Vite 통과. 세부 한계 docs/testing/review-improvements.md. 사용자 배포 승인으로 전체 suite 포함 릴리즈 CI 실행. 기존 서명 secret 사용, 베타 prerelease 및 stable latest 유지. 운영 설치/재시작은 수행하지 않음. CI 게시 결과는 완료 후 기록.
