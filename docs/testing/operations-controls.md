@@ -4,7 +4,7 @@
 
 ## 결과
 
-- 관련 backend 고유 79건: 통과 78, 조건부 미실행 1, 실패 0. 마지막 수정 이후 변경 경로를 다시 검증했다. 대상: LiveRunnerOperations, RunnerWorkspace/Transfer/ReceiptRecovery/Folders/Gateway, ModManagement/InventoryCache/Artifacts, ServiceRestart/Access/RunnerServiceRestart, HostedLocalGames, WebDavSync, LogFiles, GameHostSpawn, HostReadiness.
+- 관련 backend 고유 81건: 통과 80, 조건부 미실행 1, 실패 0. 마지막 수정 이후 변경 경로를 다시 검증했다. 대상: LiveRunnerOperations, RunnerWorkspace/Transfer/ReceiptRecovery/Folders/Gateway, ModManagement/InventoryCache/Artifacts, ServiceRestart/Access/RunnerServiceRestart, HostedLocalGames, WebDavSync, LogFiles, GameHostSpawn, HostReadiness.
 - UI 고유 19건 통과: 실행·전송 중 파일 저장/모드 토글, 읽기 전용 사용자, 강제 활성/비활성화, 처음 시작 후 0/1200줄 뒤 크래시, 모바일 가로 스크롤·logger 그룹·프레임 Mixin, 새 크래시 파일 발견/다운로드 링크, 관리 앱/실행기 재시작·취소·새 boot 확인.
 - TypeScript/Vite production build, Kotlin/bootJar 통과. 릴리즈 버전 빌드·패키지·서명·bootstrap 시험은 릴리즈 CI 결과로 별도 확정한다.
 - 실제 Mac의 모드 234개, 804,135,748바이트 읽기 전용 스캔: 첫 986ms / 재조회 3ms, 재조회 읽은 파일 바이트 0, 해시 재사용 234. 실제 운영 모드 토글 전체 처리 시간 측정은 아니다.
@@ -24,3 +24,5 @@
 ## 중간 실패 기록
 
 초기 테스트 준비에서 uncached 모드 누락, mock runner online 누락, Mockito nullable matcher, 브라우저 editor selector/update-status 응답 누락을 수정했다. 최초 컴파일의 잘못 치환된 manifest 인자를 수정했고, 재시작 테스트의 로컬 변수 이름도 정리했다. 환경의 Vite 포트 sandbox 거절은 허용된 로컬 테스트 실행으로 재실행했다. 실제 기능 결함인 snapshot 주기 재시도 누락·heartbeat의 배경 진행률 덮어쓰기·이전 중앙 crash 첨부 경로를 수정하고 해당 경로를 재검증했다.
+
+게시 직전 짧은 파일·모드 변경을 preparing 예약에 등록해 제어 계층 재시작과의 경합을 막았다. 완료된 편집 복사본은 RPC 응답 직전에도 반영 완료로 인정하되 아직 WRITE_CHUNK 중인 업로드는 완료로 간주하지 않는 시험도 통과했다. 첫 릴리즈 CI는 이 보완 전에 게시하지 않도록 수동 취소했으며 기능 보완 후 재실행한다.

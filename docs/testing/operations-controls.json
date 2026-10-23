@@ -2,8 +2,8 @@
   "date": "2026-10-23",
   "fullSuite": "skipped by user request",
   "backend": {
-    "unique": 79,
-    "passed": 78,
+    "unique": 81,
+    "passed": 80,
     "conditionalSkipped": 1,
     "failed": 0
   },
