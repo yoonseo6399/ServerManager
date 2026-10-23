@@ -25,8 +25,8 @@ class ServiceRestartAccessTest {
     private fun session(account:Account,fresh:Boolean=true)=MockHttpSession().also {it.setAttribute("sm.user",account.id);it.setAttribute("sm.epoch",account.epoch);it.setAttribute("sm.started",System.currentTimeMillis());if(fresh)it.setAttribute("sm.verified",System.currentTimeMillis())}
     @Test fun `restart HTTP filters enforce owner registrant fresh passkey and CSRF`() {
         val manager=mock(ServerManager::class.java);`when`(manager.root).thenReturn(temp.resolve("profile").createDirectories())
-        val desktop=mock(DesktopLifecycle::class.java);val status=ServiceRestartStatus(true,"boot","REQUESTED",true)
-        `when`(desktop.serviceRestartStatus()).thenReturn(status);`when`(desktop.requestServiceRestart()).thenReturn(status)
+        val desktop=mock(DesktopLifecycle::class.java);val expected=ServiceRestartStatus(true,"boot","REQUESTED",true)
+        `when`(desktop.serviceRestartStatus()).thenReturn(expected);`when`(desktop.requestServiceRestart()).thenReturn(expected)
         val registry=mock(RunnerRegistry::class.java);val gateway=mock(RunnerGateway::class.java)
         AnnotationConfigWebApplicationContext().use {context->
             context.servletContext=MockServletContext();context.register(Web::class.java)
