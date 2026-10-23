@@ -1,4 +1,4 @@
-상태: 관리 앱 동일 버전 재시작·실행기 재연결 확인 구현, 선커밋 후 검증 예정
+상태: 구현·기능 검증 완료, v0.7.0-beta.24 게시
 
 # feat/remote-service-restart
 
@@ -13,3 +13,5 @@
 - runner: 정확한 ACK 토큰, raw jar/서버 준비 중 거부, supervised exit callback, 중복, 새 boot와 같은 boot 재연결 구별. HTTP security chain으로 owner/등록자/다른 사용자 권한 확인.
 - 브라우저: 확인 취소, 승인 요청, 재인증 재시도, 연결 끊김과 boot 변경 완료, 지원 없는 실행기 잠금/재연결 상태.
 - 기존 hosted-game 보존/bootstraps와 최종 통합 전체 회귀. 테스트·미실행 결과를 인계 문서에 남긴다.
+
+Beta24 게시 완료. 관련 기능80통과/조건부1미실행, browser19통과, 전체 suite는 사용자 지시로 생략. 게시자산9개와CI39893980700성공을 메타데이터로 확인했고 게시 후 재다운로드는 하지 않았다. 상세: https://github.com/yoonseo6399/ServerManager/blob/release/0.7.0-beta.24/docs/testing/operations-controls.md
