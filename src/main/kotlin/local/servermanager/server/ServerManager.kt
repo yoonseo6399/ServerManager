@@ -848,7 +848,7 @@ class ServerManager {
         val bytes=p.inputStream().use {it.readNBytes(2*1024*1024+1)}
         require(bytes.size<=2*1024*1024) {"2 MiB 이하 텍스트 파일만 편집할 수 있습니다"}
         require(!bytes.contains(0.toByte())) { "바이너리 파일은 다운로드하세요" }
-        return mapOf("content" to bytes.toString(Charsets.UTF_8), "revision" to digest(bytes))
+        return mapOf("content" to EditableText.decode(bytes), "revision" to digest(bytes))
     }
     private fun digest(bytes: ByteArray)=java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
     fun write(id:String,relative:String,bytes:ByteArray,revision:String?=null) {

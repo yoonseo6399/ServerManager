@@ -3,6 +3,7 @@ package local.servermanager
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import jakarta.annotation.PreDestroy
+import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.multipart.MultipartFile
@@ -174,7 +175,11 @@ class MrpackImporter(private val manager: ServerManager,private val catalog: Mod
     private val http=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).followRedirects(HttpClient.Redirect.NEVER).build()
     private val jobs=Executors.newSingleThreadExecutor()
     private val imports=manager.root.resolve("imports").also { it.createDirectories() }
-    fun preview(input: InputStream): PackPreview {
+    private val active=mutableSetOf<String>()
+    init {cleanupExpired()}
+    @Scheduled(fixedDelay=3600000) @Synchronized fun cleanupExpired() {PackArchiveRetention.sweep(imports,active)}
+    @Synchronized fun preview(input: InputStream): PackPreview {
+        cleanupExpired();PackArchiveRetention.requireCapacity(imports)
         val token=UUID.randomUUID().toString();val dir=imports.resolve(token);dir.createDirectories()
         try {
             input.use { PackFormat.copyBounded(it,dir.resolve("pack.mrpack"),PackFormat.MAX_FILE) }
@@ -182,7 +187,7 @@ class MrpackImporter(private val manager: ServerManager,private val catalog: Mod
             dir.resolve("preview.json").writeText(mapper.writeValueAsString(result));return result
         } catch(e:Exception) { dir.toFile().deleteRecursively();throw e }
     }
-    fun import(req: PackImportRequest): Map<String,Any?> {
+    @Synchronized fun import(req: PackImportRequest): Map<String,Any?> {
         require(req.token.matches(Regex("[a-f0-9-]{36}"))) { "잘못된 가져오기 토큰" }
         val dir=imports.resolve(req.token);val zip=dir.resolve("pack.mrpack")
         require(zip.exists() && Instant.now().isBefore(Files.getLastModifiedTime(zip).toInstant().plusSeconds(86400))) { "팩 미리보기가 만료되었습니다. 다시 업로드하세요" }
@@ -192,6 +197,7 @@ class MrpackImporter(private val manager: ServerManager,private val catalog: Mod
         val id=(row.getValue("config") as Instance).id;val r=manager.runtime(id)
         manager.root.resolve(id).resolve("import.pending").writeText(req.token)
         synchronized(r) { r.state="IMPORTING";r.event("system","mrpack 가져오기: ${plan.name} ${plan.version}") }
+        active.add(req.token)
         jobs.submit {
             val stage=dir.resolve("stage")
             try {
@@ -219,7 +225,7 @@ class MrpackImporter(private val manager: ServerManager,private val catalog: Mod
             } catch(e:Exception) {
                 synchronized(r) { r.state="IMPORT_FAILED";r.event("error","mrpack 가져오기 실패: ${e.message}. 원본 팩을 다시 가져오세요.") }
                 stage.toFile().deleteRecursively()
-            }
+            } finally {synchronized(this) {active.remove(req.token)}}
         }
         return manager.view(id)
     }

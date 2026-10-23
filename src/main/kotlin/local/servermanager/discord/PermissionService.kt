@@ -43,8 +43,17 @@ class PermissionService(private val directory:Path,private val clock:()->Long = 
     private val ceilingFile=directory.resolve("permission-ceiling.json")
     private val auditFile=directory.resolve("permission-audit.jsonl")
     private val declared=LinkedHashMap<String,PermissionDecl>()
-    private var grants:List<PermissionGrant> = runCatching {if(grantsFile.exists())mapper.readValue<PermissionGrantFile>(grantsFile.readText()).grants else emptyList()}.getOrDefault(emptyList())
-    private var ceiling:PermissionCeiling = runCatching {if(ceilingFile.exists())mapper.readValue<PermissionCeiling>(ceilingFile.readText()) else PermissionCeiling()}.getOrDefault(PermissionCeiling())
+    private val loadErrors=linkedSetOf<String>()
+    private inline fun <reified T> load(path:Path,default:()->T):T = try {
+        // notExists is false for inaccessible paths: those must fail closed too.
+        if(Files.notExists(path))default() else mapper.readValue<T>(path.readText())
+    } catch(e:Exception) {loadErrors.add(path.fileName.toString());default()}
+    private var grants:List<PermissionGrant> = load(grantsFile) {PermissionGrantFile()}.grants
+    private var ceiling:PermissionCeiling = load(ceilingFile) {PermissionCeiling()}
+    @Synchronized fun storageError():String? = if(loadErrors.isEmpty())null else
+        "권한 설정을 읽을 수 없어 실행을 차단했습니다: ${loadErrors.joinToString()}. 정상 백업을 복원한 뒤 다시 시작하세요."
+    private fun requireHealthy() {check(loadErrors.isEmpty()) {storageError()!!}}
+
 
     // ---- Declarations -------------------------------------------------------------------------------------------
     @Synchronized fun declare(decls:List<PermissionDecl>) {
@@ -64,6 +73,7 @@ class PermissionService(private val directory:Path,private val clock:()->Long = 
     @Synchronized fun ceiling():PermissionCeiling = ceiling
     /** Not reachable from Discord commands. Called from local configuration code or a management-web endpoint. */
     @Synchronized fun setCeiling(next:PermissionCeiling,actor:String="local") {
+        requireHealthy()
         persist(ceilingFile,mapper.writeValueAsString(next));ceiling=next
         audit("*",actor,"ceiling","maxRisk=${next.maxRisk} disabled=${next.disabled.sorted().joinToString(",")}")
     }
@@ -71,6 +81,7 @@ class PermissionService(private val directory:Path,private val clock:()->Long = 
     // ---- Decision -------------------------------------------------------------------------------------------------
     private fun matches(rule:String,permission:String)=rule==permission || (rule.endsWith(".*") && permission.startsWith(rule.removeSuffix("*")))
     @Synchronized fun check(guildId:String,roles:Set<String>,permission:String,superAdmin:Boolean=false):PermissionDecision {
+        storageError()?.let {return PermissionDecision(false,it)}
         val decl=declared[permission] ?: return PermissionDecision(false,"선언되지 않은 권한입니다")
         if(decl.risk.ordinal>ceiling.maxRisk.ordinal)return PermissionDecision(false,"위험도 상한(${ceiling.maxRisk})을 넘는 권한입니다. 상한은 관리 컴퓨터의 로컬 설정에서만 올릴 수 있습니다")
         if(permission in ceiling.disabled)return PermissionDecision(false,"관리 컴퓨터의 로컬 설정에서 비활성화된 권한입니다")
@@ -86,6 +97,7 @@ class PermissionService(private val directory:Path,private val clock:()->Long = 
     // ---- Changes (super admin only; HIGH needs confirmation and a short lifetime) -------------------------------------
     private fun requireAdmin(actorIsSuperAdmin:Boolean) {check(actorIsSuperAdmin) {"최고 관리자 역할만 권한 규칙을 바꿀 수 있습니다."}}
     @Synchronized fun grant(guildId:String,actor:String,actorIsSuperAdmin:Boolean,roleId:String,permission:String,effect:String="ALLOW",ttlMinutes:Long?=null,confirmHigh:Boolean=false):String {
+        requireHealthy()
         requireAdmin(actorIsSuperAdmin)
         require(ROLE.matches(roleId)) {"역할 ID가 올바르지 않습니다."}
         require(effect=="ALLOW" || effect=="DENY") {"효과는 ALLOW 또는 DENY여야 합니다."}
@@ -110,6 +122,7 @@ class PermissionService(private val directory:Path,private val clock:()->Long = 
         return "$effect 규칙을 저장했습니다: <@&$roleId> · $permission"+(ttlMinutes?.let {" · $it 분 후 만료"} ?: "")
     }
     @Synchronized fun revoke(guildId:String,actor:String,actorIsSuperAdmin:Boolean,roleId:String,permission:String):Int {
+        requireHealthy()
         requireAdmin(actorIsSuperAdmin)
         val next=grants.filterNot {it.guildId==guildId && it.subject.id==roleId && it.permission==permission}
         val removed=grants.size-next.size
@@ -118,6 +131,7 @@ class PermissionService(private val directory:Path,private val clock:()->Long = 
     }
     /** Kill switch: removes every rule of one guild. */
     @Synchronized fun reset(guildId:String,actor:String,actorIsSuperAdmin:Boolean):Int {
+        requireHealthy()
         requireAdmin(actorIsSuperAdmin)
         val next=grants.filterNot {it.guildId==guildId};val removed=grants.size-next.size
         if(removed>0){persist(grantsFile,mapper.writeValueAsString(PermissionGrantFile(next)));grants=next}
