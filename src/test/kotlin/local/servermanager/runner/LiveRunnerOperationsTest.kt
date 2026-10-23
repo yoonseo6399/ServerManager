@@ -70,6 +70,21 @@ class LiveRunnerOperationsTest {
             assertEquals("approved-write",home.resolve("instances/${cfg.id}/local-edits.pending").readText())
         }finally{release.countDown();pool.shutdownNow();field<MutableMap<String,Process>>(agent,"processes").clear();agent.shutdownGracefully()}
     }
+    @Test fun `control restart refuses while a live file mutation is in progress`() {
+        val cfg=config().copy(fileSyncEnabled=false);val home=temp.resolve("restart-agent");val base=home.resolve("instances/${cfg.id}/server").createDirectories()
+        val entered=CountDownLatch(1);val release=CountDownLatch(1)
+        val workspace=RunnerWorkspace(base,temp.resolve("restart-history"),beforeMutation={entered.countDown();check(release.await(5,TimeUnit.SECONDS))}){}
+        val agent=RunnerAgent(home,RunnerIdentity("https://localhost:1","runner","fixture","unused","MAC"),supervisedRestart=true)
+        agent.restartProcess={}
+        field<MutableMap<String,RunnerWorkspace>>(agent,"workspaces")[cfg.id]=workspace
+        val method=RunnerAgent::class.java.getDeclaredMethod("workspace",String::class.java,String::class.java,String::class.java).also {it.isAccessible=true}
+        val pool=Executors.newSingleThreadExecutor()
+        try {
+            val write=pool.submit {method.invoke(agent,cfg.id,"write",mapper.writeValueAsString(WorkspaceRequest("MKDIR",cfg,"new-folder")))}
+            assertTrue(entered.await(3,TimeUnit.SECONDS));assertEquals("SERVER_PREPARING",agent.restartRequested("do-not-interrupt-file-change"))
+            release.countDown();write.get(5,TimeUnit.SECONDS);assertTrue(base.resolve("new-folder").isDirectory())
+        }finally{release.countDown();pool.shutdownNow();agent.shutdownGracefully()}
+    }
     private fun managerFixture(action:(ServerManager,Instance)->Unit) {
         val manager=ServerManager();val cfg=(manager.create(CreateRequest("snapshot-${UUID.randomUUID()}","0.16.14",java.net.ServerSocket(0).use {it.localPort},512,loader="Fabric"))["config"] as Instance)
         manager.instance(cfg.id).runnerId="runner";manager.runtime(cfg.id).state="STOPPED"
