@@ -127,6 +127,15 @@ class LiveRunnerOperationsTest {
         manager.snapshotReady(cfg.id,"runner",edit);assertEquals("STOPPED",manager.runtime(cfg.id).state)
         manager.snapshotCommitted(cfg.id,"runner",edit.generation);assertFalse(manager.backgroundPending(cfg.id))
     }
+    @Test fun `snapshot clears completed edits even before RPC returns but not an unfinished upload`()=managerFixture {manager,cfg->
+        val root=manager.root.resolve(cfg.id);root.resolve("runner-edits.pending").writeText("upload-in-progress")
+        manager.start(cfg.id);val first=SnapshotReady(generation(1),root.resolve("remote-run").readText(),RunnerExitReport(0),null)
+        manager.snapshotReady(cfg.id,"runner",first);manager.snapshotCommitted(cfg.id,"runner",first.generation)
+        assertTrue(manager.backgroundPending(cfg.id));assertEquals("upload-in-progress",root.resolve("runner-edits.pending").readText())
+        val committed=SnapshotReady(generation(2),null,null,"upload-in-progress",editOnly=true)
+        manager.runtime(cfg.id).remoteFileBusy=true;manager.snapshotReady(cfg.id,"runner",committed);manager.snapshotCommitted(cfg.id,"runner",committed.generation)
+        assertFalse(manager.backgroundPending(cfg.id));manager.runtime(cfg.id).remoteFileBusy=false
+    }
     @Test fun `generation transfer mirrors files while active game state remains unchanged`()=managerFixture {manager,cfg->
         manager.start(cfg.id);val ready=SnapshotReady(generation(1),manager.root.resolve(cfg.id).resolve("remote-run").readText(),RunnerExitReport(0),null)
         manager.snapshotReady(cfg.id,"runner",ready);manager.start(cfg.id);manager.remoteState(cfg.id,"runner","RUNNING");manager.runtime(cfg.id).remotePid=321
