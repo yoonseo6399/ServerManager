@@ -730,6 +730,8 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                 return RunnerMessage("workspace-result",id,"OK",token=requestId,detail=result)
             }
             if(readOnly)execute() else synchronized(operationLocks.computeIfAbsent(id){Any()}) {
+                synchronized(lifecycle){updateCheckpoint();check(preparing.add(id)) {"실행기 작업이 진행 중입니다"}}
+                try {
                 val result=execute()
                 if(request.op in setOf("WRITE_COMMIT","MKDIR","MOVE","DELETE","MOD_TOGGLE") && instance.syncEnabled() && processes[id]?.isAlive!=true && !orphanAlive(id) && !dirty(id).exists()) {
                     val snapshot=snapshots(id).capture(serverDir(id),null,null,localEdits(id).takeIf {it.exists()}?.readText(),editOnly=true)
@@ -737,6 +739,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                     workers.submit {uploadSnapshots(id)}
                 }
                 result
+                } finally {preparing.remove(id)}
             }
         }catch(e:Exception){RunnerMessage("workspace-result",id,"ERROR",token=requestId,detail=e.message?.take(500) ?: "파일 작업 실패")}
         send(response)
