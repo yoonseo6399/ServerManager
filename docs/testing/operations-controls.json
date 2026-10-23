@@ -1,0 +1,36 @@
+{
+  "date": "2026-10-23",
+  "fullSuite": "skipped by user request",
+  "backend": {
+    "unique": 79,
+    "passed": 78,
+    "conditionalSkipped": 1,
+    "failed": 0
+  },
+  "browser": {
+    "unique": 19,
+    "passed": 19,
+    "failed": 0
+  },
+  "modScan": {
+    "files": 234,
+    "bytes": 804135748,
+    "coldMs": 986,
+    "warmMs": 3,
+    "warmReadBytes": 0
+  },
+  "javaProcesses": {
+    "runnerMachine": {
+      "total": 18,
+      "operational": 4,
+      "legacyTestHosts": 14,
+      "newSurvivorsAfterHostTests": 0
+    },
+    "managerMachine": {
+      "operational": 3,
+      "legacyTestHosts": 2
+    }
+  },
+  "productionRestarted": false,
+  "otherOsTested": false
+}
