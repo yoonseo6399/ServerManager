@@ -50,7 +50,7 @@ export function useBackClose(open:boolean,onClose:()=>void,key:string){
   else if(!open&&mine.current)release();
  },[open]);
  useEffect(()=>{
-  const on=()=>{if(mine.current&&entry().modal!==key){mine.current=false;close.current();}};
+  const on=()=>{if(mine.current&&entry().modal!==key){let closed=false;navigateWithUnsaved(()=>{closed=true;mine.current=false;close.current();});if(!closed)history.forward();}};
   window.addEventListener('popstate',on);
   return()=>{window.removeEventListener('popstate',on);if(mine.current)release();};
  },[key]);

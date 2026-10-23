@@ -29,3 +29,13 @@ aside{background:#172026;border-right-color:#2b373d}.workspace{border-radius:10p
 
 .transfer-estimates{display:flex;flex-wrap:wrap;gap:14px 28px;margin:16px 0;line-height:1.7;color:#9eb4a6}.transfer-estimates strong{display:inline-block;margin-left:9px;color:#d4e6db;font-variant-numeric:tabular-nums}
 .transfer-card .transfer-prep{margin:14px 0 0;color:#b7dfc7;font-size:12.5px}.transfer-card .transfer-prep strong{color:#e3f3e9}
+
+.native-dialog{color:inherit;margin:auto;max-width:calc(100vw - 24px);max-height:calc(100dvh - 24px)}
+.native-dialog::backdrop{background:#000a;backdrop-filter:blur(5px)}
+.dialog-fields{border:0;padding:0;margin:0;min-width:0}
+.file-name{white-space:normal;overflow-wrap:anywhere;text-align:left}
+.file-actions button,.file-actions a{min-width:32px;min-height:32px}
+.file-toolbar-path{overflow-wrap:anywhere;white-space:normal}
+.editor strong{overflow-wrap:anywhere}.editor textarea{font-size:13px}.editor footer span{font-size:12px}
+.file-feedback{padding:20px;overflow-wrap:anywhere}.file-feedback button{margin:8px}
+@media(max-width:700px){.file-list{padding:0 10px}.file-head,.file-row{grid-template-columns:minmax(0,1fr) 54px 104px;gap:3px}.file-actions{gap:2px}.file-actions button,.file-actions a{min-width:34px;min-height:40px}.native-dialog{padding:20px}.editor footer{flex-wrap:wrap}}

@@ -49,7 +49,7 @@ class RemoteFiles(private val manager:ServerManager) {
     }
     fun text(id:String,path:String):Map<String,String> {
         val out=java.io.ByteArrayOutputStream();download(id,path,out,2L*1024*1024);val bytes=out.toByteArray();require(!bytes.contains(0)) {"바이너리 파일은 다운로드하세요"}
-        return mapOf("content" to bytes.toString(Charsets.UTF_8),"revision" to java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString(""){"%02x".format(it)})
+        return mapOf("content" to EditableText.decode(bytes),"revision" to java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString(""){"%02x".format(it)})
     }
     fun write(id:String,path:String,input:InputStream,revision:String?=null,limit:Long=RunnerWorkspace.MAX)=manager.withRemoteFiles(id) {
         val upload=call(id,"WRITE_BEGIN",path,revision=revision).path("uploadId").asText();var offset=0L
