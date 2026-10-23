@@ -376,7 +376,7 @@ class ServerManager {
             checkIdle(r);check(i.syncEnabled() || enableSync) {"파일 동기화를 켜서 실행기 원본을 반영하세요"};val runner=i.runnerId ?: error("기존 폴더를 등록한 실행기를 선택하세요")
             val previous=r.state;val request=UUID.randomUUID().toString();if(enableSync)atomicText(root.resolve(id).resolve("sync-enable.pending"),request)
             folderImportMarker(id).writeText(request);root.resolve(id).resolve("remote-lease").writeText(runner)
-            r.state="IMPORTING";r.fileTransfer=null;r.transferAuthoritative=false;r.transferMeter.reset();r.folderImport=FolderImportProgress("SCANNING",message="실행기의 기존 폴더를 확인하고 있습니다")
+            r.state="IMPORTING";if(!backgroundPending(id)){r.fileTransfer=null;r.transferAuthoritative=false;r.transferMeter.reset()};r.folderImport=FolderImportProgress("SCANNING",message="실행기의 기존 폴더를 확인하고 있습니다")
             try {(remoteController ?: error("실행기 연결을 확인하세요")).importFolder(i.copy(),request)}
             catch(e:Exception){folderImportMarker(id).deleteIfExists();root.resolve(id).resolve("remote-lease").deleteIfExists();root.resolve(id).resolve("sync-enable.pending").deleteIfExists();r.state=previous;r.folderImport=FolderImportProgress("FAILED",message=e.message.orEmpty());throw e}
             r.event("system","Minecraft를 실행하지 않고 기존 서버 폴더를 가져옵니다")
@@ -426,7 +426,7 @@ class ServerManager {
     }
     fun snapshotReady(id:String,runner:String,ready:SnapshotReady) {
         require(instance(id).runnerId==runner && instance(id).syncEnabled() && ready.exit?.crashReport.let {it==null || CrashReports.validName(it)})
-        require(StoppedSnapshots.valid(ready.generation));val r=runtime(id)
+        require(StoppedSnapshots.valid(ready.generation) && (ready.exit?.reason==null || ready.exit.reason in setOf("IDLE","STOP_TIMEOUT")));val r=runtime(id)
         synchronized(r) {
             val stored=snapshotSync(id);check(stored==null || stored.runner==runner || stored.pending.isEmpty())
             val old=stored?.takeIf {it.runner==runner} ?: SnapshotSync(runner)
@@ -439,6 +439,8 @@ class ServerManager {
             check(old.pending.size<32)
             atomicText(snapshotState(id),mapper.writeValueAsString(old.copy(pending=old.pending+ready.generation,seen=(old.seen+ready.generation).takeLast(1024),revisions=old.revisions+(ready.generation to ready.localRevision))))
             if(ready.editOnly){r.fileTransfer=FolderImportProgress("UPLOADING",message="실행기 파일 변경을 중앙 복구본에 백그라운드 반영 중");return}
+            if(ready.exit?.reason=="IDLE" && r.stopReason !in setOf("FORCED","STOP_TIMEOUT","SHUTDOWN")){r.stopReason="IDLE";r.remoteStopRequested=true;r.remoteRestartRequested=false}
+            if(ready.exit?.reason=="STOP_TIMEOUT"){r.stopReason="STOP_TIMEOUT";r.remoteStopRequested=true;r.remoteRestartRequested=false}
             val requested=r.remoteStopRequested
             val exit=ServerExit(ready.exit?.code,requested,if(requested)r.stopReason ?: "MANUAL" else "UNEXPECTED",ready.exit?.crashReport)
             root.resolve(id).resolve("remote-lease").deleteIfExists();token.deleteIfExists();root.resolve(id).resolve("remote-exit.json").deleteIfExists()
@@ -497,7 +499,7 @@ class ServerManager {
             checkIdle(r,true,true);check(if(r.diagnosticActive)session!=null && session==r.diagnosticSession else session==null) {"모드 검사 패널에서 다음 시도를 준비하고 시작하세요"}; require(r.state != "IMPORT_FAILED") { "실패한 팩은 시작할 수 없습니다. 원본 mrpack에서 다시 가져오세요" }; require(eulaAccepted(id)) { "Minecraft EULA에 먼저 동의하세요" }
             r.activityVersion++;r.stopReason=null;r.idleCheckPending=false;r.idleRequestId=null;r.startActor=actor;r.restartActor=null
             r.discordError.clear();r.exitError=null;r.exitErrorCaptured=false;r.startNotified=false;r.exitReport=null;r.lastExit=null;r.remoteCloudReady=false;r.remoteWorkerReady=false
-            r.fileTransfer=null;r.transferAuthoritative=false;r.transferMeter.reset()
+            if(!backgroundPending(id)){r.fileTransfer=null;r.transferAuthoritative=false;r.transferMeter.reset()}
             if(i.runnerId!=null) {
                 val controller=remoteController ?: error("원격 실행기 연결 기능을 사용할 수 없습니다")
                 root.resolve(id).resolve("remote-exit.json").deleteIfExists()
@@ -646,7 +648,7 @@ class ServerManager {
             if(state!="UNKNOWN" && !root.resolve(id).resolve("remote-lease").exists())return
             if(state=="SYNCING" && !r.exitErrorCaptured){r.exitError=r.discordError.recent();r.exitErrorCaptured=true}
             if(state=="SYNCING" && r.exitReport==null)r.exitReport=RunnerExitReport(Regex("종료 코드 (-?[0-9]+)").find(detail.orEmpty())?.groupValues?.get(1)?.toIntOrNull())
-            r.state=state;if(state!="STOPPING")r.remoteStopProgress=null;if(state=="RUNNING")started(id,r);if(state=="SYNCING"){r.remotePid=null;r.resources=null;r.players=null};if(state=="RUNNING"){r.fileTransfer=r.fileTransfer?.copy(phase="COMPLETE")};if(state=="SYNC_FAILED"){r.fileTransfer=(r.fileTransfer ?: FolderImportProgress("FAILED")).copy(phase="FAILED",message=detail?.take(500) ?: "실행기 연결과 파일 인계 상태를 확인하세요")};detail?.take(1000)?.let { r.event("system",it) }
+            r.state=state;if(state!="STOPPING")r.remoteStopProgress=null;if(state=="RUNNING")started(id,r);if(state=="SYNCING"){r.remotePid=null;r.resources=null;r.players=null};if(state=="RUNNING" && !backgroundPending(id)){r.fileTransfer=r.fileTransfer?.copy(phase="COMPLETE")};if(state=="SYNC_FAILED"){r.fileTransfer=(r.fileTransfer ?: FolderImportProgress("FAILED")).copy(phase="FAILED",message=detail?.take(500) ?: "실행기 연결과 파일 인계 상태를 확인하세요")};detail?.take(1000)?.let { r.event("system",it) }
         }
     }
     fun remoteExited(id:String,runnerId:String,report:RunnerExitReport) {
