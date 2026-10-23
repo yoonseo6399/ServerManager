@@ -1,4 +1,4 @@
-상태: 해시 재사용·메타데이터 재조회 제거 구현, 선커밋 뒤 검증 예정
+상태: 구현·기능 검증 완료, v0.7.0-beta.24 게시
 
 # fix/mod-toggle-speed
 
@@ -12,3 +12,5 @@
 2. 토글 후 메타데이터 외부 조회 0, 원문 바이트·일반/강제 끄기·재활성화·충돌/실행/진단/stale 보호 회귀.
 3. 허용된 로컬 실행기 실제 MOD 폴더에서 읽기 전용 cold/warm 시간과 bytesRead 비교. 운영 MOD 활성 상태는 바꾸지 않는다.
 4. 최종 통합 브랜치에서 전체 백엔드·웹 빌드/관련 화면 검증. 배포·릴리즈는 별도 요청 전 미실행.
+
+Beta24 게시 완료. 관련 기능80통과/조건부1미실행, browser19통과, 전체 suite는 사용자 지시로 생략. 게시자산9개와CI39893980700성공을 메타데이터로 확인했고 게시 후 재다운로드는 하지 않았다. 상세: https://github.com/yoonseo6399/ServerManager/blob/release/0.7.0-beta.24/docs/testing/operations-controls.md
