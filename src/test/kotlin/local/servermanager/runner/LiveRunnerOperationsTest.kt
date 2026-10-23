@@ -85,6 +85,7 @@ class LiveRunnerOperationsTest {
         assertFails {manager.assignRunner(cfg.id,"other")}
         manager.start(cfg.id);val nextToken=root.resolve("remote-run").readText();assertNotEquals(token,nextToken)
         manager.remoteState(cfg.id,"runner","RUNNING");manager.runtime(cfg.id).remotePid=9876
+        manager.snapshotProgress(cfg.id,"runner",ready.generation,FolderImportProgress("UPLOADING",message="background"));manager.remoteState(cfg.id,"runner","RUNNING");assertEquals("UPLOADING",manager.runtime(cfg.id).fileTransfer?.phase)
         manager.snapshotReady(cfg.id,"runner",ready);manager.snapshotCommitted(cfg.id,"runner",ready.generation);manager.snapshotCommitted(cfg.id,"runner",ready.generation)
         assertEquals("RUNNING",manager.runtime(cfg.id).state);assertEquals(9876,manager.runtime(cfg.id).remotePid);assertEquals(nextToken,root.resolve("remote-run").readText());assertTrue(root.resolve("remote-lease").exists())
         assertFails {manager.snapshotReady(cfg.id,"runner",SnapshotReady(generation(2),token,null,null))}
