@@ -743,3 +743,5 @@ Beta23 기반에 fix/mod-start-diagnostics(edf33e2), fix/mod-toggle-speed, feat/
 Beta24 기반 fix/review-improvements eefdfe7 통합(solo). R1~R8/B1 수정, A1은 파일 UI/공통 Dialog/텍스트 디코딩/팩 보관 정책 분리. 파일 조회 세대/서버별 수명, dirty/busy 이탈 방지, 충돌·부분 업로드·재인증 복구, 키보드 모달·모바일 관리 메뉴. 권한 파일 오류 시 거부, strict UTF-8, 만료 업로드 수거/8개 상한, 일반 스냅샷 복사 공간 검사. 기존 OWNER 모델 검토 설계 유지.
 
 사전 backend42/UI27 실패0, TS/Vite 통과. 세부 한계 docs/testing/review-improvements.md. 사용자 배포 승인으로 전체 suite 포함 릴리즈 CI 실행. 기존 서명 secret 사용, 베타 prerelease 및 stable latest 유지. 운영 설치/재시작은 수행하지 않음. CI 게시 결과는 완료 후 기록.
+
+Beta25 첫 전체 CI39901621513: 715개 중 1실패/29스킵으로 게시 전 중단. Beta24 이전 원격 콘솔 테스트가 중앙 보관 파일을 live API로 읽던 기대를 중앙 보관·재시작 검증과 실제 RunnerWorkspace API 검증으로 분리했다. 최신 원격 로그 조회 및 구형 실행기에서 중앙 보관본으로 대체하지 않음을 추가 검증. 제품 코드 변경 없음, 로컬 관련4개 통과. 미게시 확인 후 태그를 수정 커밋으로 이동하여 전체 CI 재실행.
