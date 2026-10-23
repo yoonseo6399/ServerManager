@@ -26,3 +26,10 @@
 초기 테스트 준비에서 uncached 모드 누락, mock runner online 누락, Mockito nullable matcher, 브라우저 editor selector/update-status 응답 누락을 수정했다. 최초 컴파일의 잘못 치환된 manifest 인자를 수정했고, 재시작 테스트의 로컬 변수 이름도 정리했다. 환경의 Vite 포트 sandbox 거절은 허용된 로컬 테스트 실행으로 재실행했다. 실제 기능 결함인 snapshot 주기 재시도 누락·heartbeat의 배경 진행률 덮어쓰기·이전 중앙 crash 첨부 경로를 수정하고 해당 경로를 재검증했다.
 
 게시 직전 짧은 파일·모드 변경을 preparing 예약에 등록해 제어 계층 재시작과의 경합을 막았다. 완료된 편집 복사본은 RPC 응답 직전에도 반영 완료로 인정하되 아직 WRITE_CHUNK 중인 업로드는 완료로 간주하지 않는 시험도 통과했다. 첫 릴리즈 CI는 이 보완 전에 게시하지 않도록 수동 취소했으며 기능 보완 후 재실행한다.
+
+## 게시 확인
+
+2026-10-23 GitHub Actions39893980700 성공. 최종 태그 v0.7.0-beta.24는 검증 커밋 d35bd4d090e624a91fe49b71e0a6257d80d27bbd를 가리킨다. Full backend suite는 skipped, JAR/실행기 설치검증/관리앱·실행기 패키징/격리 bootstrap/서명/게시 모두 success였다. 공개 메타데이터에서 prerelease·비draft 및9개자산을 확인했다. 자산을 재다운로드하지 않았다. 안정판 latest는 v0.6.3으로 유지됐다.
+
+릴리즈: https://github.com/yoonseo6399/ServerManager/releases/tag/v0.7.0-beta.24
+CI: https://github.com/yoonseo6399/ServerManager/actions/runs/39893980700
