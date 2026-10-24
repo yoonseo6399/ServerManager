@@ -69,6 +69,10 @@ class VoiceChatRelayTest {
         val tcp=connect(f,"a");DatagramSocket(0).use {occupied->f.hub.voiceChat(listOf(VoiceChatRelayConfig("a",occupied.localPort,f.a.udp.localPort)),"127.0.0.1");assertEquals("ERROR",f.hub.status().voicechat["a"]?.state)}
         tcp.getOutputStream().write("ok".toByteArray());tcp.getOutputStream().flush();assertEquals("ok",String(tcp.getInputStream().readNBytes(2)))
     }
+    @Test fun `public voice UDP shares game TCP number without Sable`()=Fixture().use {f->
+        val port=f.hub.gamePort!!;f.hub.voiceChat(listOf(VoiceChatRelayConfig("a",port,f.a.udp.localPort)),"127.0.0.1");connect(f,"a")
+        DatagramSocket().use {p->p.soTimeout=3000;assertEquals("A:same-port",exchange(p,port,"same-port"))}
+    }
     @Test fun `voice envelope rejects malformed and oversized messages`() {
         assertNull(VoiceDatagram.decode(byteArrayOf()));assertNull(VoiceDatagram.decode(byteArrayOf(66,1,2)));assertNull(VoiceDatagram.decode(byteArrayOf(1,47,1)))
         assertFailsWith<IllegalArgumentException>{VoiceDatagram.encode("a",ByteArray(8193))};assertFailsWith<IllegalArgumentException>{VoiceDatagram.encode("../bad",byteArrayOf(1))}
