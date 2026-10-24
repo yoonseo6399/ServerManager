@@ -26,7 +26,11 @@ with tempfile.TemporaryDirectory(prefix='server-manager-launch-') as directory:
         # Resident hosts intentionally outlive their controller. An isolated test
         # must remove its own transient job before deleting the temporary home.
         host_home=home/'data/game-host'
-        label='local.servermanager.game-host.'+hashlib.sha256(str(host_home.absolute()).encode()).hexdigest()[:24]
-        cleanup=subprocess.run(['/bin/launchctl','remove',label],capture_output=True)
-        if cleanup.returncode not in (0,113):
-            raise RuntimeError('Could not remove isolated game-host job')
+        label='local.servermanager.game-host.'+hashlib.sha256(str(host_home.resolve()).encode()).hexdigest()[:24]
+        query=subprocess.run(['/bin/launchctl','list',label],capture_output=True)
+        if query.returncode==0:
+            cleanup=subprocess.run(['/bin/launchctl','remove',label],capture_output=True)
+            if cleanup.returncode!=0:
+                raise RuntimeError('Could not remove isolated game-host job')
+        elif query.returncode!=113:
+            raise RuntimeError('Could not query isolated game-host job')
