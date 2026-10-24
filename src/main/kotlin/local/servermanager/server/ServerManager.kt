@@ -54,6 +54,7 @@ class RuntimeState {
     @Volatile var resources: ResourceSample? = null
     @Volatile var players: PlayerSample? = null
     @Volatile var playerQueryInProgress = false
+    @Volatile var archiveImport:ServerArchiveProgress?=null
     @Volatile var queryPort:Int?=null
     @Volatile var playerQueryMessage:String?=null
     @Volatile var remoteStopRequested = false
@@ -253,7 +254,7 @@ class ServerManager {
         val i = instance(id); val r = runtime(id)
         val result=synchronized(r) { mapOf("config" to i.copy(), "state" to r.state, "pid" to (if(i.runnerId!=null) r.remotePid else r.process?.takeIf { it.isAlive }?.pid()), "resources" to r.resources?.takeIf { (i.runnerId!=null || r.process?.isAlive == true) && (i.runnerId!=null || it.pid == r.process?.pid()) }, "players" to r.players?.takeIf { r.state=="RUNNING" && java.time.Duration.between(Instant.parse(it.sampledAt),Instant.now()).seconds<30 }, "directory" to (if(i.runnerId==null)serverDir(id).toString() else r.folderSource?.get("path") ?: "현재 실행기의 원본 서버 폴더"), "eulaAccepted" to eulaAccepted(id),"activityVersion" to r.activityVersion,"diagnosticActive" to r.diagnosticActive,"modBusy" to (r.modBusy||r.remoteFileBusy),"liveFiles" to liveFilesAvailable(id),"backgroundSync" to backgroundPending(id)) }
         val transfer=synchronized(r) {mapOf("folderSource" to r.folderSource,"folderImport" to r.folderImport?.let(r.transferMeter::view),"fileTransfer" to r.fileTransfer?.let(r.transferMeter::view))}
-        return result+transfer+mapOf("shutdownWatchdog" to (r.stopMonitor?.status() ?: r.remoteStopProgress),"forceStopSupported" to (i.runnerId==null || remoteController?.supportsForceStop(i)==true),"playerQueryMessage" to r.playerQueryMessage?.takeIf {r.state=="RUNNING"},"sableUdp" to remoteController?.sableStatus(i),"powerSaving" to powerStatus?.invoke(id),"autoRestart" to autoRestartStatus?.invoke(id))
+        return result+transfer+mapOf("archiveImport" to r.archiveImport,"shutdownWatchdog" to (r.stopMonitor?.status() ?: r.remoteStopProgress),"forceStopSupported" to (i.runnerId==null || remoteController?.supportsForceStop(i)==true),"playerQueryMessage" to r.playerQueryMessage?.takeIf {r.state=="RUNNING"},"sableUdp" to remoteController?.sableStatus(i),"powerSaving" to powerStatus?.invoke(id),"autoRestart" to autoRestartStatus?.invoke(id))
     }
     private fun validate(req: CreateRequest) {
         require(req.name.isNotBlank() && req.name.length <= 80) { "이름은 1~80자로 입력하세요" }
@@ -269,6 +270,38 @@ class ServerManager {
         val i = Instance(UUID.randomUUID().toString(), req.name, loader=req.loader,minecraft=req.minecraft,loaderVersion=req.loaderVersion, port=req.port, memoryMb=req.memoryMb, javaPath=req.javaPath)
         serverDir(i.id).createDirectories(); instances[i.id] = i; runtimes[i.id] = RuntimeState()
         writeProperties(i); save(i); acceptEula(i.id); return view(i.id)
+    }
+    @Synchronized fun beginArchiveImport(req:CreateRequest,token:String):Map<String,Any?> {
+        val row=create(req);val id=(row["config"] as Instance).id;val r=runtime(id)
+        synchronized(r) {
+            atomicText(root.resolve(id).resolve("import.pending"),"server-archive:$token")
+            r.state="IMPORTING";r.event("system","서버 ZIP 가져오기를 시작합니다. 기존 서버는 변경하지 않습니다")
+        }
+        return view(id)
+    }
+    @Synchronized fun finishArchiveImport(id:String,stage:Path,ready:Boolean) {
+        val r=runtime(id);val i=instance(id)
+        synchronized(r) {
+            check(r.state=="IMPORTING" && i.runnerId==null) {"서버 가져오기 상태가 변경됐습니다"}
+            val target=serverDir(id);val backup=root.resolve(id).resolve("archive-initial")
+            check(stage.isDirectory() && !Files.isSymbolicLink(stage) && !backup.exists())
+            // Keep the normal new-instance EULA only if the upload did not contain its own EULA.
+            if(!stage.resolve("eula.txt").exists())Files.copy(target.resolve("eula.txt"),stage.resolve("eula.txt"))
+            Files.move(target,backup,StandardCopyOption.ATOMIC_MOVE)
+            var moved=false
+            try {
+                Files.move(stage,target,StandardCopyOption.ATOMIC_MOVE);moved=true
+                writeProperties(i)
+                if(ready)atomicText(root.resolve(id).resolve("installed.ok"),"server-archive")
+                root.resolve(id).resolve("import.pending").deleteExisting()
+                r.state=if(ready)"STOPPED" else "NEW"
+                r.event("system",if(ready)"서버 ZIP 가져오기 완료. 서버는 자동 실행하지 않았습니다" else "서버 파일 가져오기 완료. 실행 파일이 없어 공식 런처 설치가 필요합니다")
+            } catch(e:Exception) {
+                runCatching {if(moved)Files.move(target,stage,StandardCopyOption.ATOMIC_MOVE);Files.move(backup,target,StandardCopyOption.ATOMIC_MOVE);root.resolve(id).resolve("installed.ok").deleteIfExists()}.onFailure {e.addSuppressed(it)}
+                throw e
+            }
+            if(!backup.toFile().deleteRecursively())r.event("warn","가져오기 전 초기 폴더 정리를 완료하지 못했습니다")
+        }
     }
     @Synchronized fun update(id: String, req: CreateRequest): Map<String, Any?> {
         validate(req); val r = runtime(id)

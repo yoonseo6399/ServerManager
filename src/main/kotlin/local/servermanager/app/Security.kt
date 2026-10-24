@@ -127,7 +127,7 @@ class SecurityConfig {
                 val write=ctx.request.method !in listOf("GET","HEAD")
                 AuthorizationDecision(user?.enabled==true && (if(parts.isEmpty()) !write||user.managesAllServers() else if(parts.size==1 && ctx.request.method=="DELETE") user.managesAllServers() else store.allowed(user.id,parts[0],write)))
             }
-            auth.requestMatchers("/api/mrpacks/**").access { authentication,_->AuthorizationDecision(store.account(authentication.get().name)?.let { it.managesAllServers() && it.enabled }==true) }
+            auth.requestMatchers("/api/mrpacks/**","/api/server-archives/**").access { authentication,_->AuthorizationDecision(store.account(authentication.get().name)?.let { it.managesAllServers() && it.enabled }==true) }
             auth.requestMatchers("/api/**").authenticated()
             auth.anyRequest().denyAll()
         }
