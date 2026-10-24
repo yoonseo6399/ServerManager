@@ -189,7 +189,7 @@ class GameHostService(private val home:Path,private val version:String,private v
             }
             val c=me!!;socket.soTimeout=0
             // Replace the raw writer with the controller's serialized one for everything after this point.
-            c.send(mapOf("t" to "welcome","protocol" to protocol,"version" to version,"pid" to ProcessHandle.current().pid(),"caps" to listOf("replace-drain"),"instances" to statuses()))
+            c.send(mapOf("t" to "welcome","protocol" to protocol,"version" to version,"pid" to ProcessHandle.current().pid(),"caps" to listOf("replace-drain","udp-port-reservations"),"instances" to statuses()))
             while(!closed) {
                 val line=readLine(reader) ?: break
                 c.lastPong=System.currentTimeMillis()
@@ -236,6 +236,7 @@ class GameHostService(private val home:Path,private val version:String,private v
         when(m.path("t").asText()) {
             "pong" -> {}
             "status" -> ok(mapOf("instances" to statuses()))
+            "udp-port-reservations" -> ok(mapOf("ports" to relay().reservedUdpPorts()))
             "start" -> if(replacementPrepared)fail("HOST_REPLACEMENT_PENDING") else start(c,m,::ok,::fail)
             "attach" -> {
                 val id=m.path("id").asText();val after=m.path("afterSeq").asLong(0)
@@ -475,6 +476,8 @@ class GameHostClient private constructor(private val socket:Socket,private val r
         disconnected=true
         pending.values.forEach {it.completeExceptionally(java.io.IOException("서비스 연결이 끊겼습니다"))}
     }
+    fun reservedUdpPorts():Set<Int> = if("udp-port-reservations" !in hostCaps)emptySet() else
+        request(mapOf("t" to "udp-port-reservations")).path("ports").map {it.asInt()}.filter {it in 1024..65535}.toSet()
     fun status():List<HostInstanceStatus> =request(mapOf("t" to "status")).path("instances").map {mapper.treeToValue(it,HostInstanceStatus::class.java)}
     class StartResult(val process:HostedProcess,val duplicate:Boolean)
     fun start(id:String,command:List<String>,dir:Path,env:Map<String,String>,port:Int?=null):StartResult {

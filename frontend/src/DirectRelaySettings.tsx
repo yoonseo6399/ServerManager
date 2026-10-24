@@ -42,7 +42,7 @@ export function DirectRelaySettings(){
    <p className="muted">중계 컴퓨터에 UDP {view.gamePort??'공유 게임 포트'}도 포워딩해야 합니다. UDP 인증은 해당 플레이어의 실제 TCP 연결과 묶습니다. 게임 데이터는 관리 Mac을 거치지 않으며 중계↔게임 실행기 구간은 암호화된 TCP 터널을 사용합니다. 회선 손실 시 지연이 늘 수 있습니다.</p>
    <p className="muted">NeoForge 1.21.1 · Sable 2.0.6 지원. 보조 모드와 등록 연결은 서버 시작 때 준비합니다. 이미 실행 중인 게임은 다음 정상 시작부터 적용되며, 미연결 시 TCP 대체 통신을 사용합니다.</p>
    <h3>Simple Voice Chat · 음성 UDP</h3>
-   <p>음성은 게임 접속 포트·SRV와 별개입니다. 서버마다 공개 UDP 포트를 하나씩 사용합니다. 기본값은 24454이며, 중계 컴퓨터의 공유기·방화벽에서 아래 UDP 포트도 허용하세요. Sable UDP를 끄면 게임 TCP와 같은 번호의 공개 UDP 포트를 음성에 사용할 수도 있습니다. 중계와 게임이 같은 컴퓨터이면 내부 음성 포트는 다르게 지정합니다.</p>
+   <p>음성은 게임 접속 포트·SRV와 별개입니다. 한 컴퓨터에 여러 서버를 배정할 수 있으며, 서버마다 다른 내부 게임·음성 포트와 공개 음성 UDP 포트를 사용합니다. 기본값은 24454이며, 중계 컴퓨터의 공유기·방화벽에서 아래 UDP 포트도 허용하세요. Sable UDP를 끄면 게임 TCP와 같은 번호의 공개 UDP 포트를 음성에 사용할 수도 있습니다. 중계와 게임이 같은 컴퓨터이면 내부 음성 포트는 다르게 지정합니다.</p>
    {!view.voicechatServers?.length&&<p>공통 접속 주소·포트·DNS를 켜고 서버의 게임 실행기를 지정하면 음성 중계를 설정할 수 있습니다.</p>}
    {(view.voicechatServers||[]).map(server=>{
     const entry=config.voicechat?.find(v=>v.instanceId===server.instanceId);

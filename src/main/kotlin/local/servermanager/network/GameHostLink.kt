@@ -89,6 +89,7 @@ class HostedGames(private val home:Path,private val controllerId:String,private 
     fun relaySession():Boolean=connection()?.relaySession() ?: false
     fun prepareDirectSable(instance:Instance,directory:Path)=connection()?.prepareDirectSable(instance,directory) ?: error("상주 서비스에 연결하지 못했습니다")
     fun onRelay(handler:(String)->Unit){relayOutput=handler;connection()?.onRelay=handler}
+    fun reservedUdpPorts():Set<Int> = (connection() ?: error("상주 서비스에 연결하지 못했습니다")).reservedUdpPorts()
     fun hostProtocol():Int?=client?.takeIf {!it.disconnected}?.hostProtocol
     fun hostVersion():String?=client?.takeIf {!it.disconnected}?.hostVersion
     /** Detaches the controller. Games keep running; this is what an update or a shutdown must call. */

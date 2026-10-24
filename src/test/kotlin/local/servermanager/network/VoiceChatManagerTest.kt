@@ -13,6 +13,7 @@ class VoiceChatManagerTest {
     private class World:RelayWorld {
         val relay=UUID.randomUUID().toString();val game=UUID.randomUUID().toString();val a="server-a";val b="server-b"
         val sent=mutableListOf<Pair<String,RunnerMessage>>()
+        val ports=mutableMapOf(a to 25565,b to 25566)
         override fun runner(id:String)=if(id in setOf(relay,game))RunnerDevice(id,id,"MAC","owner","key","now",allowedInstanceIds=if(id==game)setOf(a,b) else emptySet()) else null
         override fun connected(id:String)=true
         override fun runnerName(id:String)=id
@@ -20,7 +21,7 @@ class VoiceChatManagerTest {
         override fun send(runnerId:String,message:RunnerMessage):Boolean{sent.add(runnerId to message);return true}
         override fun resolveHost(host:String)=listOf("203.0.113.2")
         override fun gamePort()=6700
-        override fun instancePort(id:String)=25565
+        override fun instancePort(id:String)=ports[id]
     }
     private fun setup(voice:Boolean=true):Pair<World,DirectRelayManager> {
         val w=World();val m=DirectRelayManager(DirectRelayStore(dir.resolve("store")),w)
@@ -62,6 +63,11 @@ class VoiceChatManagerTest {
         m.save(DirectRelaySave(c,0));assertTrue(m.view().relays.first {it.runnerId==w.relay}.router.any {it.protocol=="UDP" && it.externalPort==6700})
         m.save(DirectRelaySave(c.copy(voicechat=listOf(VoiceChatRelayConfig(w.a))),1))
         assertFailsWith<IllegalArgumentException>{m.prepare(w.game)}
+    }
+    @Test fun `voice cannot use another game server UDP port on the same runner`() {
+        val (w,m)=setup()
+        assertFailsWith<IllegalArgumentException>{m.save(DirectRelaySave(config(w,VoiceChatRelayConfig(w.a,24454,25566)),0))}
+        Unit
     }
     @Test fun `candidate readiness requires voice port listener and disconnection clears capability`() {
         val (w,m)=setup();m.save(DirectRelaySave(config(w,VoiceChatRelayConfig(w.a)),0))

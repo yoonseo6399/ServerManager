@@ -93,6 +93,10 @@ class DirectRelayRunnerRole(home:Path,private val send:(RunnerMessage)->Boolean,
     private val tickets=ConcurrentHashMap<String,Pair<String,CompletableFuture<RelayTicket?>>>()
     @Volatile private var announced:RelayConsentState?=null
 
+    /** Include planned ports: a game may not have bound its voice socket yet. */
+    fun reservedUdpPorts():Set<Int> = voiceTargets.map {it.localPort}.toSet()+
+        (hubConfig?.takeIf {it.on}?.let {c->c.voicechat.map {it.publicPort}+if(c.sableUdpEnabled)listOf(c.gamePort) else emptyList()} ?: emptyList())
+
     fun busy()=(hub?.streamCount() ?: 0)>0 || agents.values.any {it.streamCount()>0}
     /** Replacement drain: players and tunnels already in place continue; no new player can enter. */
     fun pauseNewWork(){hub?.pauseGame()}

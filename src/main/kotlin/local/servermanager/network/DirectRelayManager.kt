@@ -207,7 +207,9 @@ class DirectRelayManager(val store:DirectRelayStore,private val world:RelayWorld
         require(c.voicechat.map {it.publicPort}.distinct().size==c.voicechat.size) {"서버마다 다른 음성 공개 UDP 포트가 필요합니다"}
         c.voicechat.forEach {v->
             require(v.instanceId.matches(Regex("[A-Za-z0-9-]{1,64}")) && v.publicPort in 1024..65535 && v.localPort in 1024..65535) {"음성 포트는 1024~65535로 입력하세요"}
-            require((!c.sableUdpEnabled || v.publicPort!=world.gamePort()) && v.localPort!=world.instancePort(v.instanceId)) {"음성 UDP 포트가 Sable 또는 게임·쿼리 포트와 충돌합니다"}
+            val runner=world.routes().firstOrNull {it.first==v.instanceId}?.second
+            val gamePorts=world.routes().filter {it.second==runner}.mapNotNull {world.instancePort(it.first)}
+            require((!c.sableUdpEnabled || v.publicPort!=world.gamePort()) && v.localPort !in gamePorts) {"음성 UDP 포트가 Sable 또는 게임·쿼리 포트와 충돌합니다"}
         }
         (listOfNotNull(c.relayRunnerId,c.candidateRunnerId)+c.retiring.keys).forEach {validateVoiceCoLocation(c,it)}
         val byRunner=c.voicechat.mapNotNull {v->world.routes().firstOrNull {it.first==v.instanceId}?.let {it.second to v.localPort}}

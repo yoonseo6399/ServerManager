@@ -438,6 +438,26 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
         if(state!=null && state!="READY")return SableRelayStatus("TCP_FALLBACK",message=state)
         return sable.status(instance.id)
     }
+    override fun reservedGamePorts(runnerId:String?):Set<Int> {
+        val shared=network?.config() ?: return emptySet()
+        val direct=directRelay?.core?.store?.config()
+        val relayHosts=if(direct?.enabled==true)listOfNotNull(direct.relayRunnerId,direct.candidateRunnerId)+direct.retiring.filterValues {it>System.currentTimeMillis()}.keys else emptyList()
+        val relayPorts=if(shared.enabled && (if(direct?.enabled==true)runnerId in relayHosts else runnerId==shared.relayRunnerId))
+            listOfNotNull(shared.port,direct?.securePort?.takeIf {direct.enabled}) else emptyList()
+        val voicePorts=direct?.voicechat?.filter {route->runCatching {manager.instance(route.instanceId).runnerId==runnerId}.getOrDefault(false)}?.map {it.localPort} ?: emptyList()
+        return (relayPorts+voicePorts).toSet()
+    }
+    override fun validateRunnerAssignment(instance:Instance,runnerId:String?) {
+        val c=directRelay?.core?.store?.config()?.takeIf {it.enabled} ?: return
+        val own=c.voicechat.singleOrNull {it.instanceId==instance.id} ?: return
+        require(runnerId!=null) {"음성 중계를 해제한 뒤 관리 Mac으로 이동하세요"}
+        val others=c.voicechat.filter {it.instanceId!=instance.id && runCatching {manager.instance(it.instanceId).runnerId==runnerId}.getOrDefault(false)}
+        require(others.none {it.localPort==own.localPort} && (own.localPort !in manager.configuredGamePorts(runnerId,instance.id))) {
+            "이 실행기의 다른 서버와 내부 음성 UDP 포트가 겹칩니다. 직접 중계 설정에서 이 서버의 내부 음성 포트를 변경한 뒤 이동하세요"
+        }
+        if(runnerId in (listOfNotNull(c.relayRunnerId,c.candidateRunnerId)+c.retiring.keys))
+            require(c.voicechat.none {it.publicPort==own.localPort} && (!c.sableUdpEnabled || own.localPort!=sharedGamePort())) {"중계와 게임이 같은 컴퓨터이면 내부 음성 UDP 포트를 공개 음성·Sable UDP 포트와 다르게 지정하세요"}
+    }
     override fun sharedGamePort():Int?=network?.config()?.takeIf {it.enabled}?.port
     override fun stopIfEmpty(instance:Instance,requestId:String):Boolean {
         val id=requireRunner(instance)

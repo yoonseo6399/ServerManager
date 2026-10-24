@@ -38,6 +38,8 @@ interface RemoteController {
     fun command(instance:Instance,value:String)
     fun completed(instance:Instance) {}
     fun sharedGamePort():Int?=null
+    fun reservedGamePorts(runnerId:String?):Set<Int> = emptySet()
+    fun validateRunnerAssignment(instance:Instance,runnerId:String?) {}
     fun sableStatus(instance:Instance):SableRelayStatus?=null
     fun stopIfEmpty(instance:Instance,requestId:String):Boolean=false
     fun importFolder(instance:Instance,requestId:String) {error("실행기를 업데이트한 뒤 기존 폴더를 가져오세요")}
@@ -229,6 +231,7 @@ class ServerManager {
             r.event("system","파일 동기화 OFF · 현재 실행기의 원본 폴더만 사용합니다")
         };return view(id)
     }
+    fun configuredGamePorts(runnerId:String?,excluding:String?=null):Set<Int> = instances.values.filter {it.runnerId==runnerId && it.id!=excluding}.map {it.port}.toSet()
     fun list() = instances.values.sortedBy { it.name }.map { view(it.id) }
     @Synchronized fun <T> withIdle(action:()->T):T {
         check(list().all { it["pid"]==null && it["diagnosticActive"]!=true && it["modBusy"]!=true && it["state"] in setOf("NEW","STOPPED","FAILED","IMPORT_FAILED") }) { "모든 서버와 작업을 종료한 뒤 네트워크 설정을 변경하세요" }
@@ -273,7 +276,7 @@ class ServerManager {
             checkIdle(r)
             val i = instance(id)
             require(req.loaderVersion == i.loaderVersion && req.loader==i.loader && req.minecraft==i.minecraft) { "설치된 로더 버전 변경은 새 인스턴스로 진행하세요" }
-            require(remoteController?.sharedGamePort()!=null || instances.values.none { it.id != id && it.port == req.port }) { "다른 인스턴스가 사용하는 포트입니다" }
+            require(req.port !in unavailableGamePorts(id,i.runnerId)) { "이 실행기에서 다른 서버 또는 중계가 사용하는 포트입니다. 다른 내부 게임 포트를 지정하세요" }
             i.name=req.name; i.port=req.port; i.memoryMb=req.memoryMb; i.javaPath=req.javaPath
             if(i.syncEnabled() && i.runnerId==null)writeProperties(i); save(i)
         }
@@ -285,7 +288,12 @@ class ServerManager {
             checkIdle(r)
             check(r.state in setOf("NEW","STOPPED","FAILED","IMPORT_FAILED")) { "서버가 완전히 종료된 뒤 실행기를 변경하세요" }
             check(instance(id).syncEnabled() || instance(id).runnerId==runnerId) {"파일 동기화가 꺼져 있어 실행기를 변경할 수 없습니다. 먼저 동기화를 켜고 최신 파일 반영을 완료하세요"}
-            instance(id).runnerId=runnerId
+            val i=instance(id)
+            remoteController?.validateRunnerAssignment(i,runnerId)
+            val port=ServerPortPlan.available(i.port,unavailableGamePorts(id,runnerId))
+            if(port!=i.port)r.event("system","실행기 내 포트 충돌을 피하기 위해 내부 게임 포트를 ${i.port} → $port 로 배정했습니다")
+            i.port=port;i.runnerId=runnerId
+            if(runnerId==null && i.syncEnabled())writeProperties(i)
             r.folderSource=null;r.folderImport=null;r.fileTransfer=null
             save(instance(id))
         }
@@ -303,11 +311,18 @@ class ServerManager {
             return mapOf("deleted" to id,"archived" to true)
         }
     }
+    private fun unavailableGamePorts(id:String,runnerId:String?):Set<Int> {
+        val shared=remoteController?.sharedGamePort()!=null
+        // Unassigned servers are drafts in shared mode; only the chosen computer shares a socket namespace.
+        val peers=instances.values.filter {it.id!=id && (!shared || it.runnerId==runnerId)}.map {it.port}
+        return peers.toSet()+(remoteController?.reservedGamePorts(runnerId) ?: emptySet())
+    }
     private fun writeProperties(i: Instance) {
         val path=serverDir(i.id).resolve("server.properties")
         val props=Properties(); if(path.exists()) path.inputStream().use { props.load(it) }
         props.setProperty("server-ip", "127.0.0.1"); props.setProperty("server-port", i.port.toString())
-        props.setProperty("enable-rcon", "false"); runtime(i.id).queryPort=QueryEndpoint.configure(props,i.port)
+        props.setProperty("enable-rcon", "false"); runtime(i.id).queryPort=QueryEndpoint.configure(props,i.port,
+            instances.values.filter {it.id!=i.id && it.runnerId==i.runnerId}.flatMap {listOfNotNull(it.port,runtimes[it.id]?.queryPort)}.toSet())
         if(!props.containsKey("online-mode")) props.setProperty("online-mode", "true")
         if(!props.containsKey("view-distance")) props.setProperty("view-distance", "6")
         path.outputStream().use { props.store(it, "Local Server Manager") }

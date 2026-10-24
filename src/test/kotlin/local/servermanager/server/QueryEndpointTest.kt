@@ -6,6 +6,15 @@ import java.util.Properties
 import kotlin.test.*
 
 class QueryEndpointTest {
+    @Test fun `cloned query ports and planned voice or Sable ports cannot be reused before startup`() {
+        val a=Properties();val first=QueryEndpoint.configure(a,25565)
+        val clone=Properties().apply {setProperty("query.port",first.toString())}
+        val second=QueryEndpoint.configure(clone,25566,setOf(first,24454,24455,25565,25566))
+        assertNotEquals(first,second)
+        val third=QueryEndpoint.configure(a,25565,setOf(first,second))
+        assertTrue(third !in setOf(first,second,25565))
+    }
+
     @Test fun `Query is independent of Sable game UDP and preserves a free dedicated port`() {
         DatagramSocket(InetSocketAddress("127.0.0.1",0)).use {sable->
             val props=Properties().apply {setProperty("query.port",sable.localPort.toString())}
