@@ -45,7 +45,7 @@ class ServerArchiveImporterTest {
         assertEquals("COMPLETE",manager.runtime(id).archiveImport?.phase)
         val arguments=Launchers.arguments(manager.instance(id),manager.serverDir(id));assertTrue(arguments.any {it.endsWith("custom.jar")})
         manager.start(id)
-        try {val end=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);while(manager.runtime(id).state=="STARTING"){assertTrue(System.nanoTime()<end);Thread.sleep(10)};assertEquals("RUNNING",manager.runtime(id).state);val process=manager.runtime(id).process!!;manager.stop(id);assertTrue(process.waitFor(10,TimeUnit.SECONDS))}
+        try {val end=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);while(manager.runtime(id).state=="STARTING"){assertTrue(System.nanoTime()<end);Thread.sleep(10)};assertEquals("RUNNING",manager.runtime(id).state);val process=manager.runtime(id).process!!;manager.stop(id,false);assertTrue(process.waitFor(10,TimeUnit.SECONDS))}
         finally {manager.runtime(id).process?.takeIf {it.isAlive}?.destroyForcibly()}
     }
     @Test fun `upload offset retries ownership chunk quota and cleanup are enforced`() {
@@ -83,7 +83,7 @@ class ServerArchiveImporterTest {
         var offset=0L;var chunks=0
         file.inputStream().use {input->while(true){val bytes=input.readNBytes(upload.chunkSize);if(bytes.isEmpty())break;offset=importer.append("owner",upload.token,offset,bytes.inputStream()).received;chunks++}}
         val preview=importer.preview("owner",upload.token);assertEquals(2,preview.plan.files);assertEquals(file.fileSize(),offset);assertTrue(chunks>32)
-        println("SERVER-ARCHIVE-UPLOAD-PROOF bytes=$offset chunks=$chunks multipartLimitBypassed=true boundedChunk=${upload.chunkSize}")
+        println("SERVER-ARCHIVE-UPLOAD-PROOF bytes=$offset chunks=$chunks multipartIndependent=true boundedChunk=${upload.chunkSize}")
         importer.cancel("owner",upload.token)
     }
     @Test fun `invalid settings leave preview reusable and abandoned upload expires`() {
