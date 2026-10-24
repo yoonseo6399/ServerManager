@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os,pathlib,subprocess,tempfile,time,urllib.request,json,socket,hashlib
+import os,pathlib,subprocess,tempfile,time,urllib.request,json,socket,hashlib,re
 root=pathlib.Path(__file__).resolve().parent.parent
 app=root/'build/macos-package/root/Applications/Server Manager.app'
 with socket.socket() as sock:
@@ -29,8 +29,16 @@ with tempfile.TemporaryDirectory(prefix='server-manager-launch-') as directory:
         label='local.servermanager.game-host.'+hashlib.sha256(str(host_home.resolve()).encode()).hexdigest()[:24]
         query=subprocess.run(['/bin/launchctl','list',label],capture_output=True)
         if query.returncode==0:
+            match=re.search(rb'"PID"\s*=\s*(\d+)',query.stdout)
+            host_pid=int(match[1]) if match else None
             cleanup=subprocess.run(['/bin/launchctl','remove',label],capture_output=True)
             if cleanup.returncode!=0:
                 raise RuntimeError('Could not remove isolated game-host job')
+            if host_pid is not None:
+                for _ in range(100):
+                    try:os.kill(host_pid,0)
+                    except ProcessLookupError:break
+                    time.sleep(.1)
+                else:raise RuntimeError('Isolated game host did not exit after job removal')
         elif query.returncode!=113:
             raise RuntimeError('Could not query isolated game-host job')
