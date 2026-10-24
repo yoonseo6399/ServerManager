@@ -1,0 +1,115 @@
+{
+  "date": "2026-10-25",
+  "testedCommit": "50e4f74bd4901ff501d77d2eb48e5e0ff4c3115c",
+  "platform": "macOS arm64 / Temurin 21.0.13",
+  "tests": 75,
+  "failures": 0,
+  "skipped": 0,
+  "classes": [
+    {
+      "name": "local.servermanager.DirectRelayManagerTest",
+      "tests": 16,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "local.servermanager.DirectSableTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "local.servermanager.GameHostTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "local.servermanager.MultiServerGatewayTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "local.servermanager.MultiServerHostTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "local.servermanager.MultiServerPortsTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "local.servermanager.QueryEndpointTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "local.servermanager.RunnerGatewayTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "local.servermanager.ServerManagerTest",
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "local.servermanager.VoiceChatHostTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "local.servermanager.VoiceChatManagerTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "local.servermanager.VoiceChatRelayTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ],
+  "socketProof": "MULTI-SERVER-PROOF gamePorts={a=54089, b=54090} queryPorts=[55805, 62495] localVoice={a=58334, b=62001} publicVoice={a=52785, b=62645} concurrentVoicePackets=40 stoppedA=true survivorPid=26767",
+  "frontend": {
+    "build": "passed",
+    "playwright": {
+      "passed": 6,
+      "failed": 0,
+      "files": [
+        "multi-server-ports.spec.ts",
+        "direct-voicechat.spec.ts",
+        "relay-first-selection.spec.ts"
+      ]
+    }
+  },
+  "notRun": [
+    "full suite",
+    "real Minecraft multi-instance",
+    "microphone/audio",
+    "router forwarding",
+    "external Internet",
+    "production deployment"
+  ]
+}

@@ -1,4 +1,4 @@
-상태: 구현·테스트 계획 커밋 후 기능 검증 예정
+상태: 구현·범위 기능 검증 완료, 푸시 준비, 미배포
 # feat/multi-server-ports
 
 - 기반: feat/voicechat-direct-relay e34c276. 기존 여러 인스턴스 실행 기능을 유지하며 같은 컴퓨터의 포트 충돌을 보완한다. 구버전에서 저장한 중복 포트도 다음 원격 시작 전 현재 서버만 재배정한다.
@@ -17,3 +17,18 @@
 6. 프런트 빌드 및 multi-server-ports / direct-voicechat / relay-first-selection 브라우저 테스트. 두 음성 서버 포트 분리·저장·새로고침, 배정 결과 포트 표시.
 
 전체 테스트·운영 서버 재시작·실제 Minecraft/마이크/공유기/인터넷 시험은 하지 않는다. 새 릴리즈·설치 적용은 이 작업에 포함하지 않는다.
+
+## 실행 결과 (2026-10-25, macOS arm64)
+
+- 구현 커밋 `f69240d`, 추가 복구 커밋 `50e4f74`. 구현과 테스트 계획을 먼저 커밋하고 테스트를 실행했다.
+- 최종 백엔드 관련 12개 클래스 **75개 통과 / 실패 0 / 제외 0**, Temurin 21.0.13. 전체 테스트는 실행하지 않았다.
+- `MultiServerHostTest`가 같은 상주 호스트에서 독립 게임 대역 JVM 두 개를 실제 실행하고 서로 다른 게임 TCP·Query UDP·음성 UDP를 바인딩했다. 두 음성 경로로 40개 패킷을 동시에 왕복했고, A 정상 종료 후 B의 PID·TCP 연결·음성 왕복이 유지됐다.
+- 최종 소켓 증거: 게임 A/B `54089 / 54090`, Query `55805 / 62495`, 내부 음성 `58334 / 62001`, 공개 음성 `52785 / 62645`. B PID `26767`은 격리된 시험 중 증거이며 운영 PID가 아니다.
+- 프런트 TypeScript/Vite 빌드 성공. Playwright `multi-server-ports`, `direct-voicechat`, `relay-first-selection` 합계 **6개 통과 / 실패 0**.
+- 결과 원문에서 추출한 집계·소켓 증거: `docs/testing/multi-server-ports-results.json`. 설정 방법: `docs/testing/multi-server-ports.md`.
+- 실제 Minecraft 두 개·마이크 음성·공유기·외부 인터넷·다른 OS·운영 배포는 미실행. 기존 `direct-relay.spec.ts`의 별도 업데이트 로그 가시성 실패는 앞선 음성 작업에서 공개 beta.25에서도 재현한 무관 항목이며 이 범위에 포함하지 않았다.
+- 운영 앱·실행기·Minecraft를 재시작하거나 설정을 변경하지 않았고 공개 릴리즈도 만들지 않았다. 릴리즈 시 기반 `feat/voicechat-direct-relay`와 앞선 별도 Java 보안 패치 `fix/java-security-runtime`의 통합 범위를 확인해야 한다.
+
+## 릴리즈 노트 후보
+
+한 실행기에 여러 서버를 배정할 때 내부 게임 포트를 자동 분리하고, 시작 준비 중인 서버의 Query·음성 포트 충돌을 예방했습니다. 기존 중복 설정은 다음 시작 때 해당 서버만 복구하며, 웹에서 서버별 음성 포트와 배정 결과를 확인할 수 있습니다.
