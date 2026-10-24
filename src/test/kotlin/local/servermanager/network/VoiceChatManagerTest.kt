@@ -45,10 +45,23 @@ class VoiceChatManagerTest {
         val invalid=listOf(
             listOf(VoiceChatRelayConfig(w.a),VoiceChatRelayConfig(w.b,24454,24455)),
             listOf(VoiceChatRelayConfig(w.a),VoiceChatRelayConfig(w.b,24455,24454)),
-            listOf(VoiceChatRelayConfig(w.a,6700,24454)),listOf(VoiceChatRelayConfig(w.a,24454,25565)),
+            listOf(VoiceChatRelayConfig(w.a,24454,25565)),
             listOf(VoiceChatRelayConfig("unapproved",24454,24454)))
         invalid.forEach {assertFailsWith<IllegalArgumentException>{m.save(DirectRelaySave(config(w,*it.toTypedArray()),0))}}
         m.save(DirectRelaySave(config(w,VoiceChatRelayConfig(w.a),VoiceChatRelayConfig(w.b,24455,24455)),0))
+    }
+    @Test fun `same relay and game computer needs distinct internal UDP and candidate is validated`() {
+        val (w,m)=setup()
+        val colocated=config(w,VoiceChatRelayConfig(w.a)).copy(relayRunnerId=w.game)
+        assertFailsWith<IllegalArgumentException>{m.save(DirectRelaySave(colocated,0))}
+        m.save(DirectRelaySave(colocated.copy(voicechat=listOf(VoiceChatRelayConfig(w.a,24454,34454))),0))
+    }
+    @Test fun `voice may share public game TCP number only when Sable UDP is off`() {
+        val (w,m)=setup();val c=config(w,VoiceChatRelayConfig(w.a,6700,24454))
+        assertFailsWith<IllegalArgumentException>{m.save(DirectRelaySave(c.copy(sableUdpEnabled=true),0))}
+        m.save(DirectRelaySave(c,0));assertTrue(m.view().relays.first {it.runnerId==w.relay}.router.any {it.protocol=="UDP" && it.externalPort==6700})
+        m.save(DirectRelaySave(c.copy(voicechat=listOf(VoiceChatRelayConfig(w.a))),1))
+        assertFailsWith<IllegalArgumentException>{m.prepare(w.game)}
     }
     @Test fun `candidate readiness requires voice port listener and disconnection clears capability`() {
         val (w,m)=setup();m.save(DirectRelaySave(config(w,VoiceChatRelayConfig(w.a)),0))

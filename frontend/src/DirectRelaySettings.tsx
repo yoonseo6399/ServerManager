@@ -4,7 +4,7 @@ import {useAuth} from './Auth';
 import {SaveBar} from './SaveBar';
 type UdpStatus={state:string;connections:number;dropped:number;message:string};
 type VoiceRoute={instanceId:string;publicPort:number;localPort:number};
-type VoiceServer={instanceId:string;name:string;capable:boolean;localStatus?:UdpStatus|null};
+type VoiceServer={runnerId?:string|null;instanceId:string;name:string;capable:boolean;localStatus?:UdpStatus|null};
 type Relay={voicechatCapable?:boolean;voicechat?:Record<string,UdpStatus>;sableUdpCapable?:boolean;sableUdp?:UdpStatus|null;runnerId:string;name:string;consentAllowed:boolean;active:boolean;ready:boolean;connected:boolean;capable:boolean;streams:number;impactIfCut:string;router:{label:string;externalPort:number;internalAddress:string;internalPort:number;protocol?:string}[];diagnostics:Record<string,{status:string;detail:string}>};
 type Config={voicechat?:VoiceRoute[];sableUdpEnabled?:boolean;enabled:boolean;relayRunnerId:string|null;candidateRunnerId:string|null;securePort:number;agentHost:string;publicHost:string;graceSeconds:number;retiring:Record<string,number>;relayHosts:Record<string,{agentHost:string;publicHost:string}>};
 type View={voicechatServers?:VoiceServer[];revision:number;phase:string;message:string;gamePort?:number;sableUdpBlockers?:string[];config:Config;relays:Relay[];agents:{runnerId:string;name:string;relays:{relayId:string;state:string;reason:string|null;streams:number}[]}[]};
@@ -42,7 +42,7 @@ export function DirectRelaySettings(){
    <p className="muted">중계 컴퓨터에 UDP {view.gamePort??'공유 게임 포트'}도 포워딩해야 합니다. UDP 인증은 해당 플레이어의 실제 TCP 연결과 묶습니다. 게임 데이터는 관리 Mac을 거치지 않으며 중계↔게임 실행기 구간은 암호화된 TCP 터널을 사용합니다. 회선 손실 시 지연이 늘 수 있습니다.</p>
    <p className="muted">NeoForge 1.21.1 · Sable 2.0.6 지원. 보조 모드와 등록 연결은 서버 시작 때 준비합니다. 이미 실행 중인 게임은 다음 정상 시작부터 적용되며, 미연결 시 TCP 대체 통신을 사용합니다.</p>
    <h3>Simple Voice Chat · 음성 UDP</h3>
-   <p>음성은 게임 접속 포트·SRV와 별개입니다. 서버마다 공개 UDP 포트를 하나씩 사용합니다. 기본값은 24454이며, 중계 컴퓨터의 공유기·방화벽에서 아래 UDP 포트도 허용하세요.</p>
+   <p>음성은 게임 접속 포트·SRV와 별개입니다. 서버마다 공개 UDP 포트를 하나씩 사용합니다. 기본값은 24454이며, 중계 컴퓨터의 공유기·방화벽에서 아래 UDP 포트도 허용하세요. Sable UDP를 끄면 게임 TCP와 같은 번호의 공개 UDP 포트를 음성에 사용할 수도 있습니다. 중계와 게임이 같은 컴퓨터이면 내부 음성 포트는 다르게 지정합니다.</p>
    {!view.voicechatServers?.length&&<p>공통 접속 주소·포트·DNS를 켜고 서버의 게임 실행기를 지정하면 음성 중계를 설정할 수 있습니다.</p>}
    {(view.voicechatServers||[]).map(server=>{
     const entry=config.voicechat?.find(v=>v.instanceId===server.instanceId);
@@ -51,7 +51,8 @@ export function DirectRelaySettings(){
      <label className="check-label"><input type="checkbox" aria-label={`${server.name} Simple Voice Chat 중계`} checked={!!entry} disabled={busy||!entry&&(!server.capable||!udpTarget?.voicechatCapable)} onChange={e=>{
       if(!e.target.checked){edit({...config,voicechat:(config.voicechat||[]).filter(v=>v.instanceId!==server.instanceId)});return;}
       let port=24454;while((config.voicechat||[]).some(v=>v.publicPort===port||v.localPort===port)||port===view.gamePort)port++;
-      edit({...config,voicechat:[...(config.voicechat||[]),{instanceId:server.instanceId,publicPort:port,localPort:port}]});
+      let localPort=port;if(server.runnerId===config.relayRunnerId){localPort=34454;while(localPort===port||(config.voicechat||[]).some(v=>v.publicPort===localPort||v.localPort===localPort)||localPort===view.gamePort)localPort++;}
+      edit({...config,voicechat:[...(config.voicechat||[]),{instanceId:server.instanceId,publicPort:port,localPort}]});
      }}/>{server.name} 음성 중계</label>
      {(!server.capable||!udpTarget?.voicechatCapable)&&<p className="muted">중계·게임 실행기와 상주 게임호스트의 음성 중계 업데이트·연결 확인이 필요합니다.</p>}
      {entry&&<>

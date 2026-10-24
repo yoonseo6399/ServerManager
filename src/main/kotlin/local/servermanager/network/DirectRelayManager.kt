@@ -94,7 +94,7 @@ data class RelayRunnerView(val runnerId:String,val name:String,val role:String,v
     val active:Boolean,val ready:Boolean,val streams:Int,val internalAddresses:List<String>,val publicHost:String,val gamePort:Int,val securePort:Int,
     val router:List<RelayRouterRow>,val diagnostics:Map<String,RelayCheck>,val impactIfCut:String,val sableUdpCapable:Boolean=false,val sableUdp:SableRelayStatus?=null,val voicechatCapable:Boolean=false,val voicechat:Map<String,VoiceChatStatus> =emptyMap())
 data class AgentRunnerView(val runnerId:String,val name:String,val relays:List<AgentRelayStatus>)
-data class VoiceChatServerView(val instanceId:String,val name:String,val capable:Boolean,val localStatus:VoiceChatStatus?=null)
+data class VoiceChatServerView(val instanceId:String,val name:String,val capable:Boolean,val localStatus:VoiceChatStatus?=null,val runnerId:String?=null)
 data class DirectRelayView(val revision:Long,val config:DirectRelayConfig,val phase:String,val relays:List<RelayRunnerView>,val agents:List<AgentRunnerView>,val message:String,val gamePort:Int,val sableUdpBlockers:List<String> =emptyList(),val voicechatServers:List<VoiceChatServerView> =emptyList())
 
 class DirectRelayManager(val store:DirectRelayStore,private val world:RelayWorld,private val clock:()->Long={System.currentTimeMillis()}) {
@@ -207,8 +207,9 @@ class DirectRelayManager(val store:DirectRelayStore,private val world:RelayWorld
         require(c.voicechat.map {it.publicPort}.distinct().size==c.voicechat.size) {"서버마다 다른 음성 공개 UDP 포트가 필요합니다"}
         c.voicechat.forEach {v->
             require(v.instanceId.matches(Regex("[A-Za-z0-9-]{1,64}")) && v.publicPort in 1024..65535 && v.localPort in 1024..65535) {"음성 포트는 1024~65535로 입력하세요"}
-            require(v.publicPort!=world.gamePort() && v.localPort!=world.instancePort(v.instanceId)) {"음성은 게임·쿼리와 다른 UDP 포트를 선택하세요"}
+            require((!c.sableUdpEnabled || v.publicPort!=world.gamePort()) && v.localPort!=world.instancePort(v.instanceId)) {"음성 UDP 포트가 Sable 또는 게임·쿼리 포트와 충돌합니다"}
         }
+        (listOfNotNull(c.relayRunnerId,c.candidateRunnerId)+c.retiring.keys).forEach {validateVoiceCoLocation(c,it)}
         val byRunner=c.voicechat.mapNotNull {v->world.routes().firstOrNull {it.first==v.instanceId}?.let {it.second to v.localPort}}
         require(byRunner.distinct().size==byRunner.size) {"같은 게임 실행기에서는 서버마다 다른 내부 음성 포트를 사용하세요"}
         if(c.enabled){
@@ -230,8 +231,14 @@ class DirectRelayManager(val store:DirectRelayStore,private val world:RelayWorld
         }
         store.save(request);cuts.clear();reconcile();return view()
     }
+    private fun validateVoiceCoLocation(c:DirectRelayConfig,relay:String) {
+        val instances=world.routes().filter {it.second==relay}.map {it.first}.toSet()
+        val publicPorts=c.voicechat.map {it.publicPort}.toSet()+(if(c.sableUdpEnabled)setOf(world.gamePort()) else emptySet())
+        require(c.voicechat.none {it.instanceId in instances && it.localPort in publicPorts}) {"중계와 게임이 같은 컴퓨터이면 내부 음성 UDP 포트를 공개 음성·Sable UDP 포트와 다르게 지정하세요"}
+    }
     @Synchronized fun prepare(runner:String,spec:RelayHostSpec?=null):DirectRelayView {
         val c=config();check(c.enabled && c.relayRunnerId!=null) {"먼저 직접 중계를 켜세요"}
+        validateVoiceCoLocation(c,runner)
         if(c.voicechat.isNotEmpty())require(runner in voiceCapable) {"새 중계 실행기의 음성 중계 업데이트가 필요합니다"}
         if(c.sableUdpEnabled)require(runner in udpCapable) {"새 중계 실행기의 Sable UDP 직접 중계 업데이트가 필요합니다"}
         require(runner!=c.relayRunnerId) {"이미 사용 중인 중계입니다"}
@@ -299,7 +306,7 @@ class DirectRelayManager(val store:DirectRelayStore,private val world:RelayWorld
         val message=when(phase){"OFF"->"직접 중계 꺼짐";"ACTIVE"->"직접 중계 준비 완료";"CANDIDATE_READY"->"새 중계 대상 준비 완료 · 전환 가능";"PREPARING"->"새 중계 대상 준비 중";else->"중계 준비 대기 · 진단을 확인하세요"}
         val voiceServers=(world.routes().map {it.first}+c.voicechat.map {it.instanceId}).distinct().map {id->
             val runner=world.routes().firstOrNull {it.first==id}?.second
-            VoiceChatServerView(id,world.instanceName(id),runner in voiceCapable && runner?.let {world.connected(it)}==true,runner?.let {reports[it]?.voicechat?.get(id)})
+            VoiceChatServerView(id,world.instanceName(id),runner in voiceCapable && runner?.let {world.connected(it)}==true,runner?.let {reports[it]?.voicechat?.get(id)},runner)
         }
         return DirectRelayView(store.revision(),c,phase,relayViews,agentViews,message,gamePort,world.routes().map {it.second}.distinct().filter {it !in udpCapable || !world.connected(it)}.map {world.runnerName(it)},voiceServers)
     }
