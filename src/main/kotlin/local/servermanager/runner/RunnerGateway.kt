@@ -444,8 +444,9 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
         val relayHosts=if(direct?.enabled==true)listOfNotNull(direct.relayRunnerId,direct.candidateRunnerId)+direct.retiring.filterValues {it>System.currentTimeMillis()}.keys else emptyList()
         val relayPorts=if(shared.enabled && (if(direct?.enabled==true)runnerId in relayHosts else runnerId==shared.relayRunnerId))
             listOfNotNull(shared.port,direct?.securePort?.takeIf {direct.enabled}) else emptyList()
+        val publicVoice=if(runnerId in relayHosts)direct?.voicechat?.map {it.publicPort} ?: emptyList() else emptyList()
         val voicePorts=direct?.voicechat?.filter {route->runCatching {manager.instance(route.instanceId).runnerId==runnerId}.getOrDefault(false)}?.map {it.localPort} ?: emptyList()
-        return (relayPorts+voicePorts).toSet()
+        return (relayPorts+voicePorts+publicVoice).toSet()
     }
     override fun validateRunnerAssignment(instance:Instance,runnerId:String?) {
         val c=directRelay?.core?.store?.config()?.takeIf {it.enabled} ?: return

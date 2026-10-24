@@ -525,6 +525,12 @@ class ServerManager {
             if(!backgroundPending(id)){r.fileTransfer=null;r.transferAuthoritative=false;r.transferMeter.reset()}
             if(i.runnerId!=null) {
                 val controller=remoteController ?: error("원격 실행기 연결 기능을 사용할 수 없습니다")
+                controller.validateRunnerAssignment(i,i.runnerId)
+                val port=ServerPortPlan.available(i.port,unavailableGamePorts(id,i.runnerId))
+                if(port!=i.port) {
+                    r.event("system","기존 설정의 내부 게임 포트 충돌을 복구합니다: ${i.port} → $port")
+                    i.port=port;save(i)
+                }
                 root.resolve(id).resolve("remote-exit.json").deleteIfExists()
                 atomicText(root.resolve(id).resolve("start-actor.json"),mapper.writeValueAsString(actor))
                 root.resolve(id).resolve("remote-lease").writeText(i.runnerId!!)

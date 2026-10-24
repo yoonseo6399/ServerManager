@@ -9,10 +9,11 @@ import kotlin.test.*
 class MultiServerPortsTest {
     private val manager=ServerManager()
     private val ids=mutableListOf<String>()
+    private val starts=mutableListOf<Instance>()
     private val remote=object:RemoteController {
         override fun sharedGamePort()=6700
         override fun reservedGamePorts(runnerId:String?)=if(runnerId=="relay")setOf(6700,6400,24454,34454) else emptySet()
-        override fun start(instance:Instance) {}
+        override fun start(instance:Instance) {starts.add(instance.copy())}
         override fun stop(instance:Instance) {}
         override fun restart(instance:Instance) {}
         override fun command(instance:Instance,value:String) {}
@@ -33,6 +34,17 @@ class MultiServerPortsTest {
         assertFailsWith<IllegalStateException> {manager.assignRunner(a.id,"elsewhere")}
         assertEquals("same",manager.instance(a.id).runnerId)
         manager.runtime(a.id).state="STOPPED"
+    }
+    @Test fun `an existing duplicate configuration is repaired before the remote start is sent`() {
+        val a=create();val b=create();manager.assignRunner(a.id,"same");manager.assignRunner(b.id,"same")
+        manager.instance(b.id).port=25565 // persisted by an older version before assignment planning existed
+        manager.runtime(a.id).state="RUNNING"
+        try {
+            manager.start(b.id)
+            assertEquals(25566,manager.instance(b.id).port);assertEquals(25566,starts.single().port)
+            assertEquals(25565,manager.instance(a.id).port)
+            assertTrue(manager.runtime(b.id).events.any {it.text.contains("기존 설정")})
+        } finally {manager.runtime(a.id).state="STOPPED";manager.runtime(b.id).state="STOPPED"}
     }
     @Test fun `different computers may reuse the same internal port but moving reserves target ports`() {
         val a=create();val b=create();manager.assignRunner(a.id,"one");manager.assignRunner(b.id,"two")

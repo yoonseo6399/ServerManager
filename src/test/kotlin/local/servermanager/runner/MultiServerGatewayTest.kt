@@ -21,7 +21,7 @@ class MultiServerGatewayTest {
         store.save(DirectRelaySave(DirectRelayConfig(true,"relay",securePort=6400,voicechat=listOf(VoiceChatRelayConfig("a",24454,34454),VoiceChatRelayConfig("b",24455,34454))),0))
         val gateway=RunnerGateway(registry,manager,network,service)
         try {
-            assertEquals(setOf(6700,6400),gateway.reservedGamePorts("relay"));assertEquals(setOf(34454),gateway.reservedGamePorts("one"));assertTrue(gateway.reservedGamePorts("other").isEmpty())
+            assertEquals(setOf(6700,6400,24454,24455),gateway.reservedGamePorts("relay"));assertEquals(setOf(34454),gateway.reservedGamePorts("one"));assertTrue(gateway.reservedGamePorts("other").isEmpty())
             assertFailsWith<IllegalArgumentException> {gateway.validateRunnerAssignment(b,"one")}
             gateway.validateRunnerAssignment(b,"relay")
             store.save(DirectRelaySave(store.config().copy(voicechat=listOf(VoiceChatRelayConfig("a",24454,34454),VoiceChatRelayConfig("b",24455,24454))),1))
