@@ -108,6 +108,7 @@ class SecureChannel(private val socket:Socket,private val sendKey:ByteArray,priv
         const val OPEN=1;const val OPENED=2;const val OPEN_FAIL=3;const val DATA=4;const val CLOSE=5;const val PING=6;const val PONG=7
         const val GOAWAY=8;const val READY_QUERY=9;const val READY=10;const val NOT_READY=11
         const val UDP_REGISTER=12;const val UDP_REGISTERED=13;const val UDP_DENIED=14;const val UDP_UP=15;const val UDP_DOWN=16
+        const val VOICE_UP=17;const val VOICE_DOWN=18
         const val MAX_PAYLOAD=64*1024
     }
 }
@@ -166,7 +167,8 @@ data class RelayAgentStatus(val agentId:String,val epoch:Long,val connectedAt:Lo
 data class RelayHubStatus(val gameListening:Boolean,val gamePort:Int?,val secureListening:Boolean,val securePort:Int?,val generation:Long,
     val agents:List<RelayAgentStatus>,val routes:List<RelayRoute>,val streamsByRoute:Map<String,Int>,val rejects:Map<String,Long>,val lastBindError:String?,
     @get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) val sableUdp:SableRelayStatus?=null,
-    @get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) val sableInstances:Map<String,SableRelayStatus>?=null)
+    @get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) val sableInstances:Map<String,SableRelayStatus>?=null,
+    @get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY) val voicechat:Map<String,VoiceChatStatus> =emptyMap())
 
 class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clock:()->Long={System.currentTimeMillis()},private val playerReadTimeoutMillis:Int=60000):AutoCloseable {
     private inner class Tunnel(val agentId:String,val epoch:Long,val channel:SecureChannel,val connectedAt:Long) {
@@ -176,12 +178,16 @@ class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clo
             val b=java.nio.ByteBuffer.wrap(frame);val stream=b.int
             channel.send(SecureChannel.UDP_UP,stream,ByteArray(b.remaining()).also(b::get));true
         }.getOrDefault(false)}
+        val voiceDatagrams=DatagramOutbox {frame->runCatching {
+            val b=java.nio.ByteBuffer.wrap(frame);val stream=b.int
+            channel.send(SecureChannel.VOICE_UP,stream,ByteArray(b.remaining()).also(b::get));true
+        }.getOrDefault(false)}
         val ids=AtomicInteger(1)
         fun end(stream:Int,notify:Boolean) {
             instances.remove(stream);sable.removeStream(agentId,stream)
             players.remove(stream)?.let {runCatching {it.close()};if(notify)runCatching {channel.send(SecureChannel.CLOSE,stream)}}
         }
-        fun close() {datagrams.close();sable.removeRunner(agentId);channel.close();players.keys.toTypedArray().forEach {end(it,false)};opens.values.forEach {it.countDown()}}
+        fun close() {voiceDatagrams.close();voicechat.removeRunner(agentId);datagrams.close();sable.removeRunner(agentId);channel.close();players.keys.toTypedArray().forEach {end(it,false)};opens.values.forEach {it.countDown()}}
     }
     private val io=Executors.newVirtualThreadPerTaskExecutor()
     private val tunnels=ConcurrentHashMap<String,Tunnel>()
@@ -190,6 +196,11 @@ class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clo
         if(!udpEnabled || t==null || socket==null || instance==null || policy.agents[agent]!=t.epoch || policy.routes.none {it.agentId==agent && it.instanceId==instance})null
         else SableRoute(instance,socket.inetAddress)
     },{agent,frame->tunnels[agent]?.datagrams?.offer(frame)==true})
+    private val voicechat=VoiceChatPublicRelay({instance,ip->
+        val candidates=tunnels.values.filter {t->policy.agents[t.agentId]==t.epoch && policy.routes.any {it.agentId==t.agentId && it.instanceId==instance} && t.instances.any {(stream,id)->id==instance && t.players[stream]?.let {!it.isClosed && it.inetAddress==ip}==true}}
+        candidates.singleOrNull()?.agentId
+    },{agent,session,bytes->tunnels[agent]?.voiceDatagrams?.offer(java.nio.ByteBuffer.allocate(4+bytes.size).putInt(session).put(bytes).array())==true})
+    fun voiceChat(config:List<VoiceChatRelayConfig>,address:String="0.0.0.0")=voicechat.configure(config,address)
     @Volatile private var udpEnabled=false
     @Volatile private var udpRequested=false
     @Synchronized fun sableUdp(enabled:Boolean,port:Int,address:String="0.0.0.0") {
@@ -251,7 +262,7 @@ class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clo
         val p=policy
         return RelayHubStatus(gamePort!=null,gamePort,securePort!=null,securePort,p.generation,
             tunnels.values.map {RelayAgentStatus(it.agentId,it.epoch,it.connectedAt,it.players.size)}.sortedBy {it.agentId},p.routes,
-            p.routes.associate {it.hostname to (tunnels[it.agentId]?.players?.size ?: 0)},rejects.mapValues {it.value.get()},bindError,if(udpRequested)sable.status() else null,if(udpRequested)p.routes.map {it.instanceId}.distinct().take(1000).associateWith {sable.status(it)} else null)
+            p.routes.associate {it.hostname to (tunnels[it.agentId]?.players?.size ?: 0)},rejects.mapValues {it.value.get()},bindError,if(udpRequested)sable.status() else null,if(udpRequested)p.routes.map {it.instanceId}.distinct().take(1000).associateWith {sable.status(it)} else null,voicechat.statuses())
     }
     /** Asks the agent whether the instance can serve players, without opening a game connection. */
     fun probe(agentId:String,instanceId:String,timeoutMillis:Long=2000):Boolean {
@@ -310,6 +321,7 @@ class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clo
                 }
                 SecureChannel.UDP_DOWN -> if(udpEnabled && frame.payload.isNotEmpty() && frame.payload.size<=65507)
                     sable.downstream(tunnel.agentId,java.nio.ByteBuffer.allocate(4+frame.payload.size).putInt(frame.stream).put(frame.payload).array())
+                SecureChannel.VOICE_DOWN -> voicechat.downstream(tunnel.agentId,frame.stream,frame.payload)
                 SecureChannel.PING -> tunnel.channel.send(SecureChannel.PONG,0)
                 SecureChannel.READY,SecureChannel.NOT_READY -> tunnel.readyReplies[frame.payload.toString(Charsets.UTF_8)]?.complete(frame.type==SecureChannel.READY)
             }
@@ -352,7 +364,7 @@ class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clo
         }
     }
     override fun close() {
-        closed=true;sable.close();runCatching {game?.close()};runCatching {secure?.close()}
+        closed=true;voicechat.close();sable.close();runCatching {game?.close()};runCatching {secure?.close()}
         tunnels.values.forEach {it.close()};tunnels.clear();io.shutdownNow()
     }
 }
@@ -363,7 +375,7 @@ data class RelayEndpoint(val host:String,val port:Int,val ticket:RelayTicket)
 
 /** Game runner side: dials out to the relay, then serves OPEN requests only for instances it owns. */
 class DirectRelayAgent(private val endpoint:()->RelayEndpoint?,private val gamePort:(String)->Int?,private val ready:(String)->Boolean={true},
-        private val backoffMillis:LongArray=longArrayOf(500,1000,2000,5000,10000),private val sableAllowed:()->Boolean={false}):AutoCloseable {
+        private val backoffMillis:LongArray=longArrayOf(500,1000,2000,5000,10000),private val sableAllowed:()->Boolean={false},private val voiceTargets:()->List<VoiceChatTarget> ={emptyList()}):AutoCloseable {
     private val io=Executors.newVirtualThreadPerTaskExecutor()
     private val streams=ConcurrentHashMap<Int,Socket>()
     private val streamInstances=ConcurrentHashMap<Int,String>()
@@ -371,6 +383,9 @@ class DirectRelayAgent(private val endpoint:()->RelayEndpoint?,private val gameP
     private val udpTokens=ConcurrentHashMap<Int,String>()
     private val registrations=ConcurrentHashMap<String,java.util.concurrent.CompletableFuture<Boolean>>()
     @Volatile private var datagrams:DatagramOutbox?=null
+    @Volatile private var voiceOutbox:DatagramOutbox?=null
+    private val voicechat=VoiceChatAgentRelay(voiceTargets,ready,{session,bytes->voiceOutbox?.offer(java.nio.ByteBuffer.allocate(4+bytes.size).putInt(session).put(bytes).array())==true})
+    fun voiceTargetsChanged()=voicechat.reconcile()
     fun streamAtPort(port:Int):Pair<String,Int>?=streams.entries.singleOrNull {it.value.localPort==port && !it.value.isClosed}?.let {e->streamInstances[e.key]?.let {it to e.key}}
     fun registerSable(stream:Int,instance:String,token:String):Boolean {
         val tunnel=channel ?: return false
@@ -438,7 +453,8 @@ class DirectRelayAgent(private val endpoint:()->RelayEndpoint?,private val gameP
                 val tunnel=try {DirectRelayHandshake.client(socket,target.ticket)} catch(e:Exception){runCatching {socket.close()};throw e}
                 socket.soTimeout=0;channel=tunnel;connectedAt=System.currentTimeMillis();state=RelayAgentState.CONNECTED;reason=null;failures=0
                 datagrams=DatagramOutbox {bytes->runCatching {val b=java.nio.ByteBuffer.wrap(bytes);val stream=b.int;tunnel.send(SecureChannel.UDP_DOWN,stream,ByteArray(b.remaining()).also(b::get));true}.getOrDefault(false)}
-                try {serve(tunnel)} finally {datagrams?.close();datagrams=null;disableSable();channel=null;connectedAt=null;streams.keys.toTypedArray().forEach {end(it)};tunnel.close()}
+                voiceOutbox=DatagramOutbox {bytes->runCatching {val b=java.nio.ByteBuffer.wrap(bytes);val session=b.int;tunnel.send(SecureChannel.VOICE_DOWN,session,ByteArray(b.remaining()).also(b::get));true}.getOrDefault(false)}
+                try {serve(tunnel)} finally {voiceOutbox?.close();voiceOutbox=null;voicechat.close();datagrams?.close();datagrams=null;disableSable();channel=null;connectedAt=null;streams.keys.toTypedArray().forEach {end(it)};tunnel.close()}
                 if(!stopped && state==RelayAgentState.CONNECTED){state=RelayAgentState.UNREACHABLE;reason="중계 실행기 연결이 끊겼습니다"}
             } catch(e:DirectRelayRejected){state=RelayAgentState.REJECTED;reason=e.reason}
             catch(e:Exception){state=RelayAgentState.UNREACHABLE;reason="중계 실행기에 연결하지 못했습니다: ${e.javaClass.simpleName}"}
@@ -453,6 +469,7 @@ class DirectRelayAgent(private val endpoint:()->RelayEndpoint?,private val gameP
                 SecureChannel.OPEN -> open(tunnel,frame.stream,frame.payload.toString(Charsets.UTF_8))
                 SecureChannel.DATA -> streams[frame.stream]?.let {s->runCatching {s.getOutputStream().write(frame.payload);s.getOutputStream().flush()}.onFailure {end(frame.stream);runCatching {tunnel.send(SecureChannel.CLOSE,frame.stream)}}}
                 SecureChannel.CLOSE -> end(frame.stream)
+                SecureChannel.VOICE_UP -> voicechat.receive(frame.stream,frame.payload)
                 SecureChannel.UDP_UP -> receiveDatagram(tunnel,frame)
                 SecureChannel.UDP_REGISTERED,SecureChannel.UDP_DENIED -> registrations[frame.payload.toString(Charsets.US_ASCII)]?.complete(frame.type==SecureChannel.UDP_REGISTERED)
                 SecureChannel.PING -> tunnel.send(SecureChannel.PONG,0)
@@ -476,5 +493,5 @@ class DirectRelayAgent(private val endpoint:()->RelayEndpoint?,private val gameP
         }
     }
     private fun end(stream:Int){streamInstances.remove(stream);udpTokens.remove(stream);udp.remove(stream)?.close();streams.remove(stream)?.let {runCatching {it.close()}}}
-    override fun close() {stopped=true;disableSable();datagrams?.close();channel?.close();loop?.interrupt();streams.keys.toTypedArray().forEach {end(it)};io.shutdownNow();state=RelayAgentState.IDLE}
+    override fun close() {stopped=true;voicechat.close();voiceOutbox?.close();disableSable();datagrams?.close();channel?.close();loop?.interrupt();streams.keys.toTypedArray().forEach {end(it)};io.shutdownNow();state=RelayAgentState.IDLE}
 }

@@ -929,6 +929,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         activity[id]=AtomicLong()
         val crashesBefore=CrashReports.snapshot(serverDir(id))
         instanceRoot(id).resolve("exit.json").deleteIfExists()
+        if(hosted==null)directRelay.prepareVoicechat(id,serverDir(id))
         val builder=ProcessBuilder(args).directory(serverDir(id).toFile()).redirectErrorStream(true)
         val udpStatus=runCatching {
             val resident=hosted

@@ -315,6 +315,7 @@ class GameHostService(private val home:Path,private val version:String,private v
                 if(!existing.exitAcked)return fail("EXIT_UNACKED",mapOf("pid" to existing.pid,"exitCode" to existing.exitCode))
                 games.remove(id)
             }
+            try {relay().prepareVoicechat(id,directory)} catch(e:Exception){return fail("VOICECHAT_CONFIG_FAILED",mapOf("detail" to (e.message ?: "음성 설정 실패").take(200)))}
             val builder=ProcessBuilder(command).directory(directory.toFile()).redirectErrorStream(true)
             val env=m.path("env");if(env.isObject)builder.environment().apply {clear();env.fields().forEach {(k,v)->put(k,v.asText())}}
             val process=try {builder.start()} catch(e:Exception){return fail("START_FAILED",mapOf("detail" to (e.message ?: e.javaClass.simpleName).take(300)))}

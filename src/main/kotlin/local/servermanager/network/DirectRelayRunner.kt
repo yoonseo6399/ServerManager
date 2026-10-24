@@ -59,12 +59,15 @@ class RelayConsentStore(private val home:Path,private val env:(String)->String?=
 
 data class RelayHostConfig(val on:Boolean,val relayId:String,val secret:String,val gamePort:Int,val securePort:Int,val policy:RelayPolicy,
     val drain:Boolean=false,val drainSeconds:Long=600,
-    @get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_DEFAULT) val sableUdpEnabled:Boolean=false)
+    @get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_DEFAULT) val sableUdpEnabled:Boolean=false,
+    @get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY) val voicechat:List<VoiceChatRelayConfig> =emptyList())
 data class AgentRelayTarget(val relayId:String,val host:String,val port:Int,val drain:Boolean=false)
 data class AgentRelayConfig(val relays:List<AgentRelayTarget>,val instances:Set<String>,val drainSeconds:Long=600,
-    @get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_DEFAULT) val sableUdpEnabled:Boolean=false)
+    @get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_DEFAULT) val sableUdpEnabled:Boolean=false,
+    @get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY) val voicechat:List<VoiceChatTarget> =emptyList())
 data class AgentRelayStatus(val relayId:String,val state:String,val reason:String?,val streams:Int,val connectedAt:Long?)
-data class RunnerRelayReport(val consent:RelayConsentState,val hub:RelayHubStatus?,val agents:List<AgentRelayStatus>,val hostActive:Boolean,val bindOk:Boolean,val addresses:List<String> =emptyList())
+data class RunnerRelayReport(val consent:RelayConsentState,val hub:RelayHubStatus?,val agents:List<AgentRelayStatus>,val hostActive:Boolean,val bindOk:Boolean,val addresses:List<String> =emptyList(),
+    @get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY) val voicechat:Map<String,VoiceChatStatus> =emptyMap())
 
 /**
  * Runner side of the direct relay. Owns the relay hub (when this computer is the chosen relay) and one agent per relay target
@@ -74,6 +77,13 @@ data class RunnerRelayReport(val consent:RelayConsentState,val hub:RelayHubStatu
 class DirectRelayRunnerRole(home:Path,private val send:(RunnerMessage)->Boolean,private val gamePort:(String)->Int?,private val ready:(String)->Boolean,
         private val consent:RelayConsentStore=RelayConsentStore(home),private val backoff:LongArray=longArrayOf(500,1000,2000,5000,10000),private val bindAddress:String="0.0.0.0") {
     private val mapper=jacksonObjectMapper()
+    private val voiceFiles=VoiceChatFiles(home.resolve("voicechat-backups"))
+    @Volatile private var voiceTargets:List<VoiceChatTarget> =emptyList()
+    private val voiceStates=ConcurrentHashMap<String,VoiceChatStatus>()
+    fun prepareVoicechat(instance:String,directory:Path):VoiceChatStatus {
+        val target=voiceTargets.singleOrNull {it.instanceId==instance && instance in allowedInstances}
+        return voiceFiles.prepare(instance,directory,target).also {voiceStates[instance]=it}
+    }
     @Volatile private var hub:DirectRelayHub?=null
     @Volatile private var hubConfig:RelayHostConfig?=null
     @Volatile private var lastBindOk=true
@@ -91,7 +101,7 @@ class DirectRelayRunnerRole(home:Path,private val send:(RunnerMessage)->Boolean,
     fun streamTotal()=(hub?.streamCount() ?: 0)+agents.values.sumOf {it.streamCount()}
     private fun reportConsent(state:RelayConsentState) {
         announced=state
-        send(RunnerMessage("relay-consent",state=if(state.allowed)"ALLOWED" else "DENIED",version="DRP1_UDP1",detail=mapper.writeValueAsString(state)))
+        send(RunnerMessage("relay-consent",state=if(state.allowed)"ALLOWED" else "DENIED",version="DRP1_VOICE1",detail=mapper.writeValueAsString(state)))
     }
     fun onSession(){reportConsent(consent.read());report()}
     /** Called every heartbeat. Honours a local revocation within one tick without waiting for the manager. */
@@ -103,8 +113,8 @@ class DirectRelayRunnerRole(home:Path,private val send:(RunnerMessage)->Boolean,
     }
     fun report() {
         val h=hub;val state=announced ?: consent.read()
-        val body=RunnerRelayReport(state,h?.status(),agents.map {(id,a)->AgentRelayStatus(id,a.state.name,a.reason,a.streamCount(),a.connectedAt)},h!=null,lastBindOk,localAddresses())
-        send(RunnerMessage("drp-status",version="DRP1_UDP1",detail=mapper.writeValueAsString(body)))
+        val body=RunnerRelayReport(state,h?.status(),agents.map {(id,a)->AgentRelayStatus(id,a.state.name,a.reason,a.streamCount(),a.connectedAt)},h!=null,lastBindOk,localAddresses(),voiceStates.toMap())
+        send(RunnerMessage("drp-status",version="DRP1_VOICE1",detail=mapper.writeValueAsString(body)))
     }
     /** Returns true when [message] belonged to the direct relay protocol. */
     fun onMessage(message:RunnerMessage):Boolean {
@@ -133,6 +143,7 @@ class DirectRelayRunnerRole(home:Path,private val send:(RunnerMessage)->Boolean,
         lastBindOk=active.listen(config.gamePort,config.securePort,bindAddress)
         active.applyPolicy(config.policy)
         active.sableUdp(config.sableUdpEnabled,config.gamePort,bindAddress)
+        active.voiceChat(config.voicechat,bindAddress)
         hubConfig=config
     }
     private fun ticketFor(relayId:String):RelayTicket? {
@@ -160,7 +171,14 @@ class DirectRelayRunnerRole(home:Path,private val send:(RunnerMessage)->Boolean,
     fun stopped(instance:String){sableBridge.stopped(instance)}
 
     private fun agent(config:AgentRelayConfig) {
+        require(config.voicechat.size<=64 && config.voicechat.all {it.instanceId in config.instances && it.localPort in 1024..65535})
         allowedInstances=config.instances.toSet()
+        val previousVoice=voiceTargets
+        voiceTargets=config.voicechat.filter {it.instanceId in allowedInstances}
+        (previousVoice.map {it.instanceId}+voiceTargets.map {it.instanceId}).distinct().forEach {id->
+            if(previousVoice.singleOrNull {it.instanceId==id}!=voiceTargets.singleOrNull {it.instanceId==id})voiceStates[id]=VoiceChatStatus("NEEDS_RESTART",message="음성 주소·포트 설정은 다음 정상 서버 시작 때 반영됩니다")
+        }
+        agents.values.forEach {it.voiceTargetsChanged()}
         sableEnabled=config.sableUdpEnabled
         if(!sableEnabled)agents.values.forEach {it.disableSable()}
         sableBridge.enabled=sableEnabled
@@ -170,7 +188,7 @@ class DirectRelayRunnerRole(home:Path,private val send:(RunnerMessage)->Boolean,
             if(agents.containsKey(target.relayId))return@forEach
             val relayId=target.relayId
             val agent=DirectRelayAgent({endpointFor(target)},
-                {id->if(id in allowedInstances)gamePort(id) else null},{id->id in allowedInstances && ready(id)},backoff,{sableEnabled})
+                {id->if(id in allowedInstances)gamePort(id) else null},{id->id in allowedInstances && ready(id)},backoff,{sableEnabled},{voiceTargets})
             agents[relayId]=agent;agent.start()
         }
         // Targets the manager no longer lists are drained, never cut mid-game.
