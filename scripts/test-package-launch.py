@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os,pathlib,subprocess,tempfile,time,urllib.request,json,socket
+import os,pathlib,subprocess,tempfile,time,urllib.request,json,socket,hashlib
 root=pathlib.Path(__file__).resolve().parent.parent
 app=root/'build/macos-package/root/Applications/Server Manager.app'
 with socket.socket() as sock:
@@ -23,3 +23,10 @@ with tempfile.TemporaryDirectory(prefix='server-manager-launch-') as directory:
         proc.terminate()
         try:proc.wait(timeout=30)
         except subprocess.TimeoutExpired:proc.kill();proc.wait()
+        # Resident hosts intentionally outlive their controller. An isolated test
+        # must remove its own transient job before deleting the temporary home.
+        host_home=home/'data/game-host'
+        label='local.servermanager.game-host.'+hashlib.sha256(str(host_home.absolute()).encode()).hexdigest()[:24]
+        cleanup=subprocess.run(['/bin/launchctl','remove',label],capture_output=True)
+        if cleanup.returncode not in (0,113):
+            raise RuntimeError('Could not remove isolated game-host job')
