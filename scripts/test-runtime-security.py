@@ -58,6 +58,26 @@ class RuntimeSecurityTests(unittest.TestCase):
             # A compromised original must become safe; an already hardened JDK remains safe.
             self.assertIn(before.returncode, (0, 1))
 
+    def test_compromised_subject_is_removed_independent_of_alias(self):
+        java, classes = security.build_trust_tool()
+        keytool = java.parent / "keytool"
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = root / "cacerts"
+            shutil.copy2(java.parent.parent / "lib/security/cacerts", store)
+            for number, cn in enumerate(("emSign ECC Root CA - G3", "AAA Certificate Services")):
+                keys, cert = root / f"key{number}.p12", root / f"cert{number}.der"
+                subprocess.run([str(keytool), "-genkeypair", "-alias", "fixture", "-keyalg", "EC", "-groupname", "secp256r1", "-dname", f"CN={cn},O=Test Fixture", "-validity", "1", "-keystore", str(keys), "-storepass", "changeit", "-keypass", "changeit"], check=True, capture_output=True)
+                subprocess.run([str(keytool), "-exportcert", "-alias", "fixture", "-keystore", str(keys), "-storepass", "changeit", "-file", str(cert)], check=True, capture_output=True)
+                subprocess.run([str(keytool), "-importcert", "-noprompt", "-alias", f"unfamiliar-vendor-alias-{number}", "-file", str(cert), "-keystore", str(store), "-storepass", "changeit"], check=True, capture_output=True)
+            def run(mode):
+                return subprocess.run([str(java), "-cp", str(classes), "RuntimeTrust", mode, str(store)], capture_output=True, text=True)
+            self.assertNotEqual(run("check").returncode, 0)
+            hardened = run("harden")
+            self.assertEqual(hardened.returncode, 0, hardened.stderr)
+            self.assertIn("removed=2", hardened.stdout)
+            self.assertEqual(run("check").returncode, 0)
+
     def test_missing_and_linked_store_refused(self):
         java, classes = security.build_trust_tool()
         with tempfile.TemporaryDirectory() as directory:
