@@ -60,7 +60,7 @@ class ServerArchiveImporter(private val manager:ServerManager) {
         cleanupExpired()
         require(owner.isNotBlank() && req.filename.length in 1..255 && req.filename.endsWith(".zip",true) && '/' !in req.filename && '\\' !in req.filename && req.filename.none {it.isISOControl()}) {"서버 폴더를 압축한 .zip 파일을 선택하세요"}
         require(req.size in 1..ServerArchiveFormat.MAX_ARCHIVE) {"ZIP 업로드는 최대 20 GiB입니다"}
-        val dirs=uploads.listDirectoryEntries();require(dirs.size<4) {"업로드 보관 한도 4개에 도달했습니다. 기존 업로드를 취소하거나 24시간 후 다시 시도하세요"}
+        val dirs=uploads.listDirectoryEntries().filter {it.isDirectory(java.nio.file.LinkOption.NOFOLLOW_LINKS) && runCatching {UUID.fromString(it.name).toString()==it.name}.getOrDefault(false)};require(dirs.size<4) {"업로드 보관 한도 4개에 도달했습니다. 기존 업로드를 취소하거나 24시간 후 다시 시도하세요"}
         val outstanding=dirs.sumOf {dir->runCatching {val s=mapper.readValue(dir.resolve("upload.json").readText(),ArchiveUploadState::class.java);maxOf(0L,s.size-dir.resolve("archive.zip").fileSize())}.getOrDefault(0L)}
         require(Files.getFileStore(uploads).usableSpace>=req.size+outstanding+reserve) {"ZIP 업로드를 위한 디스크 여유 공간이 부족합니다"}
         val token=UUID.randomUUID().toString();val dir=directory(token).createDirectories()
@@ -129,7 +129,7 @@ class ServerArchiveImporter(private val manager:ServerManager) {
                 val ready=runCatching {Launchers.arguments(manager.instance(id),stage);true}.getOrDefault(false)
                 manager.finishArchiveImport(id,stage,ready)
                 r.archiveImport=ServerArchiveProgress("COMPLETE",plan.files,plan.bytes,plan.files,plan.bytes,if(ready)"서버 가져오기 완료. 실행 컴퓨터와 설정을 확인한 뒤 시작하세요" else "파일 가져오기 완료. 서버 실행 파일이 없어 공식 런처 설치가 필요합니다")
-                synchronized(this){remove(dir)}
+                runCatching {synchronized(this){remove(dir)}}.onFailure {r.event("warn","서버 가져오기는 완료됐지만 임시 ZIP을 정리하지 못했습니다. 만료 후 다시 정리합니다")}
             } catch(e:Exception) {
                 synchronized(r){r.state="IMPORT_FAILED";r.archiveImport=r.archiveImport?.copy(phase="FAILED",message=(e.message ?: "압축파일 가져오기 실패").take(500));r.event("error","서버 ZIP 가져오기 실패: ${e.message}. 원본 ZIP을 다시 가져오세요")}
                 stage.toFile().deleteRecursively()
