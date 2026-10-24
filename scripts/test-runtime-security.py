@@ -65,6 +65,7 @@ class RuntimeSecurityTests(unittest.TestCase):
             root = pathlib.Path(directory)
             store = root / "cacerts"
             shutil.copy2(java.parent.parent / "lib/security/cacerts", store)
+            subprocess.run([str(java), "-cp", str(classes), "RuntimeTrust", "harden", str(store)], check=True, capture_output=True)
             for number, cn in enumerate(("emSign ECC Root CA - G3", "AAA Certificate Services")):
                 keys, cert = root / f"key{number}.p12", root / f"cert{number}.der"
                 subprocess.run([str(keytool), "-genkeypair", "-alias", "fixture", "-keyalg", "EC", "-groupname", "secp256r1", "-dname", f"CN={cn},O=Test Fixture", "-validity", "1", "-keystore", str(keys), "-storepass", "changeit", "-keypass", "changeit"], check=True, capture_output=True)
