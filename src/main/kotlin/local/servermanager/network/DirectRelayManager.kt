@@ -218,7 +218,7 @@ class DirectRelayManager(val store:DirectRelayStore,private val world:RelayWorld
             if(!previous.enabled || previous.relayRunnerId!=c.relayRunnerId)c.relayRunnerId?.let {require(consents[it]?.allowed==true && world.connected(it)) {"실행기 소유자가 로컬에서 TCP 중계 사용을 허용하고 온라인이어야 합니다"}}
             if(c.voicechat.isNotEmpty()) {
                 val required=world.routes().filter {r->c.voicechat.any {it.instanceId==r.first}}
-                require(required.map {it.first}.toSet().size==c.voicechat.size) {"직접 중계에 연결된 게임 실행기의 서버를 선택하세요"}
+                require(required.map {it.first}.toSet().size==c.voicechat.size && required.all {world.runner(it.second)?.allowedInstanceIds?.contains(it.first)==true}) {"직접 중계에 연결된 게임 실행기의 서버를 선택하세요"}
                 require((required.map {it.second}+listOfNotNull(c.relayRunnerId,c.candidateRunnerId)).all {it in voiceCapable && world.connected(it)}) {"음성 중계에는 중계·게임 실행기 및 상주 게임호스트 업데이트가 필요합니다"}
                 require(c.publicHost.isNotBlank() || c.relayRunnerId?.let {publicHostFor(it).isNotBlank()}==true) {"음성 클라이언트에 안내할 공개 중계 주소를 입력하세요"}
             }

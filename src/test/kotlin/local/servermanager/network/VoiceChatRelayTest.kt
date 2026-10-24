@@ -62,7 +62,7 @@ class VoiceChatRelayTest {
             f.hub.voiceChat(emptyList());assertTrue(f.hub.status().voicechat.isEmpty());p.soTimeout=200;assertFailsWith<SocketTimeoutException>{exchange(p,f.publicA,"no")}
             tcp.getOutputStream().write("ok".toByteArray());tcp.getOutputStream().flush();assertEquals("ok",String(tcp.getInputStream().readNBytes(2)))
             f.hub.voiceChat(listOf(VoiceChatRelayConfig("a",f.publicA,f.a.udp.localPort)),"127.0.0.1");f.hub.applyPolicy(RelayPolicy(2,emptyMap(),emptyList()))
-            await {f.hub.streamCount()==0};assertFailsWith<SocketTimeoutException>{exchange(p,f.publicA,"revoked")}
+            await {f.hub.streamCount()==0};assertFailsWith<SocketTimeoutException>{exchange(p,f.publicA,"revoked")};Unit
         }
     }
     @Test fun `voice port conflict reports error without breaking game TCP`()=Fixture().use {f->

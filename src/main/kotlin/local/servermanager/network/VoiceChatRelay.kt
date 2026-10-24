@@ -5,7 +5,6 @@ import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
-import kotlin.concurrent.thread
 
 /** One public UDP port per Minecraft instance: voice packets contain no DNS routing name. */
 data class VoiceChatRelayConfig(val instanceId:String,val publicPort:Int=24454,val localPort:Int=24454)
@@ -38,6 +37,7 @@ class VoiceChatPublicRelay(private val authorize:(String,InetAddress)->String?,p
     private val peers=ConcurrentHashMap<Pair<String,InetSocketAddress>,Binding>()
     private val errors=ConcurrentHashMap<String,String>()
     private val drops=AtomicLong();private val ids=AtomicInteger()
+    @Volatile private var lastExpiry=0L
     @Synchronized fun configure(config:List<VoiceChatRelayConfig>,address:String) {
         require(config.size<=64 && config.map {it.publicPort}.distinct().size==config.size && config.all {it.publicPort in 1024..65535 && it.instanceId.matches(Regex("[A-Za-z0-9-]{1,64}"))})
         val desired=config.associateBy {it.instanceId}
@@ -49,7 +49,7 @@ class VoiceChatPublicRelay(private val authorize:(String,InetAddress)->String?,p
                 val socket=DatagramSocket(null)
                 try {socket.bind(InetSocketAddress(address,c.publicPort));socket.soTimeout=1000}catch(e:Exception){socket.close();throw e}
                 sockets[c.instanceId]=socket;errors.remove(c.instanceId)
-                thread(isDaemon=true,name="voicechat-public-udp") {
+                Thread.ofVirtual().name("voicechat-public-udp").start {
                     val buffer=ByteArray(VoiceDatagram.MAX+1)
                     while(!socket.isClosed)try {
                         val packet=DatagramPacket(buffer,buffer.size);socket.receive(packet)
@@ -90,7 +90,7 @@ class VoiceChatPublicRelay(private val authorize:(String,InetAddress)->String?,p
     fun removeRunner(runner:String){bindings.values.filter {it.runner==runner}.forEach(::remove)}
     private fun clear(instance:String){bindings.values.filter {it.instance==instance}.forEach(::remove)}
     private fun remove(b:Binding){bindings.remove(b.id,b);peers.remove(b.instance to b.peer,b)}
-    private fun expire(){val now=System.nanoTime();bindings.values.filter {now-it.seen>30_000_000_000 || authorize(it.instance,it.peer.address)!=it.runner}.forEach(::remove)}
+    private fun expire(){val now=System.nanoTime();if(now-lastExpiry<1_000_000_000)return;lastExpiry=now;bindings.values.filter {now-it.seen>30_000_000_000 || authorize(it.instance,it.peer.address)!=it.runner}.forEach(::remove)}
     override fun close(){sockets.values.forEach {it.close()};sockets.clear();bindings.clear();peers.clear();errors.clear()}
 }
 
@@ -98,7 +98,7 @@ class VoiceChatPublicRelay(private val authorize:(String,InetAddress)->String?,p
 class VoiceChatAgentRelay(private val targets:()->List<VoiceChatTarget>,private val ready:(String)->Boolean,private val forward:(Int,ByteArray)->Boolean):AutoCloseable {
     private data class Peer(val instance:String,val port:Int,val socket:DatagramSocket,@Volatile var seen:Long=System.nanoTime())
     private val peers=ConcurrentHashMap<Int,Peer>()
-    fun receive(session:Int,payload:ByteArray) {
+    @Synchronized fun receive(session:Int,payload:ByteArray) {
         val (instance,bytes)=VoiceDatagram.decode(payload) ?: return
         val target=targets().singleOrNull {it.instanceId==instance} ?: return
         if(!ready(instance) || target.localPort !in 1024..65535 || session<=0)return
@@ -106,16 +106,17 @@ class VoiceChatAgentRelay(private val targets:()->List<VoiceChatTarget>,private 
         val existing=peers[session]
         if(existing!=null && (existing.instance!=instance || existing.port!=target.localPort))return
         if(existing==null && peers.size>=512)return
-        val peer=peers.computeIfAbsent(session) {
+        var peer=existing
+        if(peer==null) {
             val socket=DatagramSocket(InetSocketAddress("127.0.0.1",0));socket.connect(InetAddress.getByName("127.0.0.1"),target.localPort);socket.soTimeout=1000
-            Peer(instance,target.localPort,socket).also {p->
-                thread(isDaemon=true,name="voicechat-loopback-udp") {
-                    val buffer=ByteArray(VoiceDatagram.MAX+1)
-                    try {while(!socket.isClosed){
-                        if(System.nanoTime()-p.seen>30_000_000_000 || !ready(instance) || targets().none {t->t.instanceId==instance && t.localPort==p.port})break
-                        try {val packet=DatagramPacket(buffer,buffer.size);socket.receive(packet);if(packet.length in 1..VoiceDatagram.MAX)forward(session,buffer.copyOf(packet.length))}catch(_:SocketTimeoutException){}
-                    }}catch(_:Exception){}finally {peers.remove(session,p);socket.close()}
-                }
+            val p=Peer(instance,target.localPort,socket)
+            peers[session]=p;peer=p // publish before the worker can remove its mapping
+            Thread.ofVirtual().name("voicechat-loopback-udp").start {
+                val buffer=ByteArray(VoiceDatagram.MAX+1)
+                try {while(!socket.isClosed){
+                    if(System.nanoTime()-p.seen>30_000_000_000 || !ready(instance) || targets().none {t->t.instanceId==instance && t.localPort==p.port})break
+                    try {val packet=DatagramPacket(buffer,buffer.size);socket.receive(packet);if(packet.length in 1..VoiceDatagram.MAX)forward(session,buffer.copyOf(packet.length))}catch(_:SocketTimeoutException){}
+                }}catch(_:Exception){}finally {peers.remove(session,p);socket.close()}
             }
         }
         peer.seen=System.nanoTime()

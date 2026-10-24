@@ -73,6 +73,7 @@ export function DirectRelaySettings(){
    <SaveBar label="직접 중계" dirty={dirty.current} busy={busy} disabled={config.enabled&&first&&(!initial||!eligible(initial))} onReset={()=>adopt(view)} onSave={()=>run(async()=>{const next=await api<View>('/admin/direct-relay','PUT',{config,revision:draftRevision.current});if(alive.current){setView(next);adopt(next);}})}/>
    <p>설치 화면에서 “관리 웹 소유자의 게임 중계 사용 허용 (TCP / Sable UDP)”을 먼저 켜세요. 기존 버전에서는 “TCP 중계 사용 허용”으로 표시됩니다. 공유기·방화벽·DNS는 자동으로 변경하지 않습니다.</p>
    {!first&&<>
+    {!!config.voicechat?.length&&<p className="muted">음성 공개 주소가 바뀌는 중계 전환은 서버를 다시 시작해야 새 주소가 모드에 반영됩니다. 전환 유예 동안 기존 주소를 유지하거나 다음 정상 시작 시점에 맞춰 전환하세요.</p>}
     <label>새 중계 실행기<select disabled={busy} aria-label="새 중계 실행기" value={runner} onChange={e=>setRunner(e.target.value)}><option value="">선택하세요</option>{options()}</select></label>
     <div className="actions">
      <button disabled={busy||!view.config.enabled||!candidate||!eligible(candidate)||runner===view.config.relayRunnerId||dirty.current} onClick={()=>run(()=>api('/admin/direct-relay/prepare','POST',{runnerId:runner,agentHost:config.agentHost,publicHost:config.publicHost}))}>새 중계 준비</button>

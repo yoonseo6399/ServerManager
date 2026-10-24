@@ -15,9 +15,9 @@ test('voice UDP ports save separately, require upgraded hosts and show forwardin
  await page.goto('/#network');const voice=page.getByLabel('야생! Simple Voice Chat 중계',{exact:true});await expect(voice).toBeDisabled();
  capable=true;await expect(voice).toBeEnabled();await voice.check();await expect(page.getByLabel('야생! 공개 음성 UDP 포트',{exact:true})).toHaveValue('24454');
  await page.getByLabel('야생! 공개 음성 UDP 포트',{exact:true}).fill('24455');await page.getByLabel('야생! 내부 음성 UDP 포트',{exact:true}).fill('24456');
- await page.getByRole('region',{name:'직접 TCP 중계'}).getByRole('button',{name:'변경 사항 저장',exact:true}).click();
+ await page.getByRole('region',{name:'직접 중계 변경 사항'}).getByRole('button',{name:'변경 사항 저장',exact:true}).click();
  expect(writes).toHaveLength(1);expect(writes[0].config.voicechat).toEqual([{instanceId:'a',publicPort:24455,localPort:24456}]);expect(writes[0].config.sableUdpEnabled).toBe(false);
  await expect(page.getByText('relay.example.com:24455',{exact:true})).toBeVisible();await expect(page.getByRole('row').filter({has:page.getByRole('cell',{name:'음성 · 야생!',exact:true})})).toContainText('24455');
  await expect(page.getByText('설정 적용: NEEDS_RESTART',{exact:false})).toBeVisible();
- capable=false;await expect(voice).toBeEnabled();await voice.uncheck();await page.getByRole('region',{name:'직접 TCP 중계'}).getByRole('button',{name:'변경 사항 저장',exact:true}).click();expect(writes[1].config.voicechat).toEqual([]);
+ capable=false;await expect(voice).toBeEnabled();await voice.uncheck();await page.getByRole('region',{name:'직접 중계 변경 사항'}).getByRole('button',{name:'변경 사항 저장',exact:true}).click();expect(writes[1].config.voicechat).toEqual([]);
 });
