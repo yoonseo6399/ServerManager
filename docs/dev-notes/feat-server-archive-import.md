@@ -1,4 +1,4 @@
-상태: 구현·테스트 계획 커밋 후 기능 검증 예정
+상태: 구현·기능 검증 완료, 미배포
 # feat/server-archive-import
 
 기반: origin/feat/multi-server-ports eb8b49b (Simple Voice Chat·같은 실행기 여러 서버 포트 분리 포함). 원격 fetch 및 현황 확인 후 별도 워크트리에서 혼자 구현한다. VERSION·main·기존 릴리즈·운영 서버는 변경하지 않는다.
@@ -25,3 +25,19 @@
 ## 제외
 
 RAR/7z/tar.gz, Nextcloud 계정 연동·파일 읽기, 운영 설치/재시작·실제 월드 업로드/인터넷 대용량·공유기·다른OS·전체 테스트·릴리즈 게시.
+
+
+## 실행 결과 (2026-10-25)
+
+- 구현·계획 먼저 `e2c920e` 커밋, 접근성 `e2deaed`, UTF-8/만료 처리 `4bfc910`, 완료 후 임시 정리 `891730a` 커밋 후 검증했다.
+- 최종 backend 관련8클래스 **46통과 / 0실패 / 0제외**. `./gradlew test`는 열거한 클래스만 선택했고 전체 suite는 실행하지 않았다. bootJar 성공.
+- 실물 ZIP `269484322`바이트(257MiB+)를 `8388608`바이트 한도로33청크에 저장하고 미리보기 확인. multipart256MiB 설정은 변경하지 않았다. 20GiB/100GiB 실용량 시험은 아니다.
+- 월드·비활성 비공개 모드·기존 다른 서버·알 수 없는 properties 값·한글 MOTD·false EULA 보존, 수동 start 전 프로세스 없음, 가져온 작은 독립 Java 서버 JAR의 실제 명시적 시작·정상 종료 확인.
+- frontend TS/Vite 성공. ZIP+다중 서버+기존 설정 합계10개 통과. 이후 UTF-8/만료 변경 커밋에서 ZIP4개 다시 통과. 데스크톱·390x844 모바일 스크린샷을 직접 확인했다(동일 테스트 중복 합산하지 않음).
+- 초기 테스트 실패도 보존: stop(force) 테스트 인자 누락으로 테스트 컴파일 실패 → false 명시. select의 암묵적 label에 옵션 문자열이 섞여 browser2개 실패 → aria-label 보완. HTTP 테스트가 refresh 전 BeanFactory를 접근해1개 실패 → 기존 프로젝트와 같은 BeanFactoryPostProcessor로 등록 후 실제 Security 검사 통과. 실패를 삭제하거나 skip하지 않았다.
+- 원시 테스트 산출물은 ignored build/test-results와 frontend/test-results에 있고 집계·업로드 증거는 docs/testing/server-archive-import-results.json에 보존했다.
+- 운영 Nextcloud/관리웹·실행기·Minecraft에는 접근·설치·재시작하지 않았다. 별도 릴리즈 요청 없이 기능 브랜치만 푸시한다. 후속 릴리즈는 기반 voicechat/multi-server 변경과 별도 Java 보안 패치 통합 여부를 함께 확인해야 한다.
+
+## 릴리즈 노트 후보
+
+mrpack 옆에 서버 ZIP 가져오기를 추가했습니다. 대용량 분할 업로드·진행률·이어 올리기·취소와 서버 폴더/종류 확인을 지원하며, 월드·모드를 새 서버로 가져온 뒤 직접 시작할 수 있습니다. ZIP 경로·용량·무결성·업로드 소유자 권한을 검사합니다.
