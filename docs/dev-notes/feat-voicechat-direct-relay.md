@@ -1,4 +1,4 @@
-상태: 음성 직접 중계·웹 설정·모드 설정 준비 구현 중, 선커밋 후 범위 검증 예정
+상태: 구현·기능 검증 완료, 원격 푸시, 미배포
 # Simple Voice Chat direct relay
 
 - Beta25 published base, solo. Add per-instance UDP public/local voice ports under direct relay settings; same selected relay runner and authenticated encrypted DRP tunnel, no manager payload. Separate Sable protocol and namespace; UDP has no DNS hostname, so unique public port per instance. The router must additionally forward selected UDP ports.
@@ -14,3 +14,12 @@
 4. Focused relay/host regression plus frontend TypeScript/Vite, mocked browser UI save/forwarding/capability checks. No full suite, OS matrix, production game restart, router changes or real microphone audio test.
 
 Official references: https://modrepo.de/minecraft/voicechat/wiki/server_config and https://modrepo.de/minecraft/voicechat/wiki/server_setup_self_hosted . Default voice UDP24454, independent of game networking. Voice host may include public hostname:port.
+
+## Final results
+
+- Backend focused64 passed, failures0/skips0, including18 new voice cases. Native authenticated encrypted tunnel + two independent UDP destinations, live-TCP-IP gate and close, route revoke/disable, UDP bind conflict with surviving TCP, malformed envelopes, shared TCP/UDP public port number, co-located relay/game port collision and candidate validation. Real resident-host process start prepares config before launch and restores on the next disabled start.
+- Relevant browser8 unique passed; final changed voice/Sable/first-selection subset5 passed. UI fixtures verify upgraded-host gate, distinct public/private values, co-located internal default34454, forwarding table, pending restart and disabling after lost capability. Initial new test selected a portal SaveBar inside the wrong region; corrected test locator. Kotlin expression-body revocation test initially returned an exception object and was not discovered; explicit Unit makes it execute. Original failures preserved in tool logs; do not claim all initial runs passed.
+- Existing runner-update visibility browser test fails identically on this branch and unmodified published beta25 (hidden offline state after disclosure click). Kept outside the final feature subset, no unrelated production UI change. This is not an all-browser-suite pass.
+- TypeScript/Vite and final bootJar including built UI passed. Whole suite, other OS, production install/restart/voice-file edits, actual microphone/mod-client and real router/Internet audio test not run. No release tag/assets created. Future release must include the Java security runtime branch separately and verify official platform runtime availability.
+- New public default UDP24454; on a shared relay/game computer use distinct local UDP34454 (auto-suggested). Sable OFF may instead use e.g. game TCP6700 + voice UDP6700, verified with actual sockets. Router UDP forwarding is still required. No extra relay secure TCP listener is introduced.
+- Configuration and port requirements: docs/testing/voicechat-direct-relay.md; structured results in docs/testing/voicechat-direct-relay-results.json. Manager + runner controller + resident game host must all be updated before enabling; don't override local relay consent.
