@@ -26,7 +26,7 @@ class ServerArchiveAccessTest {
         val manager=mock(ServerManager::class.java);`when`(manager.root).thenReturn(root.resolve("profile").createDirectories());manager.root.resolve("security").createDirectories()
         val importer=ServerArchiveImporter(manager)
         try {AnnotationConfigWebApplicationContext().use {context->
-            context.servletContext=MockServletContext();context.beanFactory.registerSingleton("manager",manager);context.beanFactory.registerSingleton("importer",importer);context.register(Web::class.java);context.refresh()
+            context.servletContext=MockServletContext();context.register(Web::class.java);context.addBeanFactoryPostProcessor {factory->factory.registerSingleton("manager",manager);factory.registerSingleton("importer",importer)};context.refresh()
             val store=context.getBean(AuthStore::class.java);val owner=store.accounts().single()
             val member=store.invitation(store.invite("member",emptyMap()))!!.userId
             val admin=store.invitation(store.invite("admin",emptyMap(),AccountRole.ADMIN))!!.userId

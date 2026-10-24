@@ -1,7 +1,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {Archive,Upload} from 'lucide-react';
 import {Dialog} from './Dialog';
-import {api} from './http';
+import {api,ApiError} from './http';
 
 type Plan={name:string;root:string;files:number;bytes:number;loader?:string|null;minecraft?:string|null;loaderVersion?:string|null;entryJar?:string|null;requiredJava?:number|null;jars:string[];warnings:string[]};
 type Preview={token:string;plan:Plan};
@@ -17,9 +17,9 @@ export function ServerArchiveDialog({javaPath,port,maxMemory,onClose,onCreated}:
  const token=useRef<string|null>(null),cancelled=useRef(false),controller=useRef<AbortController|null>(null),alive=useRef(true);
  const [name,setName]=useState(''),[loader,setLoader]=useState(''),[minecraft,setMinecraft]=useState(''),[version,setVersion]=useState(''),[jar,setJar]=useState(''),[requiredJava,setRequiredJava]=useState(21),[gamePort,setGamePort]=useState(port),[heap,setHeap]=useState(Math.min(2048,maxMemory)),[java,setJava]=useState(javaPath);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;controller.current?.abort();};},[]);
- const cleanup=async()=>{if(token.current){await api(`/server-archives/uploads/${token.current}`,'DELETE');token.current=null;}};
+ const cleanup=async()=>{if(token.current){try{await api(`/server-archives/uploads/${token.current}`,'DELETE');}catch(e){if(!(e instanceof ApiError)||e.status!==404)throw e;}token.current=null;}};
  async function upload(selected:File){
-  if(busy)return;if(!selected.name.toLowerCase().endsWith('.zip')||selected.size>20*1024**3||selected.size===0){setError('서버 폴더를 압축한 ZIP 파일을 선택하세요. 최대 20 GiB입니다.');return;}
+  if(busy)return;if(!selected.name.toLowerCase().endsWith('.zip')||selected.size>20*1024**3||selected.size===0){setPreview(null);setError('서버 폴더를 압축한 ZIP 파일을 선택하세요. 최대 20 GiB입니다.');return;}
   setBusy(true);setUploading(true);setError('');setPreview(null);cancelled.current=false;controller.current=new AbortController();
   try{
    if(file!==selected){await cleanup();setUploaded(0);setFile(selected);}

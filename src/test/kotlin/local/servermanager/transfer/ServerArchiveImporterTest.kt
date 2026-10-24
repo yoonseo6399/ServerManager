@@ -25,7 +25,7 @@ class ServerArchiveImporterTest {
         return importer.preview("owner",u.token)
     }
     private fun request(token:String,port:Int=32031,jar:String?="custom.jar")=ServerArchiveImportRequest(token,"Imported","Vanilla","1.21.1","1.21.1",jar,21,port,512)
-    private fun await(id:String){val end=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);while(manager.runtime(id).state=="IMPORTING"){assertTrue(System.nanoTime()<end,"archive import timed out");Thread.sleep(10)}}
+    private fun await(id:String){val end=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);while(manager.runtime(id).state=="IMPORTING" || manager.runtime(id).archiveImport?.phase=="EXTRACTING"){assertTrue(System.nanoTime()<end,"archive import timed out");Thread.sleep(10)}}
     private fun jar():ByteArray {
         val javaSource=dir.resolve("ImportedServer.java");javaSource.writeText("""public class ImportedServer {public static void main(String[] a)throws Exception{System.out.println("Done (0.1s)! For help, type help");java.io.BufferedReader r=new java.io.BufferedReader(new java.io.InputStreamReader(System.in));for(String s;(s=r.readLine())!=null;){if(s.equals("stop"))break;System.out.println(s);}}}""")
         assertEquals(0,javax.tools.ToolProvider.getSystemJavaCompiler().run(null,null,null,"-d",dir.toString(),javaSource.toString()))
@@ -35,12 +35,12 @@ class ServerArchiveImporterTest {
         val existing=manager.create(CreateRequest("Original","21.1.219",32030,512))["config"] as Instance
         manager.serverDir(existing.id).resolve("keep.txt").writeText("DO NOT TOUCH")
         val world=byteArrayOf(0,1,2,3,-1);val mod=byteArrayOf(12,34,56)
-        val preview=upload(zip(mapOf("Server/server.properties" to "level-name=world\nserver-port=1\nserver-ip=0.0.0.0\ncustom-flag=keep\n".toByteArray(),"Server/world/level.dat" to world,"Server/mods/private.jar.disabled" to mod,"Server/custom.jar" to jar())))
+        val preview=upload(zip(mapOf("Server/server.properties" to "level-name=world\nserver-port=1\nserver-ip=0.0.0.0\ncustom-flag=keep\nmotd=안녕하세요\n".toByteArray(),"Server/world/level.dat" to world,"Server/mods/private.jar.disabled" to mod,"Server/custom.jar" to jar())))
         val id=(importer.import("owner",request(preview.token))["config"] as Instance).id;await(id)
         assertEquals("STOPPED",manager.runtime(id).state);assertNull(manager.runtime(id).process)
         assertContentEquals(world,manager.serverDir(id).resolve("world/level.dat").readBytes());assertContentEquals(mod,manager.serverDir(id).resolve("mods/private.jar.disabled").readBytes())
         val props=java.util.Properties().apply {manager.serverDir(id).resolve("server.properties").inputStream().use(::load)}
-        assertEquals("32031",props.getProperty("server-port"));assertEquals("127.0.0.1",props.getProperty("server-ip"));assertEquals("keep",props.getProperty("custom-flag"))
+        assertEquals("32031",props.getProperty("server-port"));assertEquals("127.0.0.1",props.getProperty("server-ip"));assertEquals("keep",props.getProperty("custom-flag"));assertEquals("안녕하세요",props.getProperty("motd"))
         assertEquals("DO NOT TOUCH",manager.serverDir(existing.id).resolve("keep.txt").readText());assertFalse(manager.serverDir(id).resolve("Server").exists())
         assertEquals("COMPLETE",manager.runtime(id).archiveImport?.phase)
         val arguments=Launchers.arguments(manager.instance(id),manager.serverDir(id));assertTrue(arguments.any {it.endsWith("custom.jar")})

@@ -116,8 +116,12 @@ class ServerArchiveImporter(private val manager:ServerManager) {
                 val properties=stage.resolve("server.properties")
                 if(properties.exists()) {
                     require(properties.fileSize()<=2L*1024*1024) {"server.properties 크기가 너무 큽니다"}
-                    val values=java.util.Properties().apply {properties.inputStream().use(::load)}
+                    val raw=properties.readBytes()
+                    val text=runCatching {Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(raw)).toString()}.getOrElse {raw.toString(Charsets.ISO_8859_1)}
+                    val values=java.util.Properties().apply {java.io.StringReader(text).use(::load)}
                     ServerArchiveFormat.relative(values.getProperty("level-name","world"))
+                    // Preserve UTF-8 values when the existing runtime writer later reads Java .properties escapes.
+                    properties.outputStream().use {values.store(it,"Imported server properties")}
                 }
                 val metadata=mapOf("loader" to req.loader,"minecraft" to req.minecraft,"loaderVersion" to req.loaderVersion,"requiredJava" to req.requiredJava,"source" to "server-archive")+
                     (req.entryJar?.let {mapOf("entryJar" to it)} ?: emptyMap())
