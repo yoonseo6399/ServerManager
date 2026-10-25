@@ -10,6 +10,7 @@ import stat
 import subprocess
 import sys
 import zipfile
+from runtime_security import download_runtime, build_trust_tool, harden_runtime
 
 ROOT=pathlib.Path(__file__).resolve().parent.parent
 VERSION=(ROOT/'VERSION').read_text().strip()
@@ -80,6 +81,12 @@ def mac():
     folder=STAGE/'ServerManagerRunner-mac'
     copy_common(folder)
     shutil.copytree(MAC_RUNTIMES,folder/'runtimes',dirs_exist_ok=True)
+    tool=build_trust_tool()
+    metadata=[]
+    for arch in ('x64','aarch64'):
+        security=harden_runtime(folder/'runtimes'/arch/'Contents/Home',tool)
+        metadata.append({'architecture':arch,**security})
+    (folder/'RUNTIMES.json').write_text(json.dumps(metadata,indent=2)+'\n')
     for script in (ROOT/'packaging/runner/macos').glob('*.command'):shutil.copy2(script,folder/script.name)
     guide(folder,False,'mac')
     archive(folder,f'ServerManager-Runner-{VERSION}-mac-universal.zip')
@@ -99,17 +106,7 @@ def windows():
     copy_common(folder)
     for script in (ROOT/'packaging/runner/windows').iterdir():
         if script.name!='Setup.cmd':shutil.copy2(script,folder/script.name)
-    api='https://api.adoptium.net/v3/assets/latest/21/hotspot?architecture=x64&image_type=jre&os=windows&vendor=eclipse'
-    asset=json.loads(subprocess.check_output(['/usr/bin/curl','--fail','--silent','--show-error','--location','--retry','2','--max-time','90',api]))[0]
-    package=asset['binary']['package']
-    cache=ROOT/'.runtime-cache'
-    cache.mkdir(exist_ok=True)
-    archive_file=cache/package['name']
-    if not archive_file.exists() or hashlib.sha256(archive_file.read_bytes()).hexdigest()!=package['checksum']:
-        partial=archive_file.with_suffix('.partial')
-        subprocess.run(['/usr/bin/curl','--fail','--silent','--show-error','--location','--retry','2','--max-time','600','--output',str(partial),package['link']],check=True)
-        if hashlib.sha256(partial.read_bytes()).hexdigest()!=package['checksum']:raise RuntimeError('Windows Java runtime checksum mismatch')
-        partial.replace(archive_file)
+    archive_file,version,digest=download_runtime('x64','windows')
     with zipfile.ZipFile(archive_file) as source:
         names=source.namelist()
         if any(name.startswith('/') or '..' in pathlib.PurePosixPath(name).parts for name in names):raise RuntimeError('Unsafe Windows Java runtime archive')
@@ -121,6 +118,8 @@ def windows():
             target.parent.mkdir(parents=True,exist_ok=True)
             with source.open(item) as input,target.open('wb') as output:shutil.copyfileobj(input,output)
     if not (folder/'runtime/bin/java.exe').exists():raise RuntimeError('Windows Java runtime layout not recognized')
+    security=harden_runtime(folder/'runtime')
+    (folder/'RUNTIMES.json').write_text(json.dumps([{'architecture':'x64','java':version,'sha256':digest,'source':'Eclipse Temurin / Adoptium',**security}],indent=2)+'\n')
     guide(folder,False,'windows')
     archive(folder,f'ServerManager-Runner-{VERSION}-windows-x64.zip')
     gui=STAGE/'ServerManagerRunner-UI-windows'

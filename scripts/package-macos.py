@@ -2,6 +2,7 @@
 """Build a universal Intel + Apple Silicon .pkg, with verified Temurin 21 JREs."""
 import sys,os,re
 import concurrent.futures, hashlib, json, pathlib, plistlib, shutil, subprocess, tarfile, urllib.request
+from runtime_security import download_runtime, build_trust_tool, harden_runtime
 ROOT=pathlib.Path(__file__).resolve().parent.parent
 VERSION=(ROOT/'VERSION').read_text().strip()
 if not re.fullmatch(r'[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}(?:-beta\.[1-9][0-9]{0,5})?',VERSION): raise ValueError('Invalid version')
@@ -9,15 +10,9 @@ MAC_VERSION=VERSION.split('-')[0]
 STAGE=ROOT/'build/macos-package'; CACHE=ROOT/'.runtime-cache'; DIST=ROOT/'dist'
 CACHE.mkdir(exist_ok=True); DIST.mkdir(exist_ok=True)
 def runtime(arch):
-    url=f'https://api.adoptium.net/v3/assets/latest/21/hotspot?architecture={arch}&image_type=jre&os=mac&vendor=eclipse'
-    asset=json.loads(subprocess.check_output(['/usr/bin/curl','--fail','--silent','--show-error','--location','--retry','2','--max-time','90',url]))[0]
-    package=asset['binary']['package']; target=CACHE/package['name']
-    if not target.exists() or hashlib.sha256(target.read_bytes()).hexdigest()!=package['checksum']:
-        partial=target.with_suffix('.partial')
-        subprocess.run(['/usr/bin/curl','--fail','--silent','--show-error','--location','--retry','2','--max-time','600','--output',str(partial),package['link']],check=True)
-        if hashlib.sha256(partial.read_bytes()).hexdigest()!=package['checksum']: raise RuntimeError('Runtime checksum mismatch')
-        partial.replace(target)
-    return arch,target,asset['version']['semver'],package['checksum']
+    archive,version,digest=download_runtime(arch,'mac')
+    return arch,archive,version,digest
+
 with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool: runtimes=list(pool.map(runtime,['x64','aarch64']))
 if '--download-only' in sys.argv:
     print('Verified Java runtimes:', ', '.join(x[0]+' '+x[2] for x in runtimes))
@@ -29,6 +24,7 @@ shutil.copy2(ROOT/'packaging/macos/ServerManager',contents/'MacOS/ServerManager'
 shutil.copy2(ROOT/f'build/libs/server-manager-{VERSION}.jar',resources/'server-manager.jar')
 shutil.copy2(ROOT/'config/application.properties.example',resources/'application.properties.example')
 metadata=[]
+trust_tool=build_trust_tool()
 for arch,archive,version,digest in runtimes:
     unpack=STAGE/f'unpack-{arch}';unpack.mkdir()
     with tarfile.open(archive) as tar:
@@ -37,7 +33,8 @@ for arch,archive,version,digest in runtimes:
         tar.extractall(unpack,filter='data')
     bundle=next(p for p in unpack.iterdir() if p.is_dir())
     target=resources/'runtimes'/arch; target.parent.mkdir(exist_ok=True);shutil.move(str(bundle),target)
-    metadata.append({'architecture':arch,'java':version,'sha256':digest,'source':'Eclipse Temurin / Adoptium'})
+    security=harden_runtime(target/'Contents/Home',trust_tool)
+    metadata.append({'architecture':arch,'java':version,'sha256':digest,'source':'Eclipse Temurin / Adoptium',**security,'cacertsSha256':hashlib.sha256((target/'Contents/Home/lib/security/cacerts').read_bytes()).hexdigest()})
 with (contents/'Info.plist').open('wb') as f:
     plistlib.dump({'CFBundleName':'Server Manager','CFBundleDisplayName':'Server Manager','CFBundleIdentifier':'local.servermanager','CFBundleVersion':MAC_VERSION,'CFBundleShortVersionString':MAC_VERSION,'CFBundleExecutable':'ServerManager','CFBundlePackageType':'APPL','LSMinimumSystemVersion':'11.0','NSHighResolutionCapable':True},f)
 (resources/'RUNTIMES.json').write_text(json.dumps(metadata,indent=2)+'\n')
