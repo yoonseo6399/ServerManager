@@ -745,3 +745,12 @@ Beta24 기반 fix/review-improvements eefdfe7 통합(solo). R1~R8/B1 수정, A1�
 사전 backend42/UI27 실패0, TS/Vite 통과. 세부 한계 docs/testing/review-improvements.md. 사용자 배포 승인으로 전체 suite 포함 릴리즈 CI 실행. 기존 서명 secret 사용, 베타 prerelease 및 stable latest 유지. 운영 설치/재시작은 수행하지 않음. CI 게시 결과는 완료 후 기록.
 
 Beta25 첫 전체 CI39901621513: 715개 중 1실패/29스킵으로 게시 전 중단. Beta24 이전 원격 콘솔 테스트가 중앙 보관 파일을 live API로 읽던 기대를 중앙 보관·재시작 검증과 실제 RunnerWorkspace API 검증으로 분리했다. 최신 원격 로그 조회 및 구형 실행기에서 중앙 보관본으로 대체하지 않음을 추가 검증. 제품 코드 변경 없음, 로컬 관련4개 통과. 미게시 확인 후 태그를 수정 커밋으로 이동하여 전체 CI 재실행.
+
+
+## 2026-10-26 — 0.7.0-beta.26 게시 준비
+
+게시된 beta.25 기반 fix/java-security-runtime cff04cb 및 feat/server-archive-import e2f6893 통합(solo). 뒤 브랜치는 feat/voicechat-direct-relay e34c276·feat/multi-server-ports eb8b49b를 포함한다. Simple Voice Chat 서버별 UDP·설정 백업/복원·같은 실행기의 게임/Query/음성 포트 분리·새 서버 ZIP 분할 업로드/미리보기/검증/원자적 반영/수동 시작을 제공한다.
+
+Java21.0.13 보안 하한 및 인증서 보완 포함. Temurin 공식 Windows 신규 배포 미준비로 공식 Azul Zulu CA21.0.13+9를 SHA256 고정 대안으로 사용한다. Mac은 Temurin21.0.13. 기존 JAR 업데이트는 Java를 바꾸지 않으므로 런타임 갱신에는 새 패키지와 정상 종료가 필요하다.
+
+통합 Kotlin/bootJar·frontend 통과, backend 관련20클래스122통과/0실패/0스킵, browser11통과, 보안11통과. Windows ZIP 실제 checksum/release/구조/법적 고지·cacerts 영향 CA2개 제거와 재검사 통과(Windows 실행 아님). 전체 suite·실제 Minecraft/마이크·외부망·운영 설치/재시작·공개 자산 재다운로드 해시 비교는 생략한다. 기존 서명 secret과 workflow_dispatch skip_full_tests=true로 서명/패키징/게시 예정. stable latest/main과 기존 게시 태그·자산은 보존한다. 상세 docs/dev-notes/release-0.7.0-beta.26.md 및 docs/testing/release-0.7.0-beta.26-results.json.

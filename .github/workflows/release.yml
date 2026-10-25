@@ -39,6 +39,8 @@ jobs:
         run: ./gradlew test --no-daemon
       - name: Build release JAR
         run: ./gradlew bootJar --no-daemon
+      - name: Verify runtime security and pinned supplier
+        run: python3 scripts/test-runtime-security.py
       - run: python3 scripts/test-runner-setup.py
       - run: python3 scripts/package-macos.py
       - run: python3 scripts/package-runner.py

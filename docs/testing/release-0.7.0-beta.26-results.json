@@ -1,0 +1,193 @@
+{
+  "version": "0.7.0-beta.26",
+  "date": "2026-10-26",
+  "testedProductCommit": "908d68c212467dc58df31a6bb8420ef548c38735",
+  "backend": {
+    "classes": [
+      {
+        "name": "local.servermanager.CsrfRefreshTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.DirectRelayManagerTest",
+        "tests": 16,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.DirectRelayTest",
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.DirectSableTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.GameHostTest",
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.ImportAndMetricsTest",
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.LaunchersTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.MultiServerGatewayTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.MultiServerHostTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.MultiServerPortsTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.QueryEndpointTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.RunnerGatewayTest",
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.ServerArchiveAccessTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.ServerArchiveFormatTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.ServerArchiveImporterTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.ServerManagerTest",
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.VoiceChatFilesTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.VoiceChatHostTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.VoiceChatManagerTest",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.VoiceChatRelayTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ],
+    "tests": 122,
+    "failures": 0,
+    "skipped": 0
+  },
+  "frontend": {
+    "build": "passed",
+    "browserPassed": 11,
+    "browserFailures": 0
+  },
+  "runtimeSecurity": {
+    "tests": 11,
+    "failures": 0,
+    "officialWindowsPreflight": {
+      "name": "zulu21.54.107-ca-jre21.0.13-win_x64.zip",
+      "java": "21.0.13+9",
+      "sha256": "9532e56bcf2578b4bbb82507c4e38a17c0332c5918ff6c8b25cd2f71abf42cf9",
+      "source": "Azul Zulu / pinned official CA package",
+      "layout": "passed",
+      "license": "preserved under legal/java.base",
+      "trust": {
+        "java": "21.0.13",
+        "securityBaseline": "21.0.13",
+        "trustMitigation": "CVE-2026-91403: affected root certificates removed",
+        "advisory": "https://www.oracle.com/security-alerts/alert-cve-2026-91403.html"
+      },
+      "windowsExecution": "not run"
+    }
+  },
+  "proof": [
+    "MULTI-SERVER-PROOF gamePorts={a=61787, b=61788} queryPorts=[59962, 58083] localVoice={a=63624, b=60736} publicVoice={a=51493, b=56439} concurrentVoicePackets=40 stoppedA=true survivorPid=966",
+    "SERVER-ARCHIVE-UPLOAD-PROOF bytes=269484322 chunks=33 multipartIndependent=true boundedChunk=8388608"
+  ],
+  "publication": {
+    "status": "pending CI signing and packaging"
+  },
+  "notRun": [
+    "full backend suite",
+    "real Minecraft multiple instances",
+    "microphone/audio quality",
+    "external router/Internet",
+    "20GiB upload/100GiB extraction",
+    "Windows binary execution",
+    "production restart or installation",
+    "published assets redownload/hash check"
+  ]
+}
