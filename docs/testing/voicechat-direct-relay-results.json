@@ -1,0 +1,80 @@
+{
+  "base": "v0.7.0-beta.25",
+  "backend": {
+    "tests": 64,
+    "failures": 0,
+    "skipped": 0,
+    "classes": [
+      {
+        "name": "local.servermanager.VoiceChatFilesTest",
+        "tests": "5",
+        "failures": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "local.servermanager.VoiceChatManagerTest",
+        "tests": "6",
+        "failures": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "local.servermanager.DirectRelayTest",
+        "tests": "13",
+        "failures": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "local.servermanager.HostedRelayTest",
+        "tests": "3",
+        "failures": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "local.servermanager.VoiceChatHostTest",
+        "tests": "1",
+        "failures": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "local.servermanager.GameHostTest",
+        "tests": "10",
+        "failures": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "local.servermanager.VoiceChatRelayTest",
+        "tests": "6",
+        "failures": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "local.servermanager.DirectRelayManagerTest",
+        "tests": "16",
+        "failures": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "local.servermanager.DirectSableTest",
+        "tests": "4",
+        "failures": "0",
+        "skipped": "0"
+      }
+    ]
+  },
+  "browser": {
+    "uniqueRelevantPassed": 8,
+    "lastChangedVoiceSableSelectionRerunPassed": 5,
+    "existingUnrelatedFailure": "direct-relay.spec.ts runner update waits honestly: hidden offline status; reproduced on unchanged published beta25"
+  },
+  "build": {
+    "typescriptVite": true,
+    "bootJar": true
+  },
+  "notRun": [
+    "full backend suite",
+    "other OS execution",
+    "production installation/restart",
+    "actual microphone/Simple Voice Chat client",
+    "external Internet/router reachability"
+  ]
+}

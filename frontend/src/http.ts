@@ -11,11 +11,12 @@ async function renewCsrf(){
  if(!data?.csrf)return false;
  csrf=data.csrf;return true;
 }
-export async function api<T=unknown>(url:string,method='GET',body?:unknown):Promise<T>{
+export async function api<T=unknown>(url:string,method='GET',body?:unknown,signal?:AbortSignal):Promise<T>{
  const send=()=>{
-  const headers:Record<string,string>=body instanceof FormData?{}:{'Content-Type':'application/json'};
+  const binary=body instanceof Blob||body instanceof ArrayBuffer;
+  const headers:Record<string,string>=body instanceof FormData?{}:{'Content-Type':binary?'application/octet-stream':'application/json'};
   if(!SAFE.includes(method))headers['X-CSRF-TOKEN']=csrf;
-  return fetch('/api'+url,{method,headers,credentials:'same-origin',body:body===undefined?undefined:body instanceof FormData?body:JSON.stringify(body)});
+  return fetch('/api'+url,{method,headers,credentials:'same-origin',signal,body:body===undefined?undefined:body instanceof FormData||body instanceof Blob||body instanceof ArrayBuffer?body:JSON.stringify(body)});
  };
  let res=await send();
  let retried=false;

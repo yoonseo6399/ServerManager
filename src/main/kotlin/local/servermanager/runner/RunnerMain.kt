@@ -923,12 +923,15 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         val properties=serverDir(id).resolve("server.properties")
         val values=Properties();properties.inputStream().use { values.load(it) }
         values.setProperty("server-ip","127.0.0.1");values.setProperty("server-port",instance.port.toString())
-        queryPorts[id]=QueryEndpoint.configure(values,instance.port)
+        val reservedUdp=queryPorts.filterKeys {it!=id}.values.toSet()+configs.values.filter {it.id!=id}.map {it.port}+
+            (hosted?.reservedUdpPorts() ?: directRelay.reservedUdpPorts())
+        queryPorts[id]=QueryEndpoint.configure(values,instance.port,reservedUdp)
         properties.outputStream().use { values.store(it,"Server Manager Runner") }
         ready.remove(id)
         activity[id]=AtomicLong()
         val crashesBefore=CrashReports.snapshot(serverDir(id))
         instanceRoot(id).resolve("exit.json").deleteIfExists()
+        if(hosted==null)directRelay.prepareVoicechat(id,serverDir(id))
         val builder=ProcessBuilder(args).directory(serverDir(id).toFile()).redirectErrorStream(true)
         val udpStatus=runCatching {
             val resident=hosted

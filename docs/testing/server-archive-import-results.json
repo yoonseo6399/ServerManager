@@ -1,0 +1,116 @@
+{
+  "date": "2026-10-25",
+  "testedCommit": "891730aed5fdbafb248c96716c6e4e93f3685c32",
+  "platform": "macOS arm64 / Temurin 21.0.13",
+  "backend": {
+    "tests": 46,
+    "failures": 0,
+    "skipped": 0,
+    "classes": [
+      {
+        "name": "local.servermanager.CsrfRefreshTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.ImportAndMetricsTest",
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.LaunchersTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.MultiServerPortsTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.ServerArchiveAccessTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.ServerArchiveFormatTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.ServerArchiveImporterTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.ServerManagerTest",
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ]
+  },
+  "largeZipUploadProof": [
+    "SERVER-ARCHIVE-UPLOAD-PROOF bytes=269484322 chunks=33 multipartIndependent=true boundedChunk=8388608"
+  ],
+  "frontend": {
+    "build": "passed",
+    "combinedRun": {
+      "commit": "e2deaed",
+      "tests": 10,
+      "failures": 0,
+      "files": [
+        "server-archive.spec.ts",
+        "multi-server-ports.spec.ts",
+        "settings.spec.ts"
+      ]
+    },
+    "finalChangedUiRun": {
+      "commit": "4bfc910",
+      "tests": 4,
+      "failures": 0,
+      "files": [
+        "server-archive.spec.ts"
+      ]
+    },
+    "visualReview": [
+      "desktop ZIP preview",
+      "390x844 mobile runtime inputs and submit"
+    ]
+  },
+  "verified": [
+    "small standalone Java server JAR imported without automatic launch then explicitly started and normally stopped",
+    "existing instance and world/mod bytes preserved",
+    "Korean UTF-8 MOTD preserved",
+    "false EULA retained",
+    "8MiB bounded chunk upload beyond 256MiB multipart size",
+    "path escape/case/Unicode duplicate/file-directory collision/CRC and expansion checks",
+    "owner and global admin access with own upload token and CSRF"
+  ],
+  "notRun": [
+    "full suite",
+    "20GiB upload",
+    "100GiB extraction",
+    "real Minecraft world migration",
+    "remote runner deployment",
+    "external Internet/proxy",
+    "other OS",
+    "release publication",
+    "Nextcloud data access"
+  ]
+}

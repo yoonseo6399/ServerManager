@@ -38,6 +38,8 @@ interface RemoteController {
     fun command(instance:Instance,value:String)
     fun completed(instance:Instance) {}
     fun sharedGamePort():Int?=null
+    fun reservedGamePorts(runnerId:String?):Set<Int> = emptySet()
+    fun validateRunnerAssignment(instance:Instance,runnerId:String?) {}
     fun sableStatus(instance:Instance):SableRelayStatus?=null
     fun stopIfEmpty(instance:Instance,requestId:String):Boolean=false
     fun importFolder(instance:Instance,requestId:String) {error("실행기를 업데이트한 뒤 기존 폴더를 가져오세요")}
@@ -52,6 +54,7 @@ class RuntimeState {
     @Volatile var resources: ResourceSample? = null
     @Volatile var players: PlayerSample? = null
     @Volatile var playerQueryInProgress = false
+    @Volatile var archiveImport:ServerArchiveProgress?=null
     @Volatile var queryPort:Int?=null
     @Volatile var playerQueryMessage:String?=null
     @Volatile var remoteStopRequested = false
@@ -229,6 +232,7 @@ class ServerManager {
             r.event("system","파일 동기화 OFF · 현재 실행기의 원본 폴더만 사용합니다")
         };return view(id)
     }
+    fun configuredGamePorts(runnerId:String?,excluding:String?=null):Set<Int> = instances.values.filter {it.runnerId==runnerId && it.id!=excluding}.map {it.port}.toSet()
     fun list() = instances.values.sortedBy { it.name }.map { view(it.id) }
     @Synchronized fun <T> withIdle(action:()->T):T {
         check(list().all { it["pid"]==null && it["diagnosticActive"]!=true && it["modBusy"]!=true && it["state"] in setOf("NEW","STOPPED","FAILED","IMPORT_FAILED") }) { "모든 서버와 작업을 종료한 뒤 네트워크 설정을 변경하세요" }
@@ -250,7 +254,7 @@ class ServerManager {
         val i = instance(id); val r = runtime(id)
         val result=synchronized(r) { mapOf("config" to i.copy(), "state" to r.state, "pid" to (if(i.runnerId!=null) r.remotePid else r.process?.takeIf { it.isAlive }?.pid()), "resources" to r.resources?.takeIf { (i.runnerId!=null || r.process?.isAlive == true) && (i.runnerId!=null || it.pid == r.process?.pid()) }, "players" to r.players?.takeIf { r.state=="RUNNING" && java.time.Duration.between(Instant.parse(it.sampledAt),Instant.now()).seconds<30 }, "directory" to (if(i.runnerId==null)serverDir(id).toString() else r.folderSource?.get("path") ?: "현재 실행기의 원본 서버 폴더"), "eulaAccepted" to eulaAccepted(id),"activityVersion" to r.activityVersion,"diagnosticActive" to r.diagnosticActive,"modBusy" to (r.modBusy||r.remoteFileBusy),"liveFiles" to liveFilesAvailable(id),"backgroundSync" to backgroundPending(id)) }
         val transfer=synchronized(r) {mapOf("folderSource" to r.folderSource,"folderImport" to r.folderImport?.let(r.transferMeter::view),"fileTransfer" to r.fileTransfer?.let(r.transferMeter::view))}
-        return result+transfer+mapOf("shutdownWatchdog" to (r.stopMonitor?.status() ?: r.remoteStopProgress),"forceStopSupported" to (i.runnerId==null || remoteController?.supportsForceStop(i)==true),"playerQueryMessage" to r.playerQueryMessage?.takeIf {r.state=="RUNNING"},"sableUdp" to remoteController?.sableStatus(i),"powerSaving" to powerStatus?.invoke(id),"autoRestart" to autoRestartStatus?.invoke(id))
+        return result+transfer+mapOf("archiveImport" to r.archiveImport,"shutdownWatchdog" to (r.stopMonitor?.status() ?: r.remoteStopProgress),"forceStopSupported" to (i.runnerId==null || remoteController?.supportsForceStop(i)==true),"playerQueryMessage" to r.playerQueryMessage?.takeIf {r.state=="RUNNING"},"sableUdp" to remoteController?.sableStatus(i),"powerSaving" to powerStatus?.invoke(id),"autoRestart" to autoRestartStatus?.invoke(id))
     }
     private fun validate(req: CreateRequest) {
         require(req.name.isNotBlank() && req.name.length <= 80) { "이름은 1~80자로 입력하세요" }
@@ -267,13 +271,45 @@ class ServerManager {
         serverDir(i.id).createDirectories(); instances[i.id] = i; runtimes[i.id] = RuntimeState()
         writeProperties(i); save(i); acceptEula(i.id); return view(i.id)
     }
+    @Synchronized fun beginArchiveImport(req:CreateRequest,token:String):Map<String,Any?> {
+        val row=create(req);val id=(row["config"] as Instance).id;val r=runtime(id)
+        synchronized(r) {
+            atomicText(root.resolve(id).resolve("import.pending"),"server-archive:$token")
+            r.state="IMPORTING";r.event("system","서버 ZIP 가져오기를 시작합니다. 기존 서버는 변경하지 않습니다")
+        }
+        return view(id)
+    }
+    @Synchronized fun finishArchiveImport(id:String,stage:Path,ready:Boolean) {
+        val r=runtime(id);val i=instance(id)
+        synchronized(r) {
+            check(r.state=="IMPORTING" && i.runnerId==null) {"서버 가져오기 상태가 변경됐습니다"}
+            val target=serverDir(id);val backup=root.resolve(id).resolve("archive-initial")
+            check(stage.isDirectory() && !Files.isSymbolicLink(stage) && !backup.exists())
+            // Keep the normal new-instance EULA only if the upload did not contain its own EULA.
+            if(!stage.resolve("eula.txt").exists())Files.copy(target.resolve("eula.txt"),stage.resolve("eula.txt"))
+            Files.move(target,backup,StandardCopyOption.ATOMIC_MOVE)
+            var moved=false
+            try {
+                Files.move(stage,target,StandardCopyOption.ATOMIC_MOVE);moved=true
+                writeProperties(i)
+                if(ready)atomicText(root.resolve(id).resolve("installed.ok"),"server-archive")
+                root.resolve(id).resolve("import.pending").deleteExisting()
+                r.state=if(ready)"STOPPED" else "NEW"
+                r.event("system",if(ready)"서버 ZIP 가져오기 완료. 서버는 자동 실행하지 않았습니다" else "서버 파일 가져오기 완료. 실행 파일이 없어 공식 런처 설치가 필요합니다")
+            } catch(e:Exception) {
+                runCatching {if(moved)Files.move(target,stage,StandardCopyOption.ATOMIC_MOVE);Files.move(backup,target,StandardCopyOption.ATOMIC_MOVE);root.resolve(id).resolve("installed.ok").deleteIfExists()}.onFailure {e.addSuppressed(it)}
+                throw e
+            }
+            if(!backup.toFile().deleteRecursively())r.event("warn","가져오기 전 초기 폴더 정리를 완료하지 못했습니다")
+        }
+    }
     @Synchronized fun update(id: String, req: CreateRequest): Map<String, Any?> {
         validate(req); val r = runtime(id)
         synchronized(r) {
             checkIdle(r)
             val i = instance(id)
             require(req.loaderVersion == i.loaderVersion && req.loader==i.loader && req.minecraft==i.minecraft) { "설치된 로더 버전 변경은 새 인스턴스로 진행하세요" }
-            require(remoteController?.sharedGamePort()!=null || instances.values.none { it.id != id && it.port == req.port }) { "다른 인스턴스가 사용하는 포트입니다" }
+            require(req.port !in unavailableGamePorts(id,i.runnerId)) { "이 실행기에서 다른 서버 또는 중계가 사용하는 포트입니다. 다른 내부 게임 포트를 지정하세요" }
             i.name=req.name; i.port=req.port; i.memoryMb=req.memoryMb; i.javaPath=req.javaPath
             if(i.syncEnabled() && i.runnerId==null)writeProperties(i); save(i)
         }
@@ -285,7 +321,12 @@ class ServerManager {
             checkIdle(r)
             check(r.state in setOf("NEW","STOPPED","FAILED","IMPORT_FAILED")) { "서버가 완전히 종료된 뒤 실행기를 변경하세요" }
             check(instance(id).syncEnabled() || instance(id).runnerId==runnerId) {"파일 동기화가 꺼져 있어 실행기를 변경할 수 없습니다. 먼저 동기화를 켜고 최신 파일 반영을 완료하세요"}
-            instance(id).runnerId=runnerId
+            val i=instance(id)
+            remoteController?.validateRunnerAssignment(i,runnerId)
+            val port=ServerPortPlan.available(i.port,unavailableGamePorts(id,runnerId))
+            if(port!=i.port)r.event("system","실행기 내 포트 충돌을 피하기 위해 내부 게임 포트를 ${i.port} → $port 로 배정했습니다")
+            i.port=port;i.runnerId=runnerId
+            if(runnerId==null && i.syncEnabled())writeProperties(i)
             r.folderSource=null;r.folderImport=null;r.fileTransfer=null
             save(instance(id))
         }
@@ -303,11 +344,18 @@ class ServerManager {
             return mapOf("deleted" to id,"archived" to true)
         }
     }
+    private fun unavailableGamePorts(id:String,runnerId:String?):Set<Int> {
+        val shared=remoteController?.sharedGamePort()!=null
+        // Unassigned servers are drafts in shared mode; only the chosen computer shares a socket namespace.
+        val peers=instances.values.filter {it.id!=id && (!shared || it.runnerId==runnerId)}.map {it.port}
+        return peers.toSet()+(remoteController?.reservedGamePorts(runnerId) ?: emptySet())
+    }
     private fun writeProperties(i: Instance) {
         val path=serverDir(i.id).resolve("server.properties")
         val props=Properties(); if(path.exists()) path.inputStream().use { props.load(it) }
         props.setProperty("server-ip", "127.0.0.1"); props.setProperty("server-port", i.port.toString())
-        props.setProperty("enable-rcon", "false"); runtime(i.id).queryPort=QueryEndpoint.configure(props,i.port)
+        props.setProperty("enable-rcon", "false"); runtime(i.id).queryPort=QueryEndpoint.configure(props,i.port,
+            instances.values.filter {it.id!=i.id && it.runnerId==i.runnerId}.flatMap {listOfNotNull(it.port,runtimes[it.id]?.queryPort)}.toSet())
         if(!props.containsKey("online-mode")) props.setProperty("online-mode", "true")
         if(!props.containsKey("view-distance")) props.setProperty("view-distance", "6")
         path.outputStream().use { props.store(it, "Local Server Manager") }
@@ -510,6 +558,12 @@ class ServerManager {
             if(!backgroundPending(id)){r.fileTransfer=null;r.transferAuthoritative=false;r.transferMeter.reset()}
             if(i.runnerId!=null) {
                 val controller=remoteController ?: error("원격 실행기 연결 기능을 사용할 수 없습니다")
+                controller.validateRunnerAssignment(i,i.runnerId)
+                val port=ServerPortPlan.available(i.port,unavailableGamePorts(id,i.runnerId))
+                if(port!=i.port) {
+                    r.event("system","기존 설정의 내부 게임 포트 충돌을 복구합니다: ${i.port} → $port")
+                    i.port=port;save(i)
+                }
                 root.resolve(id).resolve("remote-exit.json").deleteIfExists()
                 atomicText(root.resolve(id).resolve("start-actor.json"),mapper.writeValueAsString(actor))
                 root.resolve(id).resolve("remote-lease").writeText(i.runnerId!!)
