@@ -10,7 +10,7 @@ import stat
 import subprocess
 import sys
 import zipfile
-from runtime_security import download_runtime, build_trust_tool, harden_runtime
+from runtime_security import download_runtime, build_trust_tool, harden_runtime, runtime_source
 
 ROOT=pathlib.Path(__file__).resolve().parent.parent
 VERSION=(ROOT/'VERSION').read_text().strip()
@@ -119,7 +119,7 @@ def windows():
             with source.open(item) as input,target.open('wb') as output:shutil.copyfileobj(input,output)
     if not (folder/'runtime/bin/java.exe').exists():raise RuntimeError('Windows Java runtime layout not recognized')
     security=harden_runtime(folder/'runtime')
-    (folder/'RUNTIMES.json').write_text(json.dumps([{'architecture':'x64','java':version,'sha256':digest,'source':'Eclipse Temurin / Adoptium',**security}],indent=2)+'\n')
+    (folder/'RUNTIMES.json').write_text(json.dumps([{'architecture':'x64','java':version,'sha256':digest,'source':runtime_source(archive_file),**security}],indent=2)+'\n')
     guide(folder,False,'windows')
     archive(folder,f'ServerManager-Runner-{VERSION}-windows-x64.zip')
     gui=STAGE/'ServerManagerRunner-UI-windows'

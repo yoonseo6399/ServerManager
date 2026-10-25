@@ -10,6 +10,46 @@ from urllib.parse import urlparse
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 MINIMUM_JAVA = (21, 0, 13)
 ADVISORY = "https://www.oracle.com/security-alerts/alert-cve-2026-91403.html"
+# Temurin's Windows rollout still reports 21.0.12.1. This official Zulu CA artifact is
+# pinned to the SHA-256 returned by Azul's metadata API on 2026-10-26. No downgrade.
+WINDOWS_ZULU = {
+    "name": "zulu21.54.107-ca-jre21.0.13-win_x64.zip",
+    "version": "21.0.13+9",
+    "sha256": "9532e56bcf2578b4bbb82507c4e38a17c0332c5918ff6c8b25cd2f71abf42cf9",
+    "url": "https://cdn.azul.com/zulu/bin/zulu21.54.107-ca-jre21.0.13-win_x64.zip",
+    "metadata": "https://api.azul.com/metadata/v1/zulu/packages/1953be22-1404-4175-8257-0dcb1ac0dffb",
+}
+
+
+def cache_archive(name, digest, url):
+    if pathlib.PurePosixPath(name).name != name or "\\" in name or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValueError("Invalid runtime package metadata")
+    cache = ROOT / ".runtime-cache"
+    cache.mkdir(exist_ok=True)
+    target = cache / name
+    if not target.exists() or hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+        partial = target.with_suffix(".partial")
+        try:
+            subprocess.run(["/usr/bin/curl", "--fail", "--silent", "--show-error", "--location", "--retry", "2", "--max-time", "600", "--output", str(partial), url], check=True)
+            if hashlib.sha256(partial.read_bytes()).hexdigest() != digest:
+                raise RuntimeError("Java runtime checksum mismatch")
+            partial.replace(target)
+        finally:
+            partial.unlink(missing_ok=True)
+    return target
+
+
+def download_windows_alternative():
+    pinned = WINDOWS_ZULU
+    require_security_baseline(pinned["version"])
+    link = urlparse(pinned["url"])
+    if link.scheme != "https" or link.netloc != "cdn.azul.com" or link.path != "/zulu/bin/" + pinned["name"]:
+        raise ValueError("Unexpected alternate runtime publisher")
+    return cache_archive(pinned["name"], pinned["sha256"], pinned["url"]), pinned["version"], pinned["sha256"]
+
+
+def runtime_source(archive):
+    return "Azul Zulu / pinned official CA package" if archive.name == WINDOWS_ZULU["name"] else "Eclipse Temurin / Adoptium"
 
 
 def version_tuple(version):
@@ -33,6 +73,8 @@ def download_runtime(arch, osname, image_type="jre"):
     # Do not silently package an older architecture while the vendor rolls out a CPU.
     eligible = [a for a in assets if version_tuple(a["version"]["semver"]) >= MINIMUM_JAVA]
     if not eligible:
+        if osname == "windows" and arch == "x64" and image_type == "jre":
+            return download_windows_alternative()
         raise RuntimeError(f"No security-baseline {osname}/{arch}/{image_type} published by Adoptium yet; refusing an outdated runtime")
     asset = max(eligible, key=lambda a: (version_tuple(a["version"]["semver"]), a["version"].get("build", 0)))
     require_security_baseline(asset["version"]["semver"])
@@ -43,19 +85,7 @@ def download_runtime(arch, osname, image_type="jre"):
         raise ValueError("Invalid runtime package metadata")
     if link.scheme != "https" or link.netloc != "github.com" or not link.path.startswith("/adoptium/temurin21-binaries/releases/download/"):
         raise ValueError("Unexpected runtime publisher")
-    cache = ROOT / ".runtime-cache"
-    cache.mkdir(exist_ok=True)
-    target = cache / name
-    if not target.exists() or hashlib.sha256(target.read_bytes()).hexdigest() != digest:
-        partial = target.with_suffix(".partial")
-        try:
-            subprocess.run(["/usr/bin/curl", "--fail", "--silent", "--show-error", "--location", "--retry", "2", "--max-time", "600", "--output", str(partial), package["link"]], check=True)
-            if hashlib.sha256(partial.read_bytes()).hexdigest() != digest:
-                raise RuntimeError("Java runtime checksum mismatch")
-            partial.replace(target)
-        finally:
-            partial.unlink(missing_ok=True)
-    return target, asset["version"]["semver"], digest
+    return cache_archive(name, digest, package["link"]), asset["version"]["semver"], digest
 
 
 def build_trust_tool():

@@ -26,11 +26,38 @@ class RuntimeSecurityTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 security.require_security_baseline(version)
 
-    def test_vendor_rollout_cannot_fall_back_to_unpatched_windows(self):
+    def test_windows_uses_only_pinned_patched_alternative_during_rollout(self):
         data = [{"version": {"semver": "21.0.12+101.0.LTS"}}]
-        with patch.object(subprocess, "check_output", return_value=json.dumps(data).encode()):
-            with self.assertRaisesRegex(RuntimeError, "refusing an outdated runtime"):
+        pinned = security.WINDOWS_ZULU
+        with patch.object(subprocess, "check_output", return_value=json.dumps(data).encode()), patch.object(security, "cache_archive", return_value=pathlib.Path(pinned["name"])) as cache:
+            path, version, digest = security.download_runtime("x64", "windows")
+        self.assertEqual(version, "21.0.13+9")
+        self.assertEqual(digest, pinned["sha256"])
+        self.assertIn("Azul Zulu", security.runtime_source(path))
+        cache.assert_called_once_with(pinned["name"], pinned["sha256"], pinned["url"])
+
+    def test_alternative_does_not_allow_unpatched_java_or_another_publisher(self):
+        for changes in ({"version": "21.0.12.1+1"}, {"url": "https://example.com/java.zip"}):
+            with patch.dict(security.WINDOWS_ZULU, changes), patch.object(security, "cache_archive") as cache:
+                with self.assertRaises((ValueError, RuntimeError)):
+                    security.download_windows_alternative()
+                cache.assert_not_called()
+
+    def test_alternative_failure_is_not_replaced_by_an_old_runtime(self):
+        data = [{"version": {"semver": "21.0.12+101.0.LTS"}}]
+        with patch.object(subprocess, "check_output", return_value=json.dumps(data).encode()), patch.object(security, "download_windows_alternative", side_effect=RuntimeError("unavailable")):
+            with self.assertRaisesRegex(RuntimeError, "unavailable"):
                 security.download_runtime("x64", "windows")
+
+    def test_corrupt_archive_is_not_published_to_cache(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(security, "ROOT", pathlib.Path(folder)):
+            def corrupt(args, **kwargs):
+                pathlib.Path(args[args.index("--output") + 1]).write_bytes(b"corrupt")
+            with patch.object(subprocess, "run", side_effect=corrupt):
+                with self.assertRaisesRegex(RuntimeError, "checksum"):
+                    security.cache_archive("fixture.zip", "0" * 64, "https://cdn.azul.com/zulu/bin/fixture.zip")
+            self.assertFalse((pathlib.Path(folder) / ".runtime-cache/fixture.zip").exists())
+            self.assertFalse((pathlib.Path(folder) / ".runtime-cache/fixture.partial").exists())
 
     def test_unexpected_publisher_refused_before_download(self):
         data = [{"version": {"semver": "21.0.13+9.0.LTS"}, "binary": {"package": {
