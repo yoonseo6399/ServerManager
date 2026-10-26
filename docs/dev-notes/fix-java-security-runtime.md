@@ -1,4 +1,4 @@
-상태: 구현·Mac 운영 적용·범위 검증 완료, Windows 공식 보안 런타임 미게시로 새 공개 릴리즈는 미생성
+상태: v0.7.0-beta.26 보안 런타임 게시 완료, Windows는 고정 공식 Zulu CA 대안 사용
 # Java October 2026 security runtime update
 
 - Latest published beta.25 is the base; solo implementation. No PHP runtime found in ServerManager or the two inspected Macs; user explicitly excluded PHP work on this computer.
@@ -32,3 +32,5 @@
 - Let's Create Survival (474f040a-08f3-424e-bc6c-4186721bef37): authenticated host stop, old game PID554 exited0. New game PID41237 reached Done at 15:18:49 KST and player reconnect appeared in actual latest.log. Rebuilt documented NeoForge launch arguments from saved server settings, without harvesting process credentials or environments; recreated bridge registration through the authenticated host API. Console sequence reset for the new host's sequence space, original marker copies backed up.
 - Existing installed bootstrap auto-respawned its controller. Stop its precise launchd session first. Controller40795 then blocked in shutdownGracefully -> uploadStopped -> uploadSnapshots; exact thread dump captured locally. After verifying no live game/child, only the stuck controller was force-terminated, leaving disk queue/snapshots untouched. Queue-lock shutdown behavior is a separate existing product issue, not fixed or represented as fixed by this Java packaging patch.
 - User authorized Minecraft/service restarts and explicitly excluded PHP. No PHP runtime/service found in inspected locations. Full backend suite, Windows execution, other SDK migrations and published asset re-download/hash tests omitted.
+
+2026-10-26: beta.26에 통합·게시했다. Windows Temurin은 여전히 이전 버전이나 공식 Azul Zulu CA JRE21.0.13+9를 SHA256 고정 대안으로 검증해 패키징했다. 실제 Windows 실행은 하지 않았고 운영 Java 재교체·재시작도 없다. 자세한 결과는 release-0.7.0-beta.26.md를 따른다.

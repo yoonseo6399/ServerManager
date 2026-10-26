@@ -1,4 +1,4 @@
-상태: 통합 범위 검증 완료, 서명 패키징·게시 대기
+상태: v0.7.0-beta.26 서명 prerelease 게시 완료, 공개 자산9개 메타데이터 확인
 # release/0.7.0-beta.26
 
 - 게시된 beta.25 기반, solo. origin/fix/java-security-runtime과 origin/feat/server-archive-import를 merge --no-ff. 뒤 브랜치는 voicechat/multi-server 작업을 포함한다. 충돌 없음.
@@ -14,3 +14,10 @@
 - Windows 공식 Azul ZIP49,364,100바이트의 고정 SHA256 확인. release21.0.13/구조/bin/java.exe/라이선스 확인. 호스트 Mac JVM으로 실제 Windows cacerts의 영향받는 인증서2개 제거, 재검사0개 확인. Windows 실행 아님.
 - 첫 Windows 사전 검사에서 루트 LICENSE를 가정해 실패했으나 실제 legal/java.base/LICENSE 배치를 확인해 검사 경로를 보완했다. 제품 패키저는 전체 런타임을 복사하므로 파일 누락 수정은 필요 없었다. 실패도 기록한다.
 - CI에 runtime-security focused 검사도 추가해 공급자/무결성/인증서 회귀를 패키징 전에 확인한다. 설치된 서비스·게임·OS 메모리 설정을 변경하지 않았다.
+
+## 게시 완료
+
+- CI [40247054797](https://github.com/yoonseo6399/ServerManager/actions/runs/40247054797) 성공. Mac 설치 PKG·Mac/Windows CLI/UI 실행기 ZIP4개·JAR·서명 업데이트 manifest·signature·SHA256SUMS 합계9개 게시.
+- [v0.7.0-beta.26](https://github.com/yoonseo6399/ServerManager/releases/tag/v0.7.0-beta.26), 2026-10-26 09:02:37 KST. tag commit924dca894639500f43ef09f96a471e46f08cb588는 CI 빌드 커밋과 일치한다. 기존 태그·자산을 교체하지 않았다.
+- GitHub API 메타데이터로 prerelease=true/draft=false·자산 이름·크기 모두 양수 확인. 전체 suite step은 skipped이고 보안·runner setup·bootstrap·서명·게시 step은 success 확인. stable latest는v0.6.3 유지, main 미변경.
+- 공개 자산 재다운로드/해시 대조는 사용자 지시대로 실행하지 않았다. 운영 설치·재시작 없음. 이 후속 커밋은 게시 결과 문서만 추가하며 이미 게시된 태그나 바이너리를 변경하지 않는다.

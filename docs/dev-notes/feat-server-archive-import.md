@@ -1,4 +1,4 @@
-상태: 구현·기능 검증 완료, 미배포
+상태: v0.7.0-beta.26 통합·게시 완료, 운영 자동 적용 없음
 # feat/server-archive-import
 
 기반: origin/feat/multi-server-ports eb8b49b (Simple Voice Chat·같은 실행기 여러 서버 포트 분리 포함). 원격 fetch 및 현황 확인 후 별도 워크트리에서 혼자 구현한다. VERSION·main·기존 릴리즈·운영 서버는 변경하지 않는다.

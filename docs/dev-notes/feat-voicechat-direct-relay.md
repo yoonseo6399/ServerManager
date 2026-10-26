@@ -1,4 +1,4 @@
-상태: 구현·기능 검증 완료, 원격 푸시, 미배포
+상태: v0.7.0-beta.26 통합·게시 완료, 운영 자동 적용 없음
 # Simple Voice Chat direct relay
 
 - Beta25 published base, solo. Add per-instance UDP public/local voice ports under direct relay settings; same selected relay runner and authenticated encrypted DRP tunnel, no manager payload. Separate Sable protocol and namespace; UDP has no DNS hostname, so unique public port per instance. The router must additionally forward selected UDP ports.

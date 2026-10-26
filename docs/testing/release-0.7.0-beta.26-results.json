@@ -178,7 +178,145 @@
     "SERVER-ARCHIVE-UPLOAD-PROOF bytes=269484322 chunks=33 multipartIndependent=true boundedChunk=8388608"
   ],
   "publication": {
-    "status": "pending CI signing and packaging"
+    "run": {
+      "status": "completed",
+      "conclusion": "success",
+      "headSha": "924dca894639500f43ef09f96a471e46f08cb588",
+      "url": "https://github.com/yoonseo6399/ServerManager/actions/runs/40247054797"
+    },
+    "steps": [
+      {
+        "name": "Set up job",
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/setup-java@v4",
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/setup-node@v4",
+        "conclusion": "success"
+      },
+      {
+        "name": "Validate release version",
+        "conclusion": "success"
+      },
+      {
+        "name": "Run npm ci --prefix frontend && npm run build --prefix frontend",
+        "conclusion": "success"
+      },
+      {
+        "name": "Prepare pinned official YouTube dependencies",
+        "conclusion": "success"
+      },
+      {
+        "name": "Full backend suite",
+        "conclusion": "skipped"
+      },
+      {
+        "name": "Build release JAR",
+        "conclusion": "success"
+      },
+      {
+        "name": "Verify runtime security and pinned supplier",
+        "conclusion": "success"
+      },
+      {
+        "name": "Run python3 scripts/test-runner-setup.py",
+        "conclusion": "success"
+      },
+      {
+        "name": "Run python3 scripts/package-macos.py",
+        "conclusion": "success"
+      },
+      {
+        "name": "Run python3 scripts/package-runner.py",
+        "conclusion": "success"
+      },
+      {
+        "name": "Verify isolated bootstrap after packaging",
+        "conclusion": "success"
+      },
+      {
+        "name": "Sign update manifest",
+        "conclusion": "success"
+      },
+      {
+        "name": "Create release tag after validated manual build",
+        "conclusion": "success"
+      },
+      {
+        "name": "Publish immutable version assets",
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/setup-node@v4",
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/setup-java@v4",
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "conclusion": "success"
+      }
+    ],
+    "release": {
+      "tagName": "v0.7.0-beta.26",
+      "isDraft": false,
+      "isPrerelease": true,
+      "publishedAt": "2026-10-26T00:02:37Z",
+      "url": "https://github.com/yoonseo6399/ServerManager/releases/tag/v0.7.0-beta.26"
+    },
+    "assets": [
+      {
+        "name": "server-manager-0.7.0-beta.26.jar",
+        "size": 94781526
+      },
+      {
+        "name": "ServerManager-0.7.0-beta.26-universal.pkg",
+        "size": 179321489
+      },
+      {
+        "name": "ServerManager-Runner-0.7.0-beta.26-mac-universal.zip",
+        "size": 180211717
+      },
+      {
+        "name": "ServerManager-Runner-0.7.0-beta.26-windows-x64.zip",
+        "size": 138379431
+      },
+      {
+        "name": "ServerManager-Runner-UI-0.7.0-beta.26-mac-universal.zip",
+        "size": 180275823
+      },
+      {
+        "name": "ServerManager-Runner-UI-0.7.0-beta.26-windows-x64.zip",
+        "size": 138381656
+      },
+      {
+        "name": "SHA256SUMS",
+        "size": 846
+      },
+      {
+        "name": "update.properties",
+        "size": 157
+      },
+      {
+        "name": "update.sig",
+        "size": 64
+      }
+    ],
+    "tagCommit": "924dca894639500f43ef09f96a471e46f08cb588",
+    "validation": "GitHub metadata only; published assets not downloaded or hashed"
   },
   "notRun": [
     "full backend suite",
@@ -189,5 +327,6 @@
     "Windows binary execution",
     "production restart or installation",
     "published assets redownload/hash check"
-  ]
+  ],
+  "stableLatest": "v0.6.3"
 }
