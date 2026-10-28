@@ -52,9 +52,14 @@ class RemoteFiles(private val manager:ServerManager) {
         return mapOf("content" to EditableText.decode(bytes),"revision" to java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString(""){"%02x".format(it)})
     }
     fun write(id:String,path:String,input:InputStream,revision:String?=null,limit:Long=RunnerWorkspace.MAX)=manager.withRemoteFiles(id) {
+        writeUnreserved(id,path,input,revision,limit)
+    }
+    internal fun revision(id:String,path:String):String=call(id,"STAT",path).path("revision").asText()
+    internal fun writeUnreserved(id:String,path:String,input:InputStream,revision:String?=null,limit:Long=RunnerWorkspace.MAX) {
         val upload=call(id,"WRITE_BEGIN",path,revision=revision).path("uploadId").asText();var offset=0L
         try {while(true){val bytes=input.readNBytes(RunnerWorkspace.CHUNK);if(bytes.isEmpty())break;require(offset+bytes.size<=limit) {"파일 크기 제한을 초과했습니다"};call(id,"WRITE_CHUNK",path,offset,java.util.Base64.getEncoder().encodeToString(bytes),uploadId=upload);offset+=bytes.size};call(id,"WRITE_COMMIT",path,uploadId=upload);Unit}
         catch(e:Exception){runCatching {call(id,"WRITE_ABORT",path,uploadId=upload)};throw e}
     }
-    fun change(id:String,op:String,path:String,to:String="")=manager.withRemoteFiles(id) {call(id,op,path,to=to);Unit}
+    internal fun changeUnreserved(id:String,op:String,path:String,to:String="") {call(id,op,path,to=to)}
+    fun change(id:String,op:String,path:String,to:String="")=manager.withRemoteFiles(id) {changeUnreserved(id,op,path,to);Unit}
 }

@@ -89,6 +89,9 @@ class RunnerTransfer(private val manager:ServerManager,private val registry:Runn
     private fun <T> locked(id:String,action:()->T):T {val gate=lock(id).writeLock();gate.lock();try{return action()}finally{gate.unlock()}}
     private fun <T> shared(id:String,action:()->T):T {val gate=lock(id).readLock();gate.lock();try{return action()}finally{gate.unlock()}}
 
+    /** A ZIP of the latest completed central copy must not observe half of a delta commit. Upload chunks stay parallel. */
+    fun <T> withSnapshotRead(id:String,action:()->T):T=shared(id,action)
+
     private fun history(id:String)=manager.profileDir(id).resolve("runner-backups")
     private fun report(transfer:PendingTransfer,phase:String,message:String="") {
         val preparing=phase=="SCANNING"

@@ -130,6 +130,9 @@ object ClientModFilter {
         digest.digest().joinToString("") {"%02x".format(it)}
     }
     fun exclude(stage:Path,plan:PackPlan,replaced:Set<String>,lookup:(Collection<String>)->ModSourceLookup,log:(String)->Unit) {
+        candidates(stage,plan,replaced,lookup,log).forEach {it.deleteIfExists();log("클라이언트 전용 제외: ${stage.relativize(it)}")}
+    }
+    fun candidates(stage:Path,plan:PackPlan,replaced:Set<String>,lookup:(Collection<String>)->ModSourceLookup,log:(String)->Unit):Set<Path> {
         val mods=stage.resolve("mods")
         val jars=if(mods.isDirectory())Files.list(mods).use {paths->paths.filter {it.isRegularFile() && it.name.endsWith(".jar",true)}.toList()} else emptyList()
         val hashes=jars.associateWith {sha512(it)}
@@ -137,13 +140,16 @@ object ClientModFilter {
         val sources=hashes.mapValues {result.cache.sources[it.value]}
         fun label(file:Path)=sources[file]?.title?.let {"$it (${file.fileName})"} ?: stage.relativize(file).toString()
         val declared=plan.files.filter {it.server=="unsupported" && it.path !in replaced}.map {stage.resolve(it.path)}.filter {it.exists()}
-        val candidates=(declared+sources.filterValues {it?.clientOnly==true}.keys).toMutableSet()
-        // Unknown consumers may depend on any removable library. Do not guess from file names or JAR contents.
-        sources.filterValues {it==null}.keys.forEach {candidates.remove(it)}
+        val localClient=jars.filter {file->runCatching {ZipFile(file.toFile()).use {zip->
+            val entry=zip.getEntry("fabric.mod.json") ?: return@use false
+            if(entry.size !in 1..(1024*1024))return@use false
+            zip.getInputStream(entry).use {jacksonObjectMapper().readTree(it.readNBytes(1024*1024+1)).path("environment").asText()=="client"}
+        }}.getOrDefault(false)}
+        val candidates=(declared+localClient+sources.filterValues {it?.clientOnly==true}.keys).toMutableSet()
+        // Explicit pack declarations remain authoritative when a file is absent from Modrinth.
         val unknown=jars.filter {it !in candidates && sources[it]==null}
         if(unknown.isNotEmpty()) {
-            candidates.removeAll(jars.toSet())
-            log("의존성 미확인 모드가 있어 JAR 자동 제외를 보류합니다: ${unknown.take(10).joinToString {it.fileName.toString()}}")
+            log("미확인 모드는 유지하고, 명시적으로 확인된 클라이언트 전용 모드만 제외합니다: ${unknown.take(10).joinToString {it.fileName.toString()}}")
         }
         fun installed(file:Path)=InstalledMod(file.fileName.toString(),true,Files.size(file),"","",sources[file])
         // A retained client-only library can itself require another candidate. Repeat through the entire closure.
@@ -159,13 +165,11 @@ object ClientModFilter {
         val kept=jars.filter {it !in candidates}.map(::installed)
         try {ModGraph(ModInventorySnapshot("pack",kept,emptyList())).validateEnabled()}
         catch(e:IllegalArgumentException) {
-            // Metadata may be incomplete (private uploads/deleted upstream versions). Never reject the entire
-            // import or remove a possible provider on that evidence; retain all JARs and report the uncertainty.
-            candidates.removeAll(jars.toSet())
-            log("의존성을 완전히 확인하지 못해 JAR 자동 제외를 보류하고 그대로 가져옵니다: ${e.message?.take(500)}")
+            // An unrelated missing dependency must not undo verified client-only exclusions.
+            // Unknown files remain installed, and known required-provider closure was checked above.
+            log("일부 의존성이 미확인입니다. 미확인 파일은 유지하며 확인된 클라이언트 전용 제외는 계속합니다: ${e.message?.take(500)}")
         }
-        candidates.sortedBy {it.toString()}.forEach {it.deleteIfExists();log("클라이언트 전용 제외: ${label(it)}")}
-
+        return candidates.toSortedSet(compareBy {it.toString()})
     }
 }
 
@@ -229,6 +233,7 @@ class MrpackImporter(private val manager: ServerManager,private val catalog: Mod
         }
         return manager.view(id)
     }
+    internal fun downloadVerified(file:PackFile,dest:Path)=download(file,dest)
     private fun download(file: PackFile,dest: Path) {
         var error: Exception?=null
         for(source in file.downloads) {

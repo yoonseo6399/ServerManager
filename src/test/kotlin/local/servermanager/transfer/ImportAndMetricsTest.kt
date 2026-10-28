@@ -77,7 +77,7 @@ class ImportAndMetricsTest {
         ClientModFilter.exclude(temp.resolve("stage"),plan,emptySet(),{ ModSourceLookup(ModSourceCache(sources),emptyList()) }) {}
         assertFalse(shader.exists());assertFalse(lib.exists())
     }
-    @Test fun `unknown kept consumer prevents deletion and retained client dependencies are transitive`() {
+    @Test fun `known retained client dependencies are transitive and unknown consumers do not block verified exclusions`() {
         val main=mod("main");val client=mod("client");val lib=mod("lib")
         val sources=mapOf(hash(main) to source("main",false,"client"),hash(client) to source("client",true,"lib"),hash(lib) to source("lib",true))
         val plan=PackPlan("test","1","1.21.1","21.1.252",emptyList(),emptyList(),emptyList())
@@ -85,16 +85,22 @@ class ImportAndMetricsTest {
         assertTrue(client.exists());assertTrue(lib.exists())
         main.deleteExisting();mod("private")
         ClientModFilter.exclude(temp.resolve("stage"),plan,emptySet(),{ModSourceLookup(ModSourceCache(sources),emptyList())}) {}
-        assertTrue(client.exists());assertTrue(lib.exists())
+        assertFalse(client.exists());assertFalse(lib.exists())
     }
-    @Test fun `private upload and unresolved known dependency keep pack import usable without deleting jars`() {
+    @Test fun `private uploads and missing dependencies do not prevent known client exclusions`() {
         val server=mod("server");val privateMod=mod("private");val client=mod("client")
         val sources=mapOf(hash(server) to source("server",false,"missing"),hash(client) to source("client",true))
         val log=mutableListOf<String>()
         val plan=PackPlan("test","1","1.21.1","21.1.252",emptyList(),emptyList(),emptyList())
         ClientModFilter.exclude(temp.resolve("stage"),plan,emptySet(),{ModSourceLookup(ModSourceCache(sources),listOf("partial query failed"))}) {log.add(it)}
-        assertTrue(server.exists());assertTrue(privateMod.exists());assertTrue(client.exists())
-        assertTrue(log.any {it.contains("그대로 가져옵니다")});assertTrue(log.any {it.contains("partial query failed")})
+        assertTrue(server.exists());assertTrue(privateMod.exists());assertFalse(client.exists())
+        assertTrue(log.any {it.contains("미확인")});assertTrue(log.any {it.contains("partial query failed")})
+    }
+    @Test fun `explicit pack client declaration is excluded even when all lookups are unknown`() {
+        val client=mod("declared");val privateMod=mod("private")
+        val plan=PackPlan("test","1","1.21.1","21.1.252",listOf(PackFile("mods/declared.jar",emptyMap(),emptyList(),1,"unsupported")),emptyList(),emptyList())
+        ClientModFilter.exclude(temp.resolve("stage"),plan,emptySet(),{ModSourceLookup(ModSourceCache(),listOf("offline"))}) {}
+        assertFalse(client.exists());assertTrue(privateMod.exists())
     }
     @Test fun `process resource sampling reports real RSS and successive CPU samples`() {
         val metrics=ProcessMetrics();val handle=ProcessHandle.current()

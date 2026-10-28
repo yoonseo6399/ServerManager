@@ -4,6 +4,8 @@ import {api} from './http';
 import {FileEditor,type EditableFile} from './FileEditor';
 import {SaveBar,navigateWithUnsaved} from './SaveBar';
 import {droppedFiles,type UploadItem} from './dropFiles';
+import {uploadBatch} from './UploadProgress';
+import {FolderDownloadButton} from './FolderDownloadButton';
 
 type Entry={name:string;path:string;directory:boolean;size:number};
 type Props={id:string;name:string;folder:string;editorPath:string|null;canManage:boolean;blocked:boolean;directory:string;remote:boolean;onFolder:(path:string)=>void;onEditor:(path:string|null)=>void;children?:ReactNode};
@@ -57,10 +59,10 @@ export function FileBrowser({id,name,folder,editorPath,canManage,blocked,directo
  const lastPage=Math.max(0,Math.ceil(rows.length/100)-1),shownPage=Math.min(page,lastPage);
  const disabled=busy||blocked||!canManage||!ready;
  async function upload(items:UploadItem[],target=folder){
-  let done=0;await mutate(async()=>{for(const item of items){setProgress(`${done+1}/${items.length} · ${item.relative}`);const data=new FormData();data.append('file',item.file);
-   try{await api(endpoint('upload')+'?path='+encodeURIComponent([target,...item.relative.split('/').slice(0,-1)].filter(Boolean).join('/')),'POST',data);done++;}
-   catch(e){throw Error(`${done}/${items.length}개 업로드 완료. ${(e as Error).message}`);}
-  }},`${items.length}개 파일을 업로드했습니다.`);
+  if(!items.length)return;
+  await mutate(async()=>{const result=await uploadBatch(`${name} · 파일 업로드`,items,item=>endpoint('upload')+'?path='+encodeURIComponent([target,...item.relative.split('/').slice(0,-1)].filter(Boolean).join('/')));
+   if(result.errors.length){await load();throw Error(`${result.done}/${items.length}개 업로드 완료. ${result.errors.slice(0,3).join(' / ')}`);}
+  },`${items.length}개 파일을 업로드했습니다.`);
  }
  async function drop(e:DragEvent,target=folder){
   e.preventDefault();e.stopPropagation();setDragging(false);if(disabled)return;
@@ -76,7 +78,7 @@ export function FileBrowser({id,name,folder,editorPath,canManage,blocked,directo
  return <section className={'files-panel '+(dragging?'drag-active':'')} aria-label={name+' 파일 관리자'} onDragOver={e=>{e.preventDefault();if(!disabled)setDragging(true);}} onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node))setDragging(false);}} onDrop={e=>void drop(e)}>
   <SaveBar label="파일 작업" dirty={false} busy={busy} onSave={()=>{}} onReset={()=>{}}/>
   <div className="toolbar"><div className="actions"><button title="상위 폴더" aria-label="상위 폴더" disabled={!folder||busy} onClick={()=>go(folder.split('/').slice(0,-1).join('/'))} onDragOver={e=>e.preventDefault()} onDrop={e=>void drop(e,folder.split('/').slice(0,-1).join('/'))}><ArrowUp size={16}/></button><span className="breadcrumb file-toolbar-path">{name} / server / {folder}</span></div>
-  <div className="actions"><button aria-label="파일 목록 새로고침" disabled={loading||busy} onClick={()=>void load()}><RefreshCw size={15}/></button><button disabled={disabled} onClick={()=>{const value=prompt('새 폴더 이름');if(value?.trim())void mutate(async()=>{await api(endpoint('folders'),'POST',{path:[folder,value.trim()].filter(Boolean).join('/')});},'폴더를 만들었습니다.');}}><Plus size={15}/> 폴더</button><button disabled={disabled} onClick={newFile}><FileText size={15}/> 파일</button><button disabled={disabled} onClick={()=>navigateWithUnsaved(()=>input.current?.click())}><Upload size={15}/> 업로드</button><input ref={input} aria-label="업로드할 파일" type="file" multiple hidden onChange={e=>{void upload(Array.from(e.target.files||[]).map(file=>({file,relative:file.name})));e.target.value='';}}/></div></div>
+  <div className="actions"><FolderDownloadButton id={id} path={folder} name={folder.split('/').pop()||name}/>{remote&&<FolderDownloadButton id={id} path={folder} name={folder.split('/').pop()||name} snapshot/>}<button aria-label="파일 목록 새로고침" disabled={loading||busy} onClick={()=>void load()}><RefreshCw size={15}/></button><button disabled={disabled} onClick={()=>{const value=prompt('새 폴더 이름');if(value?.trim())void mutate(async()=>{await api(endpoint('folders'),'POST',{path:[folder,value.trim()].filter(Boolean).join('/')});},'폴더를 만들었습니다.');}}><Plus size={15}/> 폴더</button><button disabled={disabled} onClick={newFile}><FileText size={15}/> 파일</button><button disabled={disabled} onClick={()=>navigateWithUnsaved(()=>input.current?.click())}><Upload size={15}/> 업로드</button><input ref={input} aria-label="업로드할 파일" type="file" multiple hidden onChange={e=>{void upload(Array.from(e.target.files||[]).map(file=>({file,relative:file.name})));e.target.value='';}}/></div></div>
   {children}
   {error&&<div role="alert" className="alert error-banner">{error}<button onClick={()=>setError('')}>닫기</button></div>}{notice&&<p role="status" className="notice">{notice}</p>}
   <div className="drop-hint" role="status">{progress||(!canManage?'조회 전용입니다. 파일을 열거나 다운로드할 수 있습니다.':blocked?'실행기 연결 또는 파일 복구 상태를 확인하세요.':dragging?'여기에 놓아 업로드하거나 이동하세요':'파일·폴더를 끌어 놓아 업로드 · 목록의 항목을 폴더에 놓아 이동')}</div>
@@ -86,9 +88,10 @@ export function FileBrowser({id,name,folder,editorPath,canManage,blocked,directo
    {loading?<p className="file-feedback" role="status">파일 목록을 불러오는 중…</p>:listError?<div className="file-feedback" role="alert">{listError}<button onClick={()=>void load()}>파일 목록 다시 시도</button></div>:ready&&rows.length===0?<p className="no-files">비어 있는 폴더입니다.</p>:null}
    {ready&&rows.slice(shownPage*100,shownPage*100+100).map(f=><div key={f.path} className="file-row" draggable={!disabled} onDragStart={e=>e.dataTransfer.setData('application/x-servermanager-path',JSON.stringify({id,path:f.path}))} onDragOver={e=>{if(f.directory)e.preventDefault();}} onDrop={f.directory?e=>void drop(e,f.path):undefined}>
     <button className="file-name" disabled={busy} onClick={()=>open(f)}>{f.directory?<Folder size={16}/>:<FileText size={16}/>} {f.name}</button><span>{f.directory?'—':f.size<1024?f.size+' B':(f.size/1024).toFixed(1)+' KB'}</span><div className="file-actions">
+    {f.directory&&<><FolderDownloadButton id={id} path={f.path} name={f.name}/>{remote&&<FolderDownloadButton id={id} path={f.path} name={f.name} snapshot/>}</>}
     {!f.directory&&<a aria-label={f.name+' 다운로드'} title="다운로드" href={'/api'+endpoint('download')+'?path='+encodeURIComponent(f.path)}><Download size={14}/></a>}
     <button aria-label={f.name+' 이동 또는 이름 변경'} title="이동 또는 이름 변경" disabled={disabled} onClick={()=>navigateWithUnsaved(()=>{const to=prompt('server/ 기준 새 경로',f.path);if(to&&to!==f.path)void mutate(async()=>{await api(endpoint('move'),'POST',{from:f.path,to});onEditor(null);},'파일을 이동했습니다.');})}><Pencil size={14}/></button>
-    <button aria-label={f.name+' 삭제'} title="삭제" disabled={disabled} onClick={()=>navigateWithUnsaved(()=>{if(confirm(`${name}의 ${f.path}을 휴지통으로 이동할까요?`))void mutate(async()=>{await api(endpoint('files')+'?path='+encodeURIComponent(f.path),'DELETE');onEditor(null);},'휴지통으로 이동했습니다.');})}><Trash2 size={14}/></button></div></div>)}
+    <button aria-label={f.name+' 삭제'} title="삭제 · Shift를 누르면 확인 생략" disabled={disabled} onClick={e=>{const skipConfirm=e.shiftKey;navigateWithUnsaved(()=>{if(skipConfirm||confirm(`${name}의 ${f.path}을 휴지통으로 이동할까요?`))void mutate(async()=>{await api(endpoint('files')+'?path='+encodeURIComponent(f.path),'DELETE');onEditor(null);},'휴지통으로 이동했습니다.');});}}><Trash2 size={14}/></button></div></div>)}
    {ready&&rows.length>100&&<div className="log-history"><button disabled={shownPage===0} onClick={()=>setPage(shownPage-1)}>이전 파일</button><span>{shownPage+1} / {lastPage+1} 페이지 · {rows.length}개</span><button disabled={shownPage===lastPage} onClick={()=>setPage(shownPage+1)}>다음 파일</button></div>}
   </div>
   {editorPath!==null&&(reading?<p className="file-feedback" role="status">파일을 읽는 중…</p>:readError?<div className="file-feedback" role="alert">{readError}<button onClick={()=>void read()}>파일 다시 읽기</button><a href={'/api'+endpoint('download')+'?path='+encodeURIComponent(editorPath)}>원본 다운로드</a><button onClick={()=>onEditor(null)}>닫기</button></div>:file&&file.path===editorPath?<FileEditor key={file.path+':'+file.revision} file={file} disabled={blocked||!canManage} busy={busy} onClose={()=>navigateWithUnsaved(()=>onEditor(null))} onSave={value=>void save(value)}/>:null)}
