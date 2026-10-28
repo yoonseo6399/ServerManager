@@ -44,6 +44,7 @@ test('pack update dialog previews all changes and sends explicit merge replace c
  await modal.getByLabel('모드 업데이트 방식').selectOption('replace');await modal.getByLabel('config 파일 추가·덮어쓰기',{exact:false}).check();await modal.getByLabel('클라이언트 전용 모드 제외',{exact:false}).uncheck();
  await expect(modal).toContainText('삭제 모드 · 1개');await expect(modal).toContainText('mods/second.jar');expect(f.updates).toEqual([]);
  await modal.evaluate(node=>node.scrollTop=0);await modal.screenshot({path:'frontend/test-results/pack-update-desktop.png'});
+ await page.setViewportSize({width:390,height:844});await modal.evaluate(node=>node.scrollTop=0);await expect(modal).toBeInViewport({ratio:1});await modal.screenshot({path:'frontend/test-results/pack-update-mobile.png'});
  await modal.getByRole('button',{name:'이 방법으로 업데이트'}).click();await expect.poll(()=>f.updates.length).toBe(1);
  expect(f.updates[0]).toEqual({token:'fixture',mode:'replace',overwriteConfig:true,excludeClientOnly:false});
 });
@@ -53,7 +54,7 @@ test('file tab uploads show floating progress and viewer may download current or
  await page.getByRole('button',{name:'world 최근 복사본 ZIP 다운로드',exact:true}).click();await expect.poll(()=>f.exports.length).toBe(1);expect(f.exports[0]).toEqual({path:'world',source:'snapshot'});
  await expect(page.locator('.upload-progress')).toContainText('중앙 복사본');await expect(page.locator('.upload-progress')).toContainText('ZIP 준비 완료');
  await page.getByRole('button',{name:'world ZIP 다운로드',exact:true}).click();await expect.poll(()=>f.exports.length).toBe(2);expect(f.exports[1]).toEqual({path:'world',source:'current'});
- await page.setViewportSize({width:390,height:844});await expect(page.locator('.upload-progress-stack')).toBeInViewport();await page.screenshot({path:'frontend/test-results/file-export-mobile.png'});
+ await page.setViewportSize({width:390,height:844});await expect(page.locator('.upload-progress-stack')).toBeInViewport({ratio:1});await page.screenshot({path:'frontend/test-results/file-export-mobile.png'});
 });
 test('file tab keeps drag drop uploads and displays byte progress in the floating bar',async({page})=>{
  const f=await fixture(page);await page.goto('/');await page.getByRole('button',{name:'파일 관리자',exact:true}).click();
