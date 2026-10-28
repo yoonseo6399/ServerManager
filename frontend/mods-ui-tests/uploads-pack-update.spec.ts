@@ -1,5 +1,5 @@
 import {test,expect,type Page} from '@playwright/test';
-async function fixture(page:Page,viewer=false){
+async function fixture(page:Page,viewer=false,failFirstUpload=false){
  const uploads:string[]=[],deletes:string[]=[],updates:any[]=[],exports:any[]=[];let pack:any=null;
  let mods=['first.jar','second.jar'];
  const plan={pack:{name:'New Pack',version:'2',minecraft:'1.21.1',loader:'Fabric',loaderVersion:'0.16.14'},currentMods:['mods/first.jar','mods/second.jar'],incomingMods:['mods/first.jar','mods/new.jar','mods/client.jar'],configFiles:['config/test.json'],excludedClientMods:['mods/client.jar'],ignoredFiles:['world/level.dat'],warnings:[]};
@@ -10,7 +10,7 @@ async function fixture(page:Page,viewer=false){
   else if(p==='/api/memory')body={totalMb:24000,freeMb:14000,reservedMb:2000,maxHeapMb:22000,startableHeapMb:22000};
   else if(p==='/api/game-addresses')body={enabled:false};
   else if(p.endsWith('/mods'))body={remote:true,editable:true,inventoryRevision:mods.join(),inventory:url.searchParams.has('inventory')?{revision:'r',mods:mods.map(filename=>({filename,enabled:true,size:10,sha256:'a'.repeat(64),source:null,warning:null})),warnings:[],dependencyFiles:[],dependencyReasons:{}}:null,job:null,diagnostic:null,next:null,active:false};
-  else if(p.endsWith('/upload')){uploads.push(url.search);await new Promise(resolve=>setTimeout(resolve,150));}
+  else if(p.endsWith('/upload')){uploads.push(url.search);if(failFirstUpload&&uploads.length===1)return route.fulfill({status:503,json:{message:'fixture upload failure'}});await new Promise(resolve=>setTimeout(resolve,150));}
   else if(p.endsWith('/files')&&method==='DELETE'){deletes.push(url.searchParams.get('path')!);mods=mods.filter(name=>'mods/'+name!==url.searchParams.get('path'));}
   else if(p.endsWith('/files'))body=[{name:'world',path:'world',directory:true,size:0}];
   else if(p.endsWith('/pack-update/preview')){pack={token:'fixture',phase:'READY',message:'업데이트 방법을 선택하세요',plan,completed:0,total:0};body=pack;}
@@ -59,4 +59,10 @@ test('file tab keeps drag drop uploads and displays byte progress in the floatin
  const f=await fixture(page);await page.goto('/');await page.getByRole('button',{name:'파일 관리자',exact:true}).click();
  await page.getByLabel('업로드할 파일',{exact:true}).setInputFiles({name:'notes.txt',mimeType:'text/plain',buffer:Buffer.from('original content')});
  await expect.poll(()=>f.uploads.length).toBe(1);await expect(page.locator('.upload-progress')).toContainText('완료 1/1');expect(f.uploads[0]).toBe('?path=');
+});
+
+test('one failed mod upload shows failure and continues uploading remaining files',async({page})=>{
+ const f=await fixture(page,false,true);await openMods(page);
+ await page.getByLabel('업로드할 모드 파일').setInputFiles([{name:'a.jar',mimeType:'application/java-archive',buffer:Buffer.from('one')},{name:'b.jar',mimeType:'application/java-archive',buffer:Buffer.from('two')}]);
+ await expect.poll(()=>f.uploads.length).toBe(2);await expect(page.locator('.upload-progress.failed')).toContainText('완료 1/2 · 실패 1');await expect(page.getByRole('alert')).toContainText('fixture upload failure');
 });
