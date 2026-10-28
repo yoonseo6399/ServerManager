@@ -18,7 +18,7 @@ class PackUpdatesTest {
     private fun clientJar():ByteArray {val out=java.io.ByteArrayOutputStream();ZipOutputStream(out).use {zip->zip.putNextEntry(ZipEntry("fabric.mod.json"));zip.write("""{"id":"client","version":"1","environment":"client"}""".toByteArray());zip.closeEntry()};return out.toByteArray()}
     private fun archive():ByteArray {
         val out=java.io.ByteArrayOutputStream();ZipOutputStream(out).use {zip->
-            val entries=mapOf("modrinth.index.json" to """{"formatVersion":1,"game":"minecraft","name":"Update","versionId":"2","dependencies":{"minecraft":"1.21.1","fabric-loader":"0.16.14"},"files":[]}""".toByteArray(),"overrides/mods/new.jar" to "new mod".toByteArray(),"overrides/mods/client.jar" to clientJar(),"overrides/config/nested/test.json" to "new config".toByteArray(),"overrides/world/level.dat" to "must not replace world".toByteArray(),"overrides/server.properties" to "must not replace properties".toByteArray())
+            val entries=mapOf("modrinth.index.json" to """{"formatVersion":1,"game":"minecraft","name":"Update","versionId":"2","dependencies":{"minecraft":"1.21.1","fabric-loader":"0.16.14"},"files":[]}""".toByteArray(),"overrides/mods/new.jar" to "new mod".toByteArray(),"overrides/mods/client.jar" to clientJar(),"overrides/config/nested/test.json" to "new config".toByteArray(),"overrides/config/new.toml" to "new setting".toByteArray(),"overrides/world/level.dat" to "must not replace world".toByteArray(),"overrides/server.properties" to "must not replace properties".toByteArray())
             entries.forEach {(name,bytes)->zip.putNextEntry(ZipEntry(name));zip.write(bytes);zip.closeEntry()}
         };return out.toByteArray()
     }
@@ -52,7 +52,7 @@ class PackUpdatesTest {
         assertTrue("world/level.dat" in ready.plan.ignoredFiles)
         updates.apply(id,PackUpdateRequest(ready.token,"merge"));waitFor(updates,id,"COMPLETE")
         assertEquals("new mod",base.resolve("mods/new.jar").readText());assertTrue(base.resolve("mods/old.jar").exists());assertFalse(base.resolve("mods/client.jar").exists())
-        assertEquals("original config",base.resolve("config/nested/test.json").readText());assertEquals("original world",base.resolve("world/level.dat").readText());assertEquals("original data",base.resolve("data/players.dat").readText());assertEquals("original settings",base.resolve("server.properties").readText())
+        assertEquals("original config",base.resolve("config/nested/test.json").readText());assertFalse(base.resolve("config/new.toml").exists());assertEquals("original world",base.resolve("world/level.dat").readText());assertEquals("original data",base.resolve("data/players.dat").readText());assertEquals("original settings",base.resolve("server.properties").readText())
         assertFalse(manager.root.resolve(id).resolve("import.pending").exists())
     }
     @Test fun `replace updates the real runner includes opted-in client and config and backs up originals`()=fixture(true) {manager,updates,id,base->
@@ -60,7 +60,7 @@ class PackUpdatesTest {
         assertEquals(listOf("mods/old.jar"),ready.plan!!.currentMods,"preview must read the runner, never the central copy")
         updates.apply(id,PackUpdateRequest(ready.token,"replace",overwriteConfig=true,excludeClientOnly=false));waitFor(updates,id,"COMPLETE")
         assertFalse(base.resolve("mods/old.jar").exists());assertTrue(base.resolve("mods/new.jar").exists());assertTrue(base.resolve("mods/client.jar").exists());assertTrue(base.resolve("mods/servermanager-sable-bridge-1.0.0.jar").exists())
-        assertEquals("new config",base.resolve("config/nested/test.json").readText());assertEquals("original world",base.resolve("world/level.dat").readText());assertEquals("original data",base.resolve("data/players.dat").readText())
+        assertEquals("new config",base.resolve("config/nested/test.json").readText());assertEquals("new setting",base.resolve("config/new.toml").readText());assertEquals("original world",base.resolve("world/level.dat").readText());assertEquals("original data",base.resolve("data/players.dat").readText())
         assertEquals("central stale copy",manager.originalServerDir(id).resolve("mods/central-only.jar").readText())
         val backup=manager.root.resolve("pack-updates").resolve(ready.token).resolve("backup")
         assertEquals("old mod",backup.resolve("mods/old.jar").readText());assertEquals("original config",backup.resolve("config/nested/test.json").readText())
@@ -73,6 +73,14 @@ class PackUpdatesTest {
         updates.preview(id,archive().inputStream());val next=waitFor(updates,id,"READY");manager.runtime(id).state="RUNNING"
         updates.apply(id,PackUpdateRequest(next.token,"replace"));assertContains(waitFor(updates,id,"FAILED").message,"종료한 뒤")
         assertFalse(base.resolve("mods/new.jar").exists())
+    }
+    @Test fun `repeated update previews do not consume new-instance import slots`()=fixture {manager,updates,id,_->
+        val imports=manager.root.resolve("imports")
+        val before=imports.listDirectoryEntries().map {it.name}.toSet()
+        repeat(9){updates.preview(id,archive().inputStream());waitFor(updates,id,"READY")}
+        assertEquals(before,imports.listDirectoryEntries().map {it.name}.toSet())
+        assertFails {updates.preview(id,"bad archive".byteInputStream())}
+        assertNull(updates.status(id),"a failed replacement must not expose the previous ready pack")
     }
     @Test fun `transaction failure restores original files and rejects world paths`() {
         val base=temp.resolve("transaction").createDirectories();val stage=temp.resolve("stage").createDirectories()

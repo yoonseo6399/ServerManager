@@ -25,7 +25,7 @@ object PackUpdatePaths {
     fun changes(plan:PackUpdatePlan,req:PackUpdateRequest):Pair<Set<String>,Set<String>> {
         require(req.mode in setOf("merge","replace")) {"모드 업데이트 방식을 선택하세요"}
         val incoming=plan.incomingMods.filterNot {req.excludeClientOnly && it in plan.excludedClientMods}.toSet()
-        val writes=incoming + if(req.overwriteConfig)plan.configFiles else emptyList()
+        val writes=incoming + if(req.overwriteConfig)plan.configFiles.filterNot {req.excludeClientOnly && it in plan.excludedClientMods} else emptyList()
         val removes=if(req.mode=="replace")plan.currentMods.toSet()-incoming else emptySet()
         require((writes+removes).all(::allowed))
         return writes to removes
@@ -115,6 +115,7 @@ class PackUpdates(private val manager:ServerManager,private val importer:MrpackI
         val instance=manager.instance(id).copy()
         check(prepared[id]?.status?.phase !in setOf("PREPARING","APPLYING")) {"팩 업데이트 작업 중입니다"}
         val token=UUID.randomUUID().toString();val dir=directory.resolve(token);dir.createDirectories()
+        prepared.remove(id) // a rejected replacement upload must not leave the previous pack selectable
         val plan=try {
             input.use {PackFormat.copyBounded(it,dir.resolve("pack.mrpack"),PackFormat.MAX_FILE)}
             PackFormat.inspect(dir.resolve("pack.mrpack")).also {plan->require(plan.loader==instance.loader && plan.minecraft==instance.minecraft) {"기존 서버와 같은 Minecraft·로더 종류의 팩만 업데이트할 수 있습니다"}}
