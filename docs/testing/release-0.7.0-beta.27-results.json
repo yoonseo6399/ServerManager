@@ -129,7 +129,68 @@
     "failed": 0
   },
   "runnerSetup": "passed",
-  "packagingSigningBootstrapPublication": "pending CI",
+  "packagingSigningBootstrapPublication": "passed",
   "releaseAssetRedownloadHashCheck": false,
-  "productionRestart": false
+  "productionRestart": false,
+  "ci": {
+    "conclusion": "success",
+    "headSha": "604eef92430dcd7e19c394cd2d02c8aaf04bb00b",
+    "status": "completed",
+    "url": "https://github.com/yoonseo6399/ServerManager/actions/runs/40787998555"
+  },
+  "release": {
+    "url": "https://github.com/yoonseo6399/ServerManager/releases/tag/v0.7.0-beta.27",
+    "publishedAt": "2026-10-28T23:35:27Z",
+    "prerelease": true,
+    "tagCommit": "604eef92430dcd7e19c394cd2d02c8aaf04bb00b",
+    "assets": [
+      {
+        "name": "server-manager-0.7.0-beta.27.jar",
+        "size": 94858174,
+        "state": "uploaded"
+      },
+      {
+        "name": "ServerManager-0.7.0-beta.27-universal.pkg",
+        "size": 179394880,
+        "state": "uploaded"
+      },
+      {
+        "name": "ServerManager-Runner-0.7.0-beta.27-mac-universal.zip",
+        "size": 180286651,
+        "state": "uploaded"
+      },
+      {
+        "name": "ServerManager-Runner-0.7.0-beta.27-windows-x64.zip",
+        "size": 138454365,
+        "state": "uploaded"
+      },
+      {
+        "name": "ServerManager-Runner-UI-0.7.0-beta.27-mac-universal.zip",
+        "size": 180350757,
+        "state": "uploaded"
+      },
+      {
+        "name": "ServerManager-Runner-UI-0.7.0-beta.27-windows-x64.zip",
+        "size": 138456590,
+        "state": "uploaded"
+      },
+      {
+        "name": "SHA256SUMS",
+        "size": 846,
+        "state": "uploaded"
+      },
+      {
+        "name": "update.properties",
+        "size": 157,
+        "state": "uploaded"
+      },
+      {
+        "name": "update.sig",
+        "size": 64,
+        "state": "uploaded"
+      }
+    ],
+    "stableLatestPreserved": "v0.6.3",
+    "verification": "GitHub metadata only; no asset redownload/hash test"
+  }
 }

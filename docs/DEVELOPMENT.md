@@ -765,3 +765,5 @@ Beta26 기반 fix/music-autoplay-skip 및 feat/mod-upload-pack-update를 포함�
 작업 브랜치 범위 검증 backend 음악47 + 팩/파일/권한45, browser14 통과. 통합 버전에서 재검증 후 상세 결과는 docs/dev-notes/release-0.7.0-beta.27.md에 기록한다. 전체 suite는 기존 사용자 생략 지시 유지. workflow_dispatch skip_full_tests=true로 기존 서명 secret·CI 패키징/isolated bootstrap/새 태그 게시. stable latest/main·기존 게시 자산 유지, 운영 설치/게임 재시작·공개 자산 재다운로드 해시 검사 없음.
 
 Beta27 통합에서도 backend14클래스92통과/0실패/0스킵, UI14통과, TS/Vite·bootJar 및 Java 보안11·runner-setup 성공. 메뉴 테스트2개 모두 해결. 상세 docs/testing/release-0.7.0-beta.27-results.json. 서명/패키징/게시 CI를 실행한다.
+
+Beta27 게시 완료: https://github.com/yoonseo6399/ServerManager/actions/runs/40787998555 success. 서명·Mac/Windows 패키징·isolated bootstrap·9개 자산 게시 성공, 태그 604eef92430dcd7e19c394cd2d02c8aaf04bb00b 불변. GitHub 메타데이터로 공개 이름/크기/상태/태그 일치 확인, stable latest v0.6.3 유지. 공개 파일 재다운로드/해시 비교·운영 재시작 없음.

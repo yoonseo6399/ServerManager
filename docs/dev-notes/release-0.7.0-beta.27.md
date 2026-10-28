@@ -1,4 +1,4 @@
-상태: 통합 backend92/UI14·빌드·보안11·설치 검사 통과 · 서명 패키징/게시 대기
+상태: v0.7.0-beta.27 서명 게시 완료 · CI 성공 · 공개 자산9개 메타데이터 확인
 # release/0.7.0-beta.27
 
 - origin/release/0.7.0-beta.26 기반. solo.
@@ -19,3 +19,10 @@
 - 첫 통합 명령에서 --tests를 bootJar 뒤에 놓아 Gradle 옵션 해석 실패. 명령 순서만 수정한 후 모든 지정 테스트 통과. 제품 수정 없이 해결.
 - 전체 suite·운영 설치/재시작·실제 외부 Modrinth/Discord/게임·다른 OS 실행·공개 파일 재다운로드는 미실행.
 - docs/testing/release-0.7.0-beta.27-results.json에 기계 판독 결과 보존. CI 서명/패키징/bootstrap/게시 결과는 완료 후 별도 기록.
+
+## 게시 완료
+
+- CI https://github.com/yoonseo6399/ServerManager/actions/runs/40787998555: success. Mac 관리 앱·Mac/Windows CLI/UI 실행기 패키징, isolated bootstrap, 서명, 새 태그·공개 게시 모두 성공. 전체 suite는 계획대로 skip.
+- 태그 v0.7.0-beta.27 = 604eef92430dcd7e19c394cd2d02c8aaf04bb00b (불변). 게시 시각 2026-10-28T23:35:27Z.
+- https://github.com/yoonseo6399/ServerManager/releases/tag/v0.7.0-beta.27 공개 자산9개가 정확한 이름·0보다 큰 크기·uploaded 상태임을 GitHub API로 확인. 태그 커밋은 CI head와 일치. 안정판 latest v0.6.3 유지.
+- 게시 파일 재다운로드/해시 비교는 수행하지 않음. 운영 앱·실행기·게임은 설치/재시작하지 않음. 이 완료 기록은 태그 이후 별도 문서 커밋이며 게시 태그·파일은 바꾸지 않는다.
