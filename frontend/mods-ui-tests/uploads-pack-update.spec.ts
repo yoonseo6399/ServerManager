@@ -1,4 +1,8 @@
 import {test,expect,type Page} from '@playwright/test';
+import {createServer,type Server} from 'node:http';
+let downloadServer:Server,downloadOrigin='';
+test.beforeAll(async()=>{downloadServer=createServer((_,response)=>{const body=Buffer.from('zip-fixture');response.writeHead(200,{'Content-Type':'application/zip','Content-Disposition':'attachment; filename=world.zip','Content-Length':body.length});response.end(body);});await new Promise<void>(resolve=>downloadServer.listen(0,'127.0.0.1',resolve));downloadOrigin='http://127.0.0.1:'+(downloadServer.address() as {port:number}).port;});
+test.afterAll(async()=>{await new Promise<void>(resolve=>downloadServer.close(()=>resolve()));});
 async function fixture(page:Page,viewer=false,failFirstUpload=false){
  const uploads:string[]=[],deletes:string[]=[],updates:any[]=[],exports:any[]=[];let pack:any=null;let downloadFinished=false;
  let mods=['first.jar','second.jar'];
@@ -18,7 +22,7 @@ async function fixture(page:Page,viewer=false,failFirstUpload=false){
   else if(p.endsWith('/pack-update'))body=pack;
   else if(p.endsWith('/folder-downloads')&&method==='POST'){exports.push(route.request().postDataJSON());downloadFinished=false;body={token:'zip',phase:'WORKING',message:'압축',completed:0,files:1,bytes:0,totalBytes:100};}
   else if(p.endsWith('/folder-downloads/zip'))body={token:'zip',phase:'READY',message:'준비 완료',completed:1,files:1,bytes:100,totalBytes:100,copiedAt:'2026-10-29T01:02:03Z',zipBytes:100,downloadedBytes:downloadFinished?100:0,downloadState:downloadFinished?'COMPLETE':'WAITING'};
-  else if(p.endsWith('/folder-downloads/zip/download')){downloadFinished=true;return route.fulfill({headers:{'content-type':'application/zip','content-disposition':'attachment; filename=world.zip'},body:Buffer.from('zip-fixture')});}
+  else if(p.endsWith('/folder-downloads/zip/download')){downloadFinished=true;return route.fulfill({status:302,headers:{location:downloadOrigin+'/world.zip'}});}
   else if(p.endsWith('/event-page'))body={events:[],hasMore:false};
   else if(p.endsWith('/log-files'))body=[];
   else if(p.endsWith('/log-display'))body={revision:0,enabled:true,rules:[],presets:[]};
