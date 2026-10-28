@@ -1,4 +1,4 @@
-상태: 구현 완료, 코드와 검증 계획 선커밋 후 음악 기능 테스트 예정 · 미배포
+상태: 구현·음악 기능 47개 테스트 통과, 원격 브랜치 인계 · 미배포
 # fix/music-autoplay-skip
 
 - 기준: 게시된 `v0.7.0-beta.26` (924dca8). 독립 워크트리, 단독 작업.
@@ -17,3 +17,11 @@
 ## 릴리즈 인계 문구
 
 음악 자동재생 중 다음 버튼으로 다음 추천곡을 재생하며, 건너뛴 곡은 이후 추천 빈도를 낮춥니다.
+
+## 검증 결과 (2026-10-29)
+
+- 구현 및 검증 계획 커밋: `085f082`. 이후 Java 21.0.13에서 계획한 7개 클래스만 지정해 `./gradlew test --tests ... --no-daemon` 실행.
+- 결과: 47개 통과, 실패 0, 오류 0, 미실행 0. `compileKotlin`, `compileTestKotlin`, 테스트 의존 `bootJar` 및 Sable bridge 빌드도 성공.
+- Playback 24, LibraryStore 7, Panel 5, Access 4, ChannelAccess 3, ChannelStore 3, IdleTimeout 1. 새 회귀 테스트 6개 포함.
+- 기존 AuthApi/Modrinth/GameHost API 사용 중단 경고와 Gradle 9 호환 경고는 남아 있다. 이번 변경 파일의 컴파일 오류는 없다.
+- 실제 Discord/YouTube 환경의 재생은 미실행. 전체 테스트, 운영 재시작, 릴리즈는 수행하지 않았다.
