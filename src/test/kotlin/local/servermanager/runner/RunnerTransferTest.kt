@@ -9,6 +9,18 @@ import kotlin.test.*
 
 class RunnerTransferTest {
     @TempDir lateinit var temp:Path
+    @Test fun `snapshot export holds a shared view until compression finishes before the next central commit`() {
+        val (transfer,_,_)=fixture()
+        val entered=java.util.concurrent.CountDownLatch(1);val release=java.util.concurrent.CountDownLatch(1)
+        val reader=java.util.concurrent.CompletableFuture.runAsync {transfer.withSnapshotRead("instance"){entered.countDown();release.await(5,java.util.concurrent.TimeUnit.SECONDS)}}
+        assertTrue(entered.await(5,java.util.concurrent.TimeUnit.SECONDS))
+        val writerEntered=java.util.concurrent.CountDownLatch(1)
+        val writer=java.util.concurrent.CompletableFuture.supplyAsync {writerEntered.countDown();transfer.inventory("instance")}
+        try {assertTrue(writerEntered.await(5,java.util.concurrent.TimeUnit.SECONDS));assertFailsWith<java.util.concurrent.TimeoutException>{writer.get(100,java.util.concurrent.TimeUnit.MILLISECONDS)}}
+        finally {release.countDown()}
+        reader.get(5,java.util.concurrent.TimeUnit.SECONDS);writer.get(5,java.util.concurrent.TimeUnit.SECONDS)
+    }
+
     private data class LegacyPlan(val transferId:String,val changedFiles:Set<String>)
 
     @Test fun `legacy strict runner wire format excludes newly added fields`() {

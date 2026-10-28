@@ -23,7 +23,7 @@ data class FolderDownloadRequest(val path:String,val source:String="current")
 data class FolderDownloadStatus(val token:String,val phase:String,val message:String,val files:Int=0,val completed:Int=0,val bytes:Long=0,val totalBytes:Long=0,val source:String="current",val copiedAt:String?=null)
 
 @Service
-class FolderDownloads(private val manager:ServerManager) {
+class FolderDownloads(private val manager:ServerManager,private val transfers:RunnerTransfer) {
     private data class Job(val instance:String,val file:Path,val filename:String,val status:FolderDownloadStatus,val created:Long=System.currentTimeMillis())
     private val remote=RemoteFiles(manager)
     private val directory=manager.root.resolve("folder-downloads").also {it.createDirectories()}
@@ -34,8 +34,7 @@ class FolderDownloads(private val manager:ServerManager) {
         require(source in setOf("current","snapshot")) {"다운로드 원본을 선택하세요"}
         val useRemote=source=="current" && remote.remote(id)
         val snapshotMarker=manager.root.resolve(id).resolve("latest-snapshot.json")
-        val snapshotStamp=if(source=="snapshot" && snapshotMarker.isRegularFile())snapshotMarker.readText() else null
-        val copiedAt=snapshotStamp?.let {runCatching {com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().readTree(it).path("completedAt").asText().takeIf(String::isNotBlank)}.getOrNull()}
+        var snapshotStamp:String?=null
         fun local(relative:String):Path {
             if(source!="snapshot")return manager.path(id,relative)
             val base=manager.originalServerDir(id)
@@ -49,9 +48,15 @@ class FolderDownloads(private val manager:ServerManager) {
         require(path.isEmpty() || PackFormat.relative(path)==path) {"폴더 경로를 확인하세요"}
         check(jobs.values.count {it.status.phase=="WORKING"}<8) {"진행 중인 압축 작업이 많습니다. 잠시 후 다시 시도하세요"}
         val token=UUID.randomUUID().toString();val name=(path.substringAfterLast('/').ifBlank {manager.instance(id).name}).replace(Regex("[^\\p{L}\\p{N}._ -]"),"_").take(100)+".zip"
-        val initial=FolderDownloadStatus(token,"WORKING","폴더 파일 목록을 확인합니다",source=source,copiedAt=copiedAt)
+        var initial=FolderDownloadStatus(token,"WORKING","폴더 파일 목록을 확인합니다",source=source)
         jobs[token]=Job(id,directory.resolve("$token.zip"),name,initial)
         executor.submit {try {
+          fun build() {
+            if(source=="snapshot") {
+                snapshotStamp=if(snapshotMarker.isRegularFile())snapshotMarker.readText() else null
+                val copiedAt=snapshotStamp?.let {runCatching {com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().readTree(it).path("completedAt").asText().takeIf(String::isNotBlank)}.getOrNull()}
+                initial=initial.copy(copiedAt=copiedAt)
+            }
             val entries=mutableListOf<FileEntry>();var total=0L
             fun list(relative:String,depth:Int=0) {
                 require(depth<64) {"폴더가 너무 깊습니다"}
@@ -89,6 +94,8 @@ class FolderDownloads(private val manager:ServerManager) {
             }
             if(source=="snapshot")check((if(snapshotMarker.isRegularFile())snapshotMarker.readText() else null)==snapshotStamp) {"압축 중 중앙 복사본이 갱신됐습니다. 다시 요청하세요"}
             jobs.computeIfPresent(token){_,job->job.copy(status=initial.copy(phase="READY",message="ZIP 준비 완료",files=files,completed=done,bytes=bytes,totalBytes=total))}
+          }
+          if(source=="snapshot")transfers.withSnapshotRead(id,::build) else build()
         } catch(e:Exception){jobs.computeIfPresent(token){_,job->job.file.deleteIfExists();job.copy(status=initial.copy(phase="FAILED",message=e.message ?: "폴더 압축 실패"))}}}
         return initial
     }

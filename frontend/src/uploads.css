@@ -2,3 +2,5 @@
 dialog.pack-modal.native-dialog{position:fixed;inset:0;margin:auto;max-height:90dvh;overflow:auto;width:min(760px,calc(100vw - 24px))}.file-actions small{font-size:10px}.pack-update-changes ul{margin:4px 0;padding-left:22px}
 
 .upload-progress.failed{border-color:#cb7e7e}.upload-progress.failed strong{color:#f2b4b4}
+
+dialog.pack-modal .modal-actions{position:sticky;bottom:0;background:#1d2b32;padding:12px 0 2px;z-index:1}

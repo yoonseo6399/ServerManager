@@ -19,7 +19,7 @@ class FolderDownloadsTest {
     }
     private fun fixture(action:(ServerManager,FolderDownloads,String,Path)->Unit) {
         val manager=ServerManager();val id=(manager.create(CreateRequest("download-${UUID.randomUUID()}","0.16.14",ServerSocket(0).use {it.localPort},512,loader="Fabric"))["config"] as Instance).id
-        val service=FolderDownloads(manager)
+        val service=FolderDownloads(manager,RunnerTransfer(manager,org.mockito.Mockito.mock(RunnerRegistry::class.java)))
         try{action(manager,service,id,manager.originalServerDir(id))}finally{service.close();manager.shutdown();manager.root.resolve(id).toFile().deleteRecursively()}
     }
     @Test fun `world directory downloads as zip preserving all bytes empty folders and originals without following links`()=fixture {manager,service,id,base->
