@@ -26,7 +26,7 @@ class FileTransferAccessTest {
         val downloads=mock(FolderDownloads::class.java);val updates=mock(PackUpdates::class.java)
         val status=FolderDownloadStatus("token","READY","ready")
         val archive=root.resolve("world.zip").also {it.writeText("zip fixture")}
-        `when`(downloads.download("server","token")).thenReturn(org.springframework.http.ResponseEntity.ok().body(org.springframework.core.io.FileSystemResource(archive)))
+        `when`(downloads.download("server","token")).thenReturn(org.springframework.http.ResponseEntity.ok().body(org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody {out->out.write(archive.readBytes())}))
         `when`(downloads.create("server","world","snapshot")).thenReturn(status);`when`(downloads.status("server","token")).thenReturn(status)
         AnnotationConfigWebApplicationContext().use {context->
             context.servletContext=MockServletContext();context.register(Web::class.java);context.addBeanFactoryPostProcessor {factory->factory.registerSingleton("manager",manager);factory.registerSingleton("downloads",downloads);factory.registerSingleton("updates",updates)};context.refresh()
@@ -36,7 +36,8 @@ class FileTransferAccessTest {
             val body="""{"path":"world","source":"snapshot"}"""
             mvc.perform(post("/api/instances/server/folder-downloads").with(user(viewer)).session(session()).with(csrf()).contentType("application/json").content(body)).andExpect(status().isOk).andExpect(jsonPath("$.phase").value("READY"))
             mvc.perform(get("/api/instances/server/folder-downloads/token").with(user(viewer)).session(session())).andExpect(status().isOk)
-            mvc.perform(get("/api/instances/server/folder-downloads/token/download").with(user(viewer)).session(session())).andExpect(status().isOk).andExpect(content().string("zip fixture"))
+            val streaming=mvc.perform(get("/api/instances/server/folder-downloads/token/download").with(user(viewer)).session(session())).andExpect(request().asyncStarted()).andReturn()
+            mvc.perform(asyncDispatch(streaming)).andExpect(status().isOk).andExpect(content().string("zip fixture"))
             mvc.perform(post("/api/instances/server/folder-downloads").with(user(viewer)).session(session()).contentType("application/json").content(body)).andExpect(status().isForbidden)
             mvc.perform(get("/api/instances/other/folder-downloads/token").with(user(viewer)).session(session())).andExpect(status().isForbidden)
             mvc.perform(post("/api/instances/server/pack-update").with(user(viewer)).session(session()).with(csrf()).contentType("application/json").content("""{"token":"x","mode":"replace"}""")).andExpect(status().isForbidden)

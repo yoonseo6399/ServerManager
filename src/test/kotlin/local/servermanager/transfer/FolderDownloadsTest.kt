@@ -17,6 +17,13 @@ class FolderDownloadsTest {
         while(service.status(id,token).phase=="WORKING" && System.nanoTime()<deadline)Thread.sleep(10)
         return service.status(id,token).also {assertEquals("READY",it.phase,it.message)}
     }
+    private fun zip(service:FolderDownloads,id:String,token:String):Path {
+        val target=temp.resolve("${UUID.randomUUID()}.zip")
+        target.outputStream().use {service.download(id,token).body!!.writeTo(it)}
+        val status=service.status(id,token)
+        assertEquals("COMPLETE",status.downloadState);assertEquals(target.fileSize(),status.downloadedBytes)
+        return target
+    }
     private fun fixture(action:(ServerManager,FolderDownloads,String,Path)->Unit) {
         val manager=ServerManager();val id=(manager.create(CreateRequest("download-${UUID.randomUUID()}","0.16.14",ServerSocket(0).use {it.localPort},512,loader="Fabric"))["config"] as Instance).id
         val service=FolderDownloads(manager,RunnerTransfer(manager,org.mockito.Mockito.mock(RunnerRegistry::class.java)))
@@ -30,7 +37,7 @@ class FolderDownloadsTest {
         val request=service.create(id,"world");val status=waitFor(service,id,request.token)
         assertEquals(2,status.files);assertEquals(status.totalBytes,status.bytes)
         val response=service.download(id,request.token);assertEquals("application/zip",response.headers.contentType.toString())
-        ZipFile(response.body!!.file).use {zip->
+        ZipFile(zip(service,id,request.token).toFile()).use {zip->
             assertNotNull(zip.getEntry("empty/"));assertNull(zip.getEntry("private"))
             assertContentEquals(world.resolve("level.dat").readBytes(),zip.getInputStream(zip.getEntry("level.dat")).readAllBytes())
             assertEquals("original region",zip.getInputStream(zip.getEntry("region/한글.mca")).reader().readText())
@@ -51,7 +58,7 @@ class FolderDownloadsTest {
             override fun start(instance:Instance)=error("unused");override fun stop(instance:Instance)=error("unused");override fun restart(instance:Instance)=error("unused");override fun command(instance:Instance,value:String)=error("unused")
         })
         val request=service.create(id,"world");waitFor(service,id,request.token)
-        ZipFile(service.download(id,request.token).body!!.file).use {zip->assertContentEquals(content,zip.getInputStream(zip.getEntry("region.mca")).readAllBytes())}
+        ZipFile(zip(service,id,request.token).toFile()).use {zip->assertContentEquals(content,zip.getInputStream(zip.getEntry("region.mca")).readAllBytes())}
         assertTrue(reads>=3);assertEquals("stale copy",central.resolve("world/region.mca").readText())
     }
     @Test fun `latest central snapshot downloads with runner offline and names its recorded completion time`()=fixture {manager,service,id,base->
@@ -60,6 +67,6 @@ class FolderDownloadsTest {
         manager.root.resolve(id).resolve("latest-snapshot.json").writeText("""{"completedAt":"2026-10-29T01:02:03Z"}""")
         val request=service.create(id,"world","snapshot");val status=waitFor(service,id,request.token)
         assertEquals("snapshot",status.source);assertEquals("2026-10-29T01:02:03Z",status.copiedAt)
-        ZipFile(service.download(id,request.token).body!!.file).use {zip->assertEquals("latest completed central copy",zip.getInputStream(zip.getEntry("level.dat")).reader().readText())}
+        ZipFile(zip(service,id,request.token).toFile()).use {zip->assertEquals("latest completed central copy",zip.getInputStream(zip.getEntry("level.dat")).reader().readText())}
     }
 }

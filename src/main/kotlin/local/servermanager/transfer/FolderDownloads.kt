@@ -1,7 +1,7 @@
 package local.servermanager
 
 import jakarta.annotation.PreDestroy
-import org.springframework.core.io.FileSystemResource
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
@@ -20,7 +20,7 @@ import java.util.zip.ZipOutputStream
 import kotlin.io.path.*
 
 data class FolderDownloadRequest(val path:String,val source:String="current")
-data class FolderDownloadStatus(val token:String,val phase:String,val message:String,val files:Int=0,val completed:Int=0,val bytes:Long=0,val totalBytes:Long=0,val source:String="current",val copiedAt:String?=null)
+data class FolderDownloadStatus(val token:String,val phase:String,val message:String,val files:Int=0,val completed:Int=0,val bytes:Long=0,val totalBytes:Long=0,val source:String="current",val copiedAt:String?=null,val zipBytes:Long=0,val downloadedBytes:Long=0,val downloadState:String="WAITING")
 
 @Service
 class FolderDownloads(private val manager:ServerManager,private val transfers:RunnerTransfer) {
@@ -93,7 +93,7 @@ class FolderDownloads(private val manager:ServerManager,private val transfers:Ru
                 }
             }
             if(source=="snapshot")check((if(snapshotMarker.isRegularFile())snapshotMarker.readText() else null)==snapshotStamp) {"압축 중 중앙 복사본이 갱신됐습니다. 다시 요청하세요"}
-            jobs.computeIfPresent(token){_,job->job.copy(status=initial.copy(phase="READY",message="ZIP 준비 완료",files=files,completed=done,bytes=bytes,totalBytes=total))}
+            jobs.computeIfPresent(token){_,job->job.copy(status=initial.copy(phase="READY",message="ZIP 준비 완료",files=files,completed=done,bytes=bytes,totalBytes=total,zipBytes=job.file.fileSize()))}
           }
           if(source=="snapshot")transfers.withSnapshotRead(id,::build) else build()
         } catch(e:Exception){jobs.computeIfPresent(token){_,job->job.file.deleteIfExists();job.copy(status=initial.copy(phase="FAILED",message=e.message ?: "폴더 압축 실패"))}}}
@@ -101,15 +101,25 @@ class FolderDownloads(private val manager:ServerManager,private val transfers:Ru
     }
     private fun job(id:String,token:String):Job {manager.instance(id);return jobs[token]?.also {require(it.instance==id) {"다른 서버의 압축 파일입니다"}} ?: error("압축 파일이 만료되었습니다. 다시 요청하세요")}
     fun status(id:String,token:String)=job(id,token).status
-    fun download(id:String,token:String):ResponseEntity<FileSystemResource> {
+    fun download(id:String,token:String):ResponseEntity<StreamingResponseBody> {
         val job=job(id,token);check(job.status.phase=="READY" && job.file.isRegularFile()) {"압축이 끝날 때까지 기다리세요"}
+        val body=StreamingResponseBody {out->
+            var sent=0L;var last=0L
+            jobs.computeIfPresent(token){_,current->current.copy(status=current.status.copy(downloadState="SENDING",downloadedBytes=0))}
+            try {
+                job.file.inputStream().buffered().use {input->val buffer=ByteArray(64*1024);while(true){val count=input.read(buffer);if(count<0)break;out.write(buffer,0,count);sent+=count
+                    val now=System.nanoTime();if(now-last>100_000_000){last=now;jobs.computeIfPresent(token){_,current->current.copy(status=current.status.copy(downloadedBytes=sent))}}
+                }}
+                out.flush();jobs.computeIfPresent(token){_,current->current.copy(status=current.status.copy(downloadState="COMPLETE",downloadedBytes=sent))}
+            } catch(e:Exception){jobs.computeIfPresent(token){_,current->current.copy(status=current.status.copy(downloadState="FAILED",downloadedBytes=sent,message="ZIP 전송이 끊겼습니다. 다운로드를 다시 시도하세요."))};throw e}
+        }
         return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/zip")).contentLength(job.file.fileSize())
             .header(HttpHeaders.CONTENT_DISPOSITION,org.springframework.http.ContentDisposition.attachment().filename(job.filename,Charsets.UTF_8).build().toString())
-            .cacheControl(org.springframework.http.CacheControl.noStore()).body(FileSystemResource(job.file))
+            .cacheControl(org.springframework.http.CacheControl.noStore()).body(body)
     }
     @Scheduled(fixedDelay=600000) fun cleanup() {
         val cutoff=System.currentTimeMillis()-3600000
-        jobs.entries.removeIf {(_,job)->if(job.status.phase!="WORKING" && job.created<cutoff){job.file.deleteIfExists();true}else false}
+        jobs.entries.removeIf {(_,job)->if(job.status.phase!="WORKING" && job.status.downloadState!="SENDING" && job.created<cutoff){job.file.deleteIfExists();true}else false}
         directory.listDirectoryEntries("*.zip").filter {file->jobs.values.none {it.file==file} && Files.getLastModifiedTime(file).toMillis()<cutoff}.forEach {it.deleteIfExists()}
     }
     @PreDestroy fun close(){executor.shutdownNow()}
@@ -119,5 +129,12 @@ class FolderDownloads(private val manager:ServerManager,private val transfers:Ru
 class FolderDownloadApi(private val downloads:FolderDownloads) {
     @PostMapping fun create(@PathVariable id:String,@RequestBody req:FolderDownloadRequest)=downloads.create(id,req.path,req.source)
     @GetMapping("/{token}") fun status(@PathVariable id:String,@PathVariable token:String)=downloads.status(id,token)
-    @GetMapping("/{token}/download") fun download(@PathVariable id:String,@PathVariable token:String)=downloads.download(id,token)
+    @GetMapping("/{token}/download") fun download(@PathVariable id:String,@PathVariable token:String,request:jakarta.servlet.http.HttpServletRequest):ResponseEntity<StreamingResponseBody> {
+        val response=downloads.download(id,token);val stream=response.body!!
+        return ResponseEntity.status(response.statusCode).headers(response.headers).body(StreamingResponseBody {out->
+            // Large worlds can take longer than the servlet's default async request timeout.
+            if(request.isAsyncStarted)request.asyncContext.timeout=0
+            stream.writeTo(out)
+        })
+    }
 }
