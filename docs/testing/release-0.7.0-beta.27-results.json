@@ -1,0 +1,135 @@
+{
+  "version": "0.7.0-beta.27",
+  "date": "2026-10-29",
+  "testedProductCommit": "d815c4006b375b93cf6dc281706131f984c58f57",
+  "backend": {
+    "classes": [
+      {
+        "name": "local.servermanager.DiscordMusicAccessTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.DiscordMusicChannelAccessTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.DiscordMusicChannelStoreTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.DiscordMusicIdleTimeoutTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.DiscordMusicLibraryStoreTest",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.DiscordMusicPanelTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.DiscordMusicPlaybackTest",
+        "tests": 24,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.FileTransferAccessTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.FolderDownloadsTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.ImportAndMetricsTest",
+        "tests": 12,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.ModManagementTest",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.PackUpdatesTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.RunnerTransferTest",
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "local.servermanager.RunnerWorkspaceTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ],
+    "totals": {
+      "tests": 92,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "fullSuiteRun": false
+  },
+  "browser": {
+    "passed": 14,
+    "failed": 0,
+    "files": [
+      "roles-sync.spec.ts",
+      "uploads-pack-update.spec.ts",
+      "force-disable.spec.ts",
+      "force-enable.spec.ts"
+    ],
+    "oldMenuFailuresResolved": 2
+  },
+  "frontendBuild": "passed",
+  "bootJar": "passed",
+  "runtimeSecurityTests": {
+    "passed": 11,
+    "failed": 0
+  },
+  "runnerSetup": "passed",
+  "packagingSigningBootstrapPublication": "pending CI",
+  "releaseAssetRedownloadHashCheck": false,
+  "productionRestart": false
+}
