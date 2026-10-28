@@ -75,7 +75,7 @@ internal object PackUpdateTransaction {
 }
 
 @Service
-class PackUpdates(private val manager:ServerManager,private val importer:MrpackImporter,private val catalog:ModrinthCatalog) {
+class PackUpdates(private val manager:ServerManager,private val importer:MrpackImporter,private val catalog:ModrinthCatalog,private val mods:ModManagement) {
     private val remote=RemoteFiles(manager)
     private val executor=Executors.newFixedThreadPool(2)
     private data class Prepared(val status:PackUpdateStatus,val dir:Path,val expected:Map<String,String> = emptyMap(),val runner:String?=null)
@@ -114,9 +114,11 @@ class PackUpdates(private val manager:ServerManager,private val importer:MrpackI
     @Synchronized fun preview(id:String,input:InputStream):PackUpdateStatus {
         val instance=manager.instance(id).copy()
         check(prepared[id]?.status?.phase !in setOf("PREPARING","APPLYING")) {"팩 업데이트 작업 중입니다"}
-        val original=importer.preview(input);val token=UUID.randomUUID().toString();val dir=directory.resolve(token);dir.createDirectories()
-        val plan=importer.copyPreviewArchive(original.token,dir.resolve("pack.mrpack"))
-        require(plan.loader==instance.loader && plan.minecraft==instance.minecraft) {"기존 서버와 같은 Minecraft·로더 종류의 팩만 업데이트할 수 있습니다"}
+        val token=UUID.randomUUID().toString();val dir=directory.resolve(token);dir.createDirectories()
+        val plan=try {
+            input.use {PackFormat.copyBounded(it,dir.resolve("pack.mrpack"),PackFormat.MAX_FILE)}
+            PackFormat.inspect(dir.resolve("pack.mrpack")).also {plan->require(plan.loader==instance.loader && plan.minecraft==instance.minecraft) {"기존 서버와 같은 Minecraft·로더 종류의 팩만 업데이트할 수 있습니다"}}
+        } catch(e:Exception){dir.toFile().deleteRecursively();throw e}
         val initial=PackUpdateStatus(token,"PREPARING","팩 파일과 서버 변경 내역을 확인합니다")
         prepared[id]=Prepared(initial,dir,runner=instance.runnerId)
         executor.submit {
@@ -170,7 +172,8 @@ class PackUpdates(private val manager:ServerManager,private val importer:MrpackI
                     } catch(e:Exception){if(e !is PackRollbackFailed)marker.deleteIfExists();throw e}
                     runtime.event("system","mrpack 업데이트 완료: ${plan.pack.name} ${plan.pack.version}. 월드·데이터 보존, config ${if(req.overwriteConfig)"덮어쓰기" else "보존"}.")
                 }
-                prepared[id]=job.copy(status=applying.copy(phase="COMPLETE",message="업데이트 완료 · 월드와 데이터 보존 · 원본 백업: ${job.dir.resolve("backup")}",completed=applying.total))
+                val refresh=runCatching {mods.refresh(id)}
+                prepared[id]=job.copy(status=applying.copy(phase="COMPLETE",message="업데이트 완료 · 월드와 데이터 보존 · 원본 백업: ${job.dir.resolve("backup")}${if(refresh.isFailure)" · 모드 목록 새로고침을 다시 실행하세요" else ""}",completed=applying.total))
             } catch(e:Exception){prepared[id]=job.copy(status=applying.copy(phase="FAILED",message=e.message ?: "업데이트 실패"))}
         }
         return applying

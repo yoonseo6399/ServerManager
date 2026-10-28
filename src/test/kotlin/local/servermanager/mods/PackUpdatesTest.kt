@@ -31,7 +31,7 @@ class PackUpdatesTest {
         val manager=ServerManager();val instance=manager.create(CreateRequest("pack-${UUID.randomUUID()}","0.16.14",ServerSocket(0).use {it.localPort},512,loader="Fabric"))["config"] as Instance
         val id=instance.id;val central=manager.originalServerDir(id);val base=if(isRemote)temp.resolve("runner-${UUID.randomUUID()}").createDirectories() else central
         val api=object:ModrinthLookup {override fun versionsFromHashes(hashes:List<String>)=emptyMap<String,RinVersion>();override fun projects(ids:Collection<String>)=emptyList<RinProject>()}
-        val catalog=ModrinthCatalog(api);val importer=MrpackImporter(manager,catalog);val updates=PackUpdates(manager,importer,catalog)
+        val catalog=ModrinthCatalog(api);val importer=MrpackImporter(manager,catalog);val mods=ModManagement(manager,catalog);val updates=PackUpdates(manager,importer,catalog,mods)
         if(isRemote) {
             manager.instance(id).runnerId="runner";val workspace=RunnerWorkspace(base,temp.resolve("history")){}
             manager.attachRemoteController(object:RemoteController {
@@ -43,7 +43,7 @@ class PackUpdatesTest {
         }
         write(base,"mods/old.jar","old mod");write(base,"mods/servermanager-sable-bridge-1.0.0.jar","managed bridge");write(base,"config/nested/test.json","original config")
         write(base,"world/level.dat","original world");write(base,"data/players.dat","original data");write(base,"server.properties","original settings")
-        try {action(manager,updates,id,base)} finally {updates.close();importer.shutdown();manager.runtime(id).state="STOPPED";manager.runtime(id).remotePid=null;manager.shutdown();manager.root.resolve(id).toFile().deleteRecursively()}
+        try {action(manager,updates,id,base)} finally {updates.close();mods.close();importer.shutdown();manager.runtime(id).state="STOPPED";manager.runtime(id).remotePid=null;manager.shutdown();manager.root.resolve(id).toFile().deleteRecursively()}
     }
     @Test fun `merge preserves existing mods config worlds and data and filters a private client jar`()=fixture {manager,updates,id,base->
         updates.preview(id,archive().inputStream());val ready=waitFor(updates,id,"READY")

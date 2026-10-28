@@ -43,7 +43,7 @@ test('pack update dialog previews all changes and sends explicit merge replace c
  await expect(modal.getByLabel('모드 업데이트 방식')).toBeVisible();await expect(modal).toContainText('월드·플레이어 데이터·server.properties는 보존');
  await modal.getByLabel('모드 업데이트 방식').selectOption('replace');await modal.getByLabel('config 파일 추가·덮어쓰기',{exact:false}).check();await modal.getByLabel('클라이언트 전용 모드 제외',{exact:false}).uncheck();
  await expect(modal).toContainText('삭제 모드 · 1개');await expect(modal).toContainText('mods/second.jar');expect(f.updates).toEqual([]);
- await modal.screenshot({path:'test-results/pack-update-desktop.png'});
+ await modal.evaluate(node=>node.scrollTop=0);await modal.screenshot({path:'test-results/pack-update-desktop.png'});
  await modal.getByRole('button',{name:'이 방법으로 업데이트'}).click();await expect.poll(()=>f.updates.length).toBe(1);
  expect(f.updates[0]).toEqual({token:'fixture',mode:'replace',overwriteConfig:true,excludeClientOnly:false});
 });

@@ -233,14 +233,6 @@ class MrpackImporter(private val manager: ServerManager,private val catalog: Mod
         }
         return manager.view(id)
     }
-    @Synchronized fun copyPreviewArchive(token:String,target:Path):PackPlan {
-        require(token.matches(Regex("[a-f0-9-]{36}"))) {"잘못된 팩 토큰입니다"}
-        val archive=imports.resolve(token).resolve("pack.mrpack")
-        require(archive.exists() && Instant.now().isBefore(Files.getLastModifiedTime(archive).toInstant().plusSeconds(86400))) {"팩 미리보기가 만료되었습니다"}
-        val plan=PackFormat.inspect(archive)
-        target.parent.createDirectories();Files.copy(archive,target)
-        return plan
-    }
     internal fun downloadVerified(file:PackFile,dest:Path)=download(file,dest)
     private fun download(file: PackFile,dest: Path) {
         var error: Exception?=null
