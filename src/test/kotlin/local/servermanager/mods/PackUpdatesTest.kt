@@ -33,7 +33,7 @@ class PackUpdatesTest {
         val api=object:ModrinthLookup {override fun versionsFromHashes(hashes:List<String>)=emptyMap<String,RinVersion>();override fun projects(ids:Collection<String>)=emptyList<RinProject>()}
         val catalog=ModrinthCatalog(api);val importer=MrpackImporter(manager,catalog);val updates=PackUpdates(manager,importer,catalog)
         if(isRemote) {
-            instance.runnerId="runner";val workspace=RunnerWorkspace(base,temp.resolve("history")){}
+            manager.instance(id).runnerId="runner";val workspace=RunnerWorkspace(base,temp.resolve("history")){}
             manager.attachRemoteController(object:RemoteController {
                 override fun supportsLiveFiles(instance:Instance)=true
                 override fun workspace(instance:Instance,request:WorkspaceRequest)=jacksonObjectMapper().valueToTree<com.fasterxml.jackson.databind.JsonNode>(workspace.execute(request))
@@ -57,6 +57,7 @@ class PackUpdatesTest {
     }
     @Test fun `replace updates the real runner includes opted-in client and config and backs up originals`()=fixture(true) {manager,updates,id,base->
         updates.preview(id,archive().inputStream());val ready=waitFor(updates,id,"READY")
+        assertEquals(listOf("mods/old.jar"),ready.plan!!.currentMods,"preview must read the runner, never the central copy")
         updates.apply(id,PackUpdateRequest(ready.token,"replace",overwriteConfig=true,excludeClientOnly=false));waitFor(updates,id,"COMPLETE")
         assertFalse(base.resolve("mods/old.jar").exists());assertTrue(base.resolve("mods/new.jar").exists());assertTrue(base.resolve("mods/client.jar").exists());assertTrue(base.resolve("mods/servermanager-sable-bridge-1.0.0.jar").exists())
         assertEquals("new config",base.resolve("config/nested/test.json").readText());assertEquals("original world",base.resolve("world/level.dat").readText());assertEquals("original data",base.resolve("data/players.dat").readText())
