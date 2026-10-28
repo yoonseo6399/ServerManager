@@ -6,7 +6,7 @@ let downloadServer:Server,completedDownloads=0;
 test.beforeAll(async()=>{downloadServer=createServer((_,response)=>{const body=Buffer.from('zip-fixture');response.writeHead(200,{'Content-Type':'application/zip','Content-Disposition':'attachment; filename=world.zip','Content-Length':body.length});response.end(body);completedDownloads++;});await new Promise<void>((resolve,reject)=>{downloadServer.once('error',reject);downloadServer.listen(8787,'127.0.0.1',resolve);});});
 test.afterAll(async()=>{await new Promise<void>(resolve=>downloadServer.close(()=>resolve()));});
 async function fixture(page:Page,viewer=false,failFirstUpload=false){
- const uploads:string[]=[],deletes:string[]=[],updates:any[]=[],exports:any[]=[];let pack:any=null;let downloadStartedAt=completedDownloads;
+ const uploads:string[]=[],deletes:string[]=[],updates:any[]=[],exports:any[]=[];let pack:any=null;let downloadStartedAt=completedDownloads,downloadPolls=0;
  let mods=['first.jar','second.jar'];
  const plan={pack:{name:'New Pack',version:'2',minecraft:'1.21.1',loader:'Fabric',loaderVersion:'0.16.14'},currentMods:['mods/first.jar','mods/second.jar'],incomingMods:['mods/first.jar','mods/new.jar','mods/client.jar'],configFiles:['config/test.json'],excludedClientMods:['mods/client.jar'],ignoredFiles:['world/level.dat'],warnings:[]};
  await page.route('**/api/**',async route=>{
@@ -22,8 +22,8 @@ async function fixture(page:Page,viewer=false,failFirstUpload=false){
   else if(p.endsWith('/pack-update/preview')){pack={token:'fixture',phase:'READY',message:'업데이트 방법을 선택하세요',plan,completed:0,total:0};body=pack;}
   else if(p.endsWith('/pack-update')&&method==='POST'){updates.push(route.request().postDataJSON());pack={...pack,phase:'COMPLETE',message:'업데이트 완료',completed:1,total:1};body=pack;}
   else if(p.endsWith('/pack-update'))body=pack;
-  else if(p.endsWith('/folder-downloads')&&method==='POST'){exports.push(route.request().postDataJSON());downloadStartedAt=completedDownloads;body={token:'zip',phase:'WORKING',message:'압축',completed:0,files:1,bytes:0,totalBytes:100};}
-  else if(p.endsWith('/folder-downloads/zip'))body={token:'zip',phase:'READY',message:'준비 완료',completed:1,files:1,bytes:100,totalBytes:100,copiedAt:'2026-10-29T01:02:03Z',zipBytes:100,downloadedBytes:completedDownloads>downloadStartedAt?100:0,downloadState:completedDownloads>downloadStartedAt?'COMPLETE':'WAITING'};
+  else if(p.endsWith('/folder-downloads')&&method==='POST'){exports.push(route.request().postDataJSON());downloadStartedAt=completedDownloads;downloadPolls=0;body={token:'zip',phase:'WORKING',message:'압축',completed:0,files:1,bytes:0,totalBytes:100};}
+  else if(p.endsWith('/folder-downloads/zip')){const finished=completedDownloads>downloadStartedAt,sending=finished&&downloadPolls++===0;body={token:'zip',phase:'READY',message:'준비 완료',completed:1,files:1,bytes:100,totalBytes:100,copiedAt:'2026-10-29T01:02:03Z',zipBytes:100,downloadedBytes:finished?(sending?50:100):0,downloadState:!finished?'WAITING':sending?'SENDING':'COMPLETE'};}
   else if(p.endsWith('/folder-downloads/zip/download'))return route.continue();
   else if(p.endsWith('/event-page'))body={events:[],hasMore:false};
   else if(p.endsWith('/log-files'))body=[];
@@ -58,8 +58,8 @@ test('file tab uploads show floating progress and viewer may download current or
  const f=await fixture(page,true);await page.goto('/');await page.getByRole('button',{name:'파일 관리자',exact:true}).click();
  await expect(page.getByRole('button',{name:'업로드',exact:true})).toBeDisabled();
  const snapshotDownload=page.waitForEvent('download');await page.getByRole('button',{name:'world 최근 복사본 ZIP 다운로드',exact:true}).click();await expect.poll(()=>f.exports.length).toBe(1);expect(f.exports[0]).toEqual({path:'world',source:'snapshot'});expect(await (await snapshotDownload).failure()).toBeNull();
- await expect(page.locator('.upload-progress')).toContainText('중앙 복사본');await expect(page.locator('.upload-progress')).toContainText('ZIP 전송 완료');
- const currentDownload=page.waitForEvent('download');await page.getByRole('button',{name:'world ZIP 다운로드',exact:true}).click();await expect.poll(()=>f.exports.length).toBe(2);expect(f.exports[1]).toEqual({path:'world',source:'current'});expect(await (await currentDownload).failure()).toBeNull();
+ await expect(page.locator('.upload-progress')).toContainText('MiB ZIP 전송 중');await expect(page.locator('.upload-progress')).toContainText('중앙 복사본');await expect(page.locator('.upload-progress')).toContainText('ZIP 전송 완료');
+ const currentDownload=page.waitForEvent('download');await page.getByRole('button',{name:'world ZIP 다운로드',exact:true}).click();await expect.poll(()=>f.exports.length).toBe(2);expect(f.exports[1]).toEqual({path:'world',source:'current'});expect(await (await currentDownload).failure()).toBeNull();await expect(page.locator('.upload-progress').last()).toContainText('ZIP 전송 완료');
  await page.setViewportSize({width:390,height:844});await expect(page.locator('.upload-progress-stack')).toBeInViewport({ratio:1});await page.screenshot({path:'frontend/test-results/file-export-mobile.png'});
 });
 test('file tab keeps drag drop uploads and displays byte progress in the floating bar',async({page})=>{
