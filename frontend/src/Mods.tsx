@@ -1,8 +1,10 @@
 import {useBackClose} from './nav';
 import {useEffect,useRef,useState} from 'react';
-import {Check,ChevronLeft,ChevronRight,FlaskConical,Pause,Play,Power,PowerOff,Search,ShieldCheck,Square,X} from 'lucide-react';
+import {Check,ChevronLeft,ChevronRight,FlaskConical,Pause,Play,Power,PowerOff,Search,ShieldCheck,Square,Trash2,Upload,X} from 'lucide-react';
 import {api,ApiError} from './http';
 import './mods.css';
+import {uploadBatch} from './UploadProgress';
+import {PackUpdateDialog} from './PackUpdateDialog';
 
 type Source={origin?:string;projectId:string;slug:string;title:string;description:string;iconUrl:string|null;versionNumber:string;environment:string;clientOnly:boolean;dependencies:{projectId:string|null;type:string;versionId?:string|null}[]};
 type Mod={filename:string;enabled:boolean;size:number;sha256:string;warning:string|null;source:Source|null};
@@ -18,7 +20,8 @@ export function ModsPanel({id,loader,state,canManage,onChanged,onConsole}:{id:st
  const [data,setData]=useState<Page|null>(null),[error,setError]=useState(''),[sending,setSending]=useState(false);
  const [query,setQuery]=useState(''),[filter,setFilter]=useState<Filter>('all'),[page,setPage]=useState(0),[suspects,setSuspects]=useState<Set<string>>(new Set()),[keep,setKeep]=useState<Set<string>>(new Set()),[selected,setSelected]=useState<Set<string>>(new Set());
  const [historyOpen,setHistoryOpen]=useState(false),[historyPage,setHistoryPage]=useState(0);
- const inventoryRevision=useRef<string|null>(null);
+ const inventoryRevision=useRef<string|null>(null),uploadInput=useRef<HTMLInputElement>(null),uploadLock=useRef(false);
+ const [drag,setDrag]=useState(false),[packUpdate,setPackUpdate]=useState(false);
  const [blockedToggle,setBlockedToggle]=useState<{revision:string;files:string[];enabled:boolean;reason:string}|null>(null);
  const [preview,setPreview]=useState<Preview|null>(null),[note,setNote]=useState(''),[logTrial,setLogTrial]=useState<number|null>(null);
  const alive=useRef(true),autoListed=useRef(false),canManageRef=useRef(canManage);canManageRef.current=canManage;const endpoint=`/instances/${id}/mods`;
@@ -44,14 +47,28 @@ export function ModsPanel({id,loader,state,canManage,onChanged,onConsole}:{id:st
  const change=(setter:typeof setSelected,value:string,checked:boolean)=>setter(old=>{const next=new Set(old);if(checked)next.add(value);else next.delete(value);return next;});
  const groups=(ids:string[])=>session?.plan.groups.filter(g=>ids.includes(g.id)).flatMap(g=>g.files)||[];
  const requestPreview=async(files:string[],enabled:boolean,ignoreDependencies=false)=>{if(sending)return;setSending(true);setError('');setBlockedToggle(null);try{setPreview(await api<Preview>(endpoint+'/toggle-preview','POST',{revision:inv?.revision,files,enabled,...(ignoreDependencies?{ignoreDependencies:true}:{})}));}catch(e){if(e instanceof ApiError&&e.code==='MOD_DEPENDENCY_BLOCKED'&&inv)setBlockedToggle({revision:inv.revision,files,enabled,reason:e.message});else setError((e as Error).message);}finally{setSending(false);}};
+ async function uploadMods(files:File[]){
+  if(locked||uploadLock.current||!files.length)return;
+  if(files.some(file=>!/^.+\.jar(?:\.disabled)?$/i.test(file.name))){setError('모드는 .jar 또는 .jar.disabled 파일만 업로드할 수 있습니다.');return;}
+  uploadLock.current=true;setSending(true);setError('');
+  try{const result=await uploadBatch('모드 업로드',files.map(file=>({file,relative:file.name})),()=>`/instances/${id}/upload?path=mods`);if(result.done){await api(endpoint+'/refresh','POST');await load();await onChanged();}if(result.errors.length)setError(result.errors.slice(0,3).join(' / '));}
+  catch(e){setError((e as Error).message);}finally{uploadLock.current=false;if(alive.current)setSending(false);}
+ }
+ async function deleteMod(filename:string,skipConfirm:boolean){
+  if(locked||uploadLock.current)return;if(!skipConfirm&&!confirm(`${filename}을 휴지통으로 이동할까요? 다음 서버 시작부터 반영되며 의존성이 있는 모드는 시작에 실패할 수 있습니다.`))return;
+  uploadLock.current=true;setSending(true);setError('');
+  try{await api(`/instances/${id}/files?path=${encodeURIComponent('mods/'+filename)}`,'DELETE');setSelected(old=>new Set([...old].filter(f=>f!==filename)));setSuspects(old=>new Set([...old].filter(f=>f!==filename)));setKeep(old=>new Set([...old].filter(f=>f!==filename)));await api(endpoint+'/refresh','POST');await load();await onChanged();}
+  catch(e){setError((e as Error).message);}finally{uploadLock.current=false;if(alive.current)setSending(false);}
+ }
  const verdict=(value:string,trial=current)=>{if(trial)action('/diagnostic/verdict',{trial:trial.number,verdict:value,note});};
  if(!['Fabric','Forge','NeoForge'].includes(loader))return <section className="settings-panel"><h2>모드 관리</h2><p>Fabric·Forge·NeoForge 서버에서 사용할 수 있습니다.</p></section>;
- return <section className="mods-panel">
+ return <section className="mods-panel" onDragOver={e=>{if(Array.from(e.dataTransfer.types).includes('Files')){e.preventDefault();if(!locked)setDrag(true);}}} onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node))setDrag(false);}} onDrop={e=>{e.preventDefault();setDrag(false);void uploadMods(Array.from(e.dataTransfer.files));}}>
   <div className="mods-heading"><div><h2>모드 관리와 문제 모드 찾기</h2><p>Modrinth에서 확인한 의존성으로 모드를 켜고 끄고, 의심 모드를 골라 문제 원인을 좁혀보세요.</p></div></div>
   {data?.remote?<p className="notice" role="status">실행기의 실제 mods 폴더를 관리합니다. 실행·전송 중에도 변경할 수 있으며 적용은 다음 서버 시작부터입니다.</p>:running&&<p className="notice" role="status">서버가 실행 중이라 모드를 볼 수만 있습니다. 변경하려면 서버를 정지하세요.</p>}
   {error&&<div className="alert error-banner" role="alert">{error}<button onClick={()=>setError('')}>닫기</button></div>}
   {blockedToggle&&<div className="mod-force-notice" role="alert"><span>{blockedToggle.enabled?'활성화':'비활성화'} 불가 · {blockedToggle.reason}</span><button className="mod-force" disabled={locked||blockedToggle.revision!==inv?.revision} onClick={()=>requestPreview(blockedToggle.files,blockedToggle.enabled,true)}>{blockedToggle.enabled?'의존성 무시하고 그냥 켜기':'의존성 무시하고 강제로 끄기'}</button><button onClick={()=>setBlockedToggle(null)}>닫기</button></div>}
   <div className="actions"><button disabled={working||!canManage} onClick={()=>action('/refresh')}>모드 목록 다시 불러오기</button></div>
+  <div className={'mod-drop'+(drag?' drag-active':'')}><span>모드 파일을 끌어 놓아 업로드 · 변경은 다음 서버 시작부터 적용</span><div className="actions"><button disabled={locked} onClick={()=>uploadInput.current?.click()}><Upload size={16}/> 모드 업로드</button><button disabled={!canManage} onClick={()=>setPackUpdate(true)}>mrpack으로 서버 업데이트</button></div><input hidden ref={uploadInput} aria-label="업로드할 모드 파일" type="file" multiple accept=".jar,.disabled" onChange={e=>{void uploadMods(Array.from(e.target.files||[]));e.target.value='';}}/></div>
   {data?.job&&<div className={'mod-job '+data.job.phase.toLowerCase()} role="status"><span className={working?'mod-spinner':''}/><span>{data.job.message}{data.job.files>0&&` · ${data.job.files.toLocaleString()}개 · ${(data.job.bytes/1048576).toFixed(1)} MiB`}</span></div>}
   {inv?.warnings.length? <details className="mod-warnings"><summary>검사 주의사항 {inv.warnings.length}개</summary>{inv.warnings.map((w,i)=><p key={i}>{w}</p>)}</details>:null}
   {session&&session.phase!=='FINISHED'&&<div className="mod-diagnostic">
@@ -111,6 +128,7 @@ export function ModsPanel({id,loader,state,canManage,onChanged,onConsole}:{id:st
       <small className="mod-file">{m.filename}</small>{blocked&&<small className="mod-warning">일반 비활성화 불가 · {blocked}</small>}{m.warning&&<small className="mod-warning">{m.warning}</small>}
      </div>
      <div className="mod-card-side">
+      <button className="mod-trash" aria-label={`${m.filename} 삭제`} title="휴지통으로 이동 · Shift를 누르면 확인 생략" disabled={locked} onClick={e=>void deleteMod(m.filename,e.shiftKey)}><Trash2 size={16}/></button>
       <button role="switch" aria-checked={m.enabled} aria-label={`${m.filename} ${m.enabled?'비활성화':'활성화'}`} className={'mod-switch'+(m.enabled?' on':'')} disabled={locked||m.enabled&&!!blocked} title={blocked||undefined} onClick={()=>requestPreview([m.filename],!m.enabled)}><span/></button>
       {m.enabled&&blocked&&<button className="mod-force" aria-label={`${m.filename} 강제로 끄기`} disabled={locked} onClick={()=>requestPreview([m.filename],false,true)}>강제로 끄기</button>}
       <label className={'mod-chip'+(suspects.has(m.filename)?' on':'')}><input aria-label={`${m.filename} 의심 모드`} type="checkbox" disabled={locked||!m.enabled||required} checked={suspects.has(m.filename)} onChange={e=>change(setSuspects,m.filename,e.target.checked)}/>의심</label>
@@ -121,6 +139,7 @@ export function ModsPanel({id,loader,state,canManage,onChanged,onConsole}:{id:st
    </div>
   </div>}
   {preview&&<div className="modal-backdrop"><div className="dialog mod-confirm" role="dialog" aria-modal="true" aria-label="모드 변경 확인"><h2>{preview.ignoreDependencies?`의존성을 무시하고 강제 ${preview.enabled?'활성화':'비활성화'}`:preview.enabled?'모드 활성화':'모드 비활성화'} 확인</h2><p>선택 {preview.selected.length}개{preview.affected.length>preview.selected.length?`와 의존 관계로 함께 바뀌는 ${preview.affected.length-preview.selected.length}개`:''}를 변경합니다. 원본 JAR는 삭제하지 않고 이름만 바꿉니다.</p><ul>{preview.affected.map(f=><li key={f}>{name(f)}{!preview.selected.includes(f)&&<span className="muted"> · {preview.enabled?'필수 의존성이라 함께 활성화':'선택한 모드'}</span>}</li>)}</ul>{!!preview.warnings?.length&&<div className="mod-warnings">{preview.warnings.map((w,i)=><p key={i}>{w}</p>)}</div>}<div className="actions"><button onClick={()=>setPreview(null)}>취소</button><button className={preview.ignoreDependencies?"mod-force":"primary"} disabled={locked} onClick={async()=>{await action('/toggle',{revision:preview.revision,files:preview.selected,enabled:preview.enabled,...(preview.ignoreDependencies?{ignoreDependencies:true}:{})});setPreview(null);setSelected(new Set());}}>{preview.ignoreDependencies?(preview.enabled?'위험을 확인하고 그냥 켜기':'위험을 확인하고 강제로 끄기'):'확인하고 변경'}</button></div></div></div>}
+  {packUpdate&&<PackUpdateDialog id={id} onClose={()=>{setPackUpdate(false);void api(endpoint+'/refresh','POST').then(()=>load()).catch(e=>setError(e.message));}} onChanged={onChanged}/>}
   {logTrial!==null&&<TrialLogs endpoint={endpoint} trial={logTrial} onClose={()=>setLogTrial(null)}/>}
  </section>;
 }

@@ -204,12 +204,16 @@ class ServerManager {
         tmp.writeText(mapper.writerWithDefaultPrettyPrinter().writeValueAsString(i))
         Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
     }
-    fun <T> withRemoteFiles(id:String,write:Boolean=true,action:()->T):T {
+    fun <T> withRemoteFiles(id:String,write:Boolean=true,stopped:Boolean=false,action:()->T):T {
         val r=runtime(id)
         synchronized(r){
             check(!r.remoteFileBusy && !r.modBusy && !r.recoveringFiles && !r.diagnosticActive) {"다른 파일 작업 또는 복구가 진행 중입니다"}
             check(r.state !in setOf("DELETED","INSTALLING","IMPORTING")) {"설치·가져오기가 끝난 뒤 변경하세요"}
             check(!folderImportMarker(id).exists()) {"최초 폴더 가져오기가 진행 중입니다"}
+            if(stopped) {
+                check(r.state in setOf("STOPPED","FAILED","NEW") && r.process?.isAlive!=true && r.remotePid==null) {"서버를 종료한 뒤 업데이트하세요"}
+                check(!r.cloudSyncActive && !backgroundPending(id)) {"파일 전송이 끝난 뒤 업데이트하세요"}
+            }
             r.remoteFileBusy=true
             if(write && instance(id).syncEnabled())atomicText(root.resolve(id).resolve("runner-edits.pending"),UUID.randomUUID().toString())
         }
@@ -518,6 +522,7 @@ class ServerManager {
             val edits=root.resolve(id).resolve("runner-edits.pending")
             if(edits.exists() && state.revisions[generation]==edits.readText())edits.deleteIfExists()
             atomicText(snapshotState(id),mapper.writeValueAsString(next))
+            atomicText(root.resolve(id).resolve("latest-snapshot.json"),mapper.writeValueAsString(mapOf("generation" to generation,"runner" to runner,"completedAt" to Instant.now().toString())))
             if(next.pending.isEmpty() && !root.resolve(id).resolve("remote-lease").exists() && !backgroundPending(id))signal(id,"snapshot","최신 종료 복사본 반영 완료")
             if(next.pending.isEmpty())r.fileTransfer=(r.fileTransfer ?: FolderImportProgress("COMPLETE")).copy(phase="COMPLETE",message="종료 복사본 전송 완료 · 현재 게임 실행 상태 유지")
         }

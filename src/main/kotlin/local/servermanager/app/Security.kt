@@ -124,7 +124,7 @@ class SecurityConfig {
             auth.requestMatchers("/api/instances/**").access { authentication,ctx->
                 val user=store.account(authentication.get().name)
                 val parts=ctx.request.requestURI.removePrefix("/api/instances").trim('/').split('/').filter { it.isNotEmpty() }
-                val write=ctx.request.method !in listOf("GET","HEAD")
+                val write=ctx.request.method !in listOf("GET","HEAD") && !(ctx.request.method=="POST" && parts.size==2 && parts[1]=="folder-downloads")
                 AuthorizationDecision(user?.enabled==true && (if(parts.isEmpty()) !write||user.managesAllServers() else if(parts.size==1 && ctx.request.method=="DELETE") user.managesAllServers() else store.allowed(user.id,parts[0],write)))
             }
             auth.requestMatchers("/api/mrpacks/**","/api/server-archives/**").access { authentication,_->AuthorizationDecision(store.account(authentication.get().name)?.let { it.managesAllServers() && it.enabled }==true) }
