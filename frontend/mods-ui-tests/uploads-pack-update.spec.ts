@@ -48,7 +48,7 @@ test('pack update dialog previews all changes and sends explicit merge replace c
  expect(f.updates[0]).toEqual({token:'fixture',mode:'replace',overwriteConfig:true,excludeClientOnly:false});
 });
 test('file tab uploads show floating progress and viewer may download current or latest central folder copy',async({page})=>{
- const f=await fixture(page,true);await page.goto('/');await page.getByRole('button',{name:'파일',exact:true}).click();
+ const f=await fixture(page,true);await page.goto('/');await page.getByRole('button',{name:'파일 관리자',exact:true}).click();
  await expect(page.getByRole('button',{name:'업로드',exact:true})).toBeDisabled();
  await page.getByRole('button',{name:'world 최근 복사본 ZIP 다운로드',exact:true}).click();await expect.poll(()=>f.exports.length).toBe(1);expect(f.exports[0]).toEqual({path:'world',source:'snapshot'});
  await expect(page.locator('.upload-progress')).toContainText('중앙 복사본');await expect(page.locator('.upload-progress')).toContainText('ZIP 준비 완료');
@@ -56,7 +56,7 @@ test('file tab uploads show floating progress and viewer may download current or
  await page.setViewportSize({width:390,height:844});await expect(page.locator('.upload-progress-stack')).toBeInViewport();await page.screenshot({path:'test-results/file-export-mobile.png'});
 });
 test('file tab keeps drag drop uploads and displays byte progress in the floating bar',async({page})=>{
- const f=await fixture(page);await page.goto('/');await page.getByRole('button',{name:'파일',exact:true}).click();
+ const f=await fixture(page);await page.goto('/');await page.getByRole('button',{name:'파일 관리자',exact:true}).click();
  await page.getByLabel('업로드할 파일',{exact:true}).setInputFiles({name:'notes.txt',mimeType:'text/plain',buffer:Buffer.from('original content')});
  await expect.poll(()=>f.uploads.length).toBe(1);await expect(page.locator('.upload-progress')).toContainText('완료 1/1');expect(f.uploads[0]).toBe('?path=');
 });
