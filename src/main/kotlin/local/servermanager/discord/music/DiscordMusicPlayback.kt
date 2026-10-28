@@ -35,7 +35,7 @@ data class MusicRequester(val name:String,val avatarUrl:String?,val userId:Strin
 data class MusicTrackView(val title:String,val url:String?,val identifier:String?,val duration:Long,val position:Long=0,val requester:MusicRequester?=null,val id:String?=null)
 data class MusicSnapshot(val current:MusicTrackView?,val queue:List<MusicTrackView>,val paused:Boolean,val channelId:String?,val error:String?,val autoplay:Boolean=true,val repeat:Boolean=false)
 
-/** At most a six percent weight bonus for popular songs; every eligible song remains possible. */
+/** Popularity adds at most 6%; intentional skips reduce weight down to 10% of its base. */
 internal fun chooseAutoplay(stats:List<MusicPlayStat>,lastUrl:String?,failed:Set<String>,random:Random=Random.Default):MusicSavedTrack? {
     val eligible=stats.filter {it.completions>0 && it.track.url !in failed}.let { all ->
         if(all.size>1) all.filter {it.track.url!=lastUrl} else all
@@ -43,7 +43,7 @@ internal fun chooseAutoplay(stats:List<MusicPlayStat>,lastUrl:String?,failed:Set
     if(eligible.isEmpty()) return null
     val maxCount=eligible.maxOf {it.completions}
     val denominator=ln(1.0+maxCount)
-    val weights=eligible.map {1.0+0.06*ln(1.0+it.completions)/denominator}
+    val weights=eligible.map {(1.0+0.06*ln(1.0+it.completions)/denominator)/(1.0+it.skips.coerceIn(0,9))}
     var draw=random.nextDouble()*weights.sum()
     eligible.forEachIndexed { index, stat ->
         draw-=weights[index]
@@ -174,11 +174,11 @@ class DiscordMusicPlayback internal constructor(private val manager: AudioPlayer
     private fun isYoutubeUrl(value:String):Boolean = runCatching { URI(value) }.getOrNull()?.let {
         it.scheme.equals("https",true) && it.host?.lowercase() in setOf("youtube.com","www.youtube.com","m.youtube.com","music.youtube.com","youtu.be") && it.userInfo==null && it.port==-1
     } ?: false
-    private fun requestAutoplay(session:Session) {
+    private fun requestAutoplay(session:Session,excludedUrl:String?=null):Boolean {
         val guildId=session.guild.id
-        if(!library.autoplayEnabled(guildId) || sessions[guildId]!==session) return
+        if(!library.autoplayEnabled(guildId) || sessions[guildId]!==session) return false
         val candidate=chooseAutoplay(runCatching { library.stats(guildId) }.getOrDefault(emptyList())
-            .filter { isYoutubeUrl(it.track.url) },session.autoplayLastUrl,session.failedAutoUrls) ?: return
+            .filter { isYoutubeUrl(it.track.url) && it.track.url!=excludedUrl },session.autoplayLastUrl,session.failedAutoUrls) ?: return false
         session.autoplayLastUrl=candidate.url
         val generation=session.generation
         val revision=session.autoplayRevision
@@ -194,6 +194,7 @@ class DiscordMusicPlayback internal constructor(private val manager: AudioPlayer
             override fun noMatches() { synchronized(session) {if(sessions[guildId]===session && generation==session.generation && revision==session.autoplayRevision){session.failedAutoUrls.add(candidate.url);session.lastError="자동재생 곡을 찾지 못했습니다.";changed(guildId)}} }
             override fun loadFailed(exception:FriendlyException) { synchronized(session) {if(sessions[guildId]===session && generation==session.generation && revision==session.autoplayRevision){session.failedAutoUrls.add(candidate.url);session.lastError="자동재생 곡을 불러오지 못했습니다.";changed(guildId)}} }
         })
+        return true
     }
     fun snapshot(guildId:String):MusicSnapshot = sessions[guildId]?.let { session -> synchronized(session) {
         MusicSnapshot(session.player.playingTrack?.view(),session.pending.map { it.view() },session.player.isPaused,session.channelId,session.lastError,library.autoplayEnabled(guildId),session.repeat)
@@ -299,9 +300,21 @@ class DiscordMusicPlayback internal constructor(private val manager: AudioPlayer
     } } ?: "재생 중인 곡이 없습니다."
 
     fun skip(guildId: String): String = sessions[guildId]?.let { session -> synchronized(session) {
-        if (session.player.playingTrack == null) "재생 중인 곡이 없습니다." else {
+        val current=session.player.playingTrack
+        if (current == null) "재생 중인 곡이 없습니다." else {
+            val skipped=safeSaved(current)
+            skipped?.let { track ->
+                runCatching {library.recordSkip(guildId,track)}.onFailure {
+                    org.slf4j.LoggerFactory.getLogger(DiscordMusicPlayback::class.java).warn("Music skip preference could not be saved: {}",it.toString())
+                }
+                session.autoplayLastUrl=track.url
+            }
+            session.autoplayRevision++
             session.advance()
-            "다음 곡으로 넘겼습니다."
+            if(session.player.playingTrack!=null) "다음 곡으로 넘겼습니다."
+            else if(requestAutoplay(session,skipped?.url)) "다음 자동재생 곡을 불러옵니다."
+            else if(library.autoplayEnabled(guildId)) "곡을 건너뛰었습니다. 다른 자동재생 후보가 없습니다."
+            else "다음 곡으로 넘겼습니다."
         }
     } } ?: "재생 중인 곡이 없습니다."
 

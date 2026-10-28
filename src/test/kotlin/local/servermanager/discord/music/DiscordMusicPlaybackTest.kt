@@ -331,6 +331,89 @@ class DiscordMusicPlaybackTest {
         playback.close()
     }
 
+    @Test fun `skipping autoplay with an empty queue loads another song and lowers skipped preference once`() {
+        val rig=Rig();val library=DiscordMusicLibraryStore()
+        val playback=DiscordMusicPlayback(rig.manager,library,monitorEmptyChannels=false)
+        val (guild,channel)=rig.guild("12345678901234567")
+        val manual=rig.track("Manual");val automatic=rig.track("Automatic")
+        val automaticSaved=MusicSavedTrack("Automatic","https://www.youtube.com/watch?v=Automaticxx")
+        library.recordCompletion(guild.id,automaticSaved)
+        try {
+            rig.load(playback,guild,channel,"manual") {it.trackLoaded(manual)}
+            rig.listeners.single().onTrackEnd(rig.players.single(),manual,AudioTrackEndReason.FINISHED)
+            assertEquals(automaticSaved.url,rig.requests.last().first)
+            rig.requests.last().second.trackLoaded(automatic)
+            playback.repeat(guild.id,true) // an explicit skip must also bypass repeat
+            assertContains(playback.skip(guild.id),"다음 자동재생")
+            assertEquals(3,rig.requests.size)
+            assertEquals("https://www.youtube.com/watch?v=Manualxxxxx",rig.requests.last().first)
+            rig.listeners.single().onTrackEnd(rig.players.single(),automatic,AudioTrackEndReason.STOPPED)
+            rig.listeners.single().onTrackEnd(rig.players.single(),automatic,AudioTrackEndReason.FINISHED)
+            assertEquals(3,rig.requests.size,"late end events must not submit a second load")
+            assertEquals(1,library.stats(guild.id).first {it.track==automaticSaved}.skips)
+            assertEquals(1,library.stats(guild.id).first {it.track==automaticSaved}.completions)
+            rig.requests.last().second.trackLoaded(manual)
+            assertEquals("Manual",playback.snapshot(guild.id).current?.title)
+        } finally {playback.close()}
+    }
+
+    @Test fun `skip gives the queue priority and does not restart autoplay when disabled`() {
+        for(autoplay in listOf(true,false)) {
+            val rig=Rig();val library=DiscordMusicLibraryStore()
+            val playback=DiscordMusicPlayback(rig.manager,library,monitorEmptyChannels=false)
+            val (guild,channel)=rig.guild("12345678901234567")
+            library.recordCompletion(guild.id,MusicSavedTrack("Saved","https://www.youtube.com/watch?v=Savedxxxxxx"))
+            try {
+                playback.autoplay(guild.id,autoplay)
+                rig.load(playback,guild,channel,"one") {it.trackLoaded(rig.track("One"))}
+                rig.load(playback,guild,channel,"two") {it.trackLoaded(rig.track("Two"))}
+                playback.skip(guild.id)
+                assertEquals("Two",playback.snapshot(guild.id).current?.title)
+                assertEquals(2,rig.requests.size,"queued songs must take priority over recommendations")
+                if(!autoplay) {
+                    playback.skip(guild.id)
+                    assertNull(playback.snapshot(guild.id).current)
+                    assertEquals(2,rig.requests.size)
+                }
+            } finally {playback.close()}
+        }
+    }
+
+    @Test fun `skip does not immediately replay its only candidate and stop cancels a pending replacement`() {
+        val rig=Rig();val library=DiscordMusicLibraryStore()
+        val playback=DiscordMusicPlayback(rig.manager,library,monitorEmptyChannels=false)
+        val (guild,channel)=rig.guild("12345678901234567")
+        val one=rig.track("One")
+        library.recordCompletion(guild.id,MusicSavedTrack("One","https://www.youtube.com/watch?v=Onexxxxxxxx"))
+        try {
+            rig.load(playback,guild,channel,"one") {it.trackLoaded(one)}
+            assertContains(playback.skip(guild.id),"후보가 없습니다")
+            assertNull(playback.snapshot(guild.id).current)
+            assertEquals(1,rig.requests.size)
+            library.recordCompletion(guild.id,MusicSavedTrack("Two","https://www.youtube.com/watch?v=Twoxxxxxxxx"))
+            rig.load(playback,guild,channel,"one") {it.trackLoaded(rig.track("One"))}
+            playback.skip(guild.id)
+            assertEquals(3,rig.requests.size)
+            playback.stop(guild.id)
+            rig.requests.last().second.trackLoaded(rig.track("Two"))
+            assertNull(playback.snapshot(guild.id).current,"stop must invalidate the skip replacement")
+        } finally {playback.close()}
+    }
+
+    @Test fun `skipped songs remain eligible with a lower bounded selection weight`() {
+        val a=MusicSavedTrack("A","https://www.youtube.com/watch?v=aaaaaaaaaaa")
+        val b=MusicSavedTrack("B","https://www.youtube.com/watch?v=bbbbbbbbbbb")
+        fun picks(skips:Int):Int {
+            val stats=listOf(MusicPlayStat(a,1,1,skips),MusicPlayStat(b,1,1))
+            val random=Random(42)
+            return (1..10_000).count {chooseAutoplay(stats,null,emptySet(),random)==a}
+        }
+        assertTrue(picks(0) in 4_800..5_200)
+        assertTrue(picks(1) in 3_100..3_600,"one skip should halve the song's weight")
+        assertTrue(picks(9) in 750..1_050,"repeated skips retain a nonzero ten percent weight")
+        assertEquals(picks(9),picks(1_000_000),"the weight penalty has a floor")
+    }
+
     @Test fun `stop invalidates an outstanding autoplay result`() {
         val rig=Rig();val playback=DiscordMusicPlayback(rig.manager,DiscordMusicLibraryStore())
         val (guild,channel)=rig.guild("12345678901234567")

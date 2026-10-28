@@ -52,6 +52,31 @@ class DiscordMusicLibraryStoreTest {
         assertTrue(store.stats(guildB).isEmpty())
     }
 
+    @Test fun `skip preferences persist with canonical URLs and survive later completions without crossing guilds`() {
+        val path=temp.resolve("library")
+        val store=DiscordMusicLibraryStore(path)
+        store.recordCompletion(guildA,track())
+        store.recordCompletion(guildB,track())
+        store.recordSkip(guildA,MusicSavedTrack("Song","https://youtu.be/dQw4w9WgXcQ"))
+        store.recordSkip(guildA,track())
+        store.recordCompletion(guildA,track())
+        val reloaded=DiscordMusicLibraryStore(path)
+        assertEquals(2,reloaded.stats(guildA).single().skips)
+        assertEquals(2,reloaded.stats(guildA).single().completions)
+        assertEquals(0,reloaded.stats(guildB).single().skips)
+        reloaded.recordSkip(guildA,track("jNQXAC9IVRw","Unfinished"))
+        assertEquals(1,reloaded.stats(guildA).size,"skipping an unfinished song must not make it eligible")
+    }
+
+    @Test fun `libraries saved before skip preferences load with zero penalty`() {
+        val path=temp.resolve("legacy");Files.createDirectories(path)
+        path.resolve("music-library.json").writeText("""{"$guildA":{"stats":[{"track":{"title":"Song","url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ"},"completions":3,"lastCompletedAt":123}]}}""")
+        val store=DiscordMusicLibraryStore(path)
+        assertEquals(0,store.stats(guildA).single().skips)
+        store.recordSkip(guildA,track())
+        assertEquals(1,DiscordMusicLibraryStore(path).stats(guildA).single().skips)
+    }
+
     @Test fun `playlist bounds and unsafe URLs are rejected without altering saved data`() {
         val store=DiscordMusicLibraryStore()
         store.save(guildA,"Good",listOf(track()),owner)
