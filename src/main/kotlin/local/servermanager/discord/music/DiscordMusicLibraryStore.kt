@@ -15,7 +15,7 @@ import kotlin.io.path.writeBytes
 
 data class MusicSavedTrack(val title:String,val url:String)
 data class MusicSavedPlaylist(val name:String,val tracks:List<MusicSavedTrack>,val ownerId:String)
-data class MusicPlayStat(val track:MusicSavedTrack,val completions:Int,val lastCompletedAt:Long)
+data class MusicPlayStat(val track:MusicSavedTrack,val completions:Int,val lastCompletedAt:Long,val skips:Int=0)
 
 private data class MusicLibraryGuild(
     val autoplay:Boolean=true,
@@ -41,7 +41,7 @@ class DiscordMusicLibraryStore(private val directory:Path?=null) {
             require(data.playlists.size<=50 && data.stats.size<=1000) { "음악 라이브러리 제한을 초과했습니다." }
             require(data.playlists.map { it.name }.toSet().size==data.playlists.size) { "중복된 재생목록입니다." }
             data.playlists.forEach(::validatePlaylist)
-            data.stats.forEach { validateTrack(it.track);require(it.completions in 1..1_000_000 && it.lastCompletedAt>=0) }
+            data.stats.forEach { validateTrack(it.track);require(it.completions in 1..1_000_000 && it.lastCompletedAt>=0 && it.skips in 0..1_000_000) }
         }
     }
 
@@ -53,11 +53,23 @@ class DiscordMusicLibraryStore(private val directory:Path?=null) {
         val old=guilds[guildId] ?: MusicLibraryGuild()
         val stats=old.stats.toMutableList()
         val index=stats.indexOfFirst { it.track.url==normalized.url }
-        val count=if(index>=0) stats.removeAt(index).completions.coerceAtMost(999_999)+1 else 1
-        stats.add(0,MusicPlayStat(normalized,count,now))
+        val previous=if(index>=0) stats.removeAt(index) else null
+        val count=previous?.completions?.coerceAtMost(999_999)?.plus(1) ?: 1
+        stats.add(0,MusicPlayStat(normalized,count,now,previous?.skips ?: 0))
         // Retain the most recently completed distinct videos when the bound is reached.
         val bounded=stats.sortedByDescending { it.lastCompletedAt }.take(1000)
         persistChange(guildId,old.copy(stats=bounded))
+    }
+
+    /** Skipping must not make a song eligible: only manually completed songs are recommended. */
+    @Synchronized fun recordSkip(guildId:String,track:MusicSavedTrack) {
+        require(snowflake(guildId)) { "Discord 서버 ID를 확인하세요." }
+        validateTrack(track)
+        val url="https://www.youtube.com/watch?v=${videoId(track.url)}"
+        val old=guilds[guildId] ?: return
+        val previous=old.stats.firstOrNull {it.track.url==url} ?: return
+        val updated=previous.copy(skips=previous.skips.coerceAtMost(999_999)+1)
+        persistChange(guildId,old.copy(stats=old.stats.map {if(it.track.url==url) updated else it}))
     }
 
     @Synchronized fun stats(guildId:String):List<MusicPlayStat> {
