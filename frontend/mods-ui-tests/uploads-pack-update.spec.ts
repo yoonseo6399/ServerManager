@@ -1,10 +1,12 @@
 import {test,expect,type Page} from '@playwright/test';
 import {createServer,type Server} from 'node:http';
-let downloadServer:Server,downloadOrigin='';
-test.beforeAll(async()=>{downloadServer=createServer((_,response)=>{const body=Buffer.from('zip-fixture');response.writeHead(200,{'Content-Type':'application/zip','Content-Disposition':'attachment; filename=world.zip','Content-Length':body.length});response.end(body);});await new Promise<void>(resolve=>downloadServer.listen(0,'127.0.0.1',resolve));downloadOrigin='http://127.0.0.1:'+(downloadServer.address() as {port:number}).port;});
+let downloadServer:Server,completedDownloads=0;
+// Use Vite's existing development proxy; do not route-fulfil Chromium attachment responses.
+// If a real backend owns 8787, fail before sending requests rather than contacting it.
+test.beforeAll(async()=>{downloadServer=createServer((_,response)=>{const body=Buffer.from('zip-fixture');response.writeHead(200,{'Content-Type':'application/zip','Content-Disposition':'attachment; filename=world.zip','Content-Length':body.length});response.end(body);completedDownloads++;});await new Promise<void>((resolve,reject)=>{downloadServer.once('error',reject);downloadServer.listen(8787,'127.0.0.1',resolve);});});
 test.afterAll(async()=>{await new Promise<void>(resolve=>downloadServer.close(()=>resolve()));});
 async function fixture(page:Page,viewer=false,failFirstUpload=false){
- const uploads:string[]=[],deletes:string[]=[],updates:any[]=[],exports:any[]=[];let pack:any=null;let downloadFinished=false;
+ const uploads:string[]=[],deletes:string[]=[],updates:any[]=[],exports:any[]=[];let pack:any=null;let downloadStartedAt=completedDownloads;
  let mods=['first.jar','second.jar'];
  const plan={pack:{name:'New Pack',version:'2',minecraft:'1.21.1',loader:'Fabric',loaderVersion:'0.16.14'},currentMods:['mods/first.jar','mods/second.jar'],incomingMods:['mods/first.jar','mods/new.jar','mods/client.jar'],configFiles:['config/test.json'],excludedClientMods:['mods/client.jar'],ignoredFiles:['world/level.dat'],warnings:[]};
  await page.route('**/api/**',async route=>{
@@ -20,9 +22,9 @@ async function fixture(page:Page,viewer=false,failFirstUpload=false){
   else if(p.endsWith('/pack-update/preview')){pack={token:'fixture',phase:'READY',message:'업데이트 방법을 선택하세요',plan,completed:0,total:0};body=pack;}
   else if(p.endsWith('/pack-update')&&method==='POST'){updates.push(route.request().postDataJSON());pack={...pack,phase:'COMPLETE',message:'업데이트 완료',completed:1,total:1};body=pack;}
   else if(p.endsWith('/pack-update'))body=pack;
-  else if(p.endsWith('/folder-downloads')&&method==='POST'){exports.push(route.request().postDataJSON());downloadFinished=false;body={token:'zip',phase:'WORKING',message:'압축',completed:0,files:1,bytes:0,totalBytes:100};}
-  else if(p.endsWith('/folder-downloads/zip'))body={token:'zip',phase:'READY',message:'준비 완료',completed:1,files:1,bytes:100,totalBytes:100,copiedAt:'2026-10-29T01:02:03Z',zipBytes:100,downloadedBytes:downloadFinished?100:0,downloadState:downloadFinished?'COMPLETE':'WAITING'};
-  else if(p.endsWith('/folder-downloads/zip/download')){downloadFinished=true;return route.fulfill({status:302,headers:{location:downloadOrigin+'/world.zip'}});}
+  else if(p.endsWith('/folder-downloads')&&method==='POST'){exports.push(route.request().postDataJSON());downloadStartedAt=completedDownloads;body={token:'zip',phase:'WORKING',message:'압축',completed:0,files:1,bytes:0,totalBytes:100};}
+  else if(p.endsWith('/folder-downloads/zip'))body={token:'zip',phase:'READY',message:'준비 완료',completed:1,files:1,bytes:100,totalBytes:100,copiedAt:'2026-10-29T01:02:03Z',zipBytes:100,downloadedBytes:completedDownloads>downloadStartedAt?100:0,downloadState:completedDownloads>downloadStartedAt?'COMPLETE':'WAITING'};
+  else if(p.endsWith('/folder-downloads/zip/download'))return route.continue();
   else if(p.endsWith('/event-page'))body={events:[],hasMore:false};
   else if(p.endsWith('/log-files'))body=[];
   else if(p.endsWith('/log-display'))body={revision:0,enabled:true,rules:[],presets:[]};
