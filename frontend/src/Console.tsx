@@ -35,14 +35,17 @@ export const ConsolePanel=memo(function ConsolePanel(props:{id:string;enabled:bo
 });
 function ConsoleView({id,enabled,hint,source,filters}:{id:string;enabled:boolean;hint:string;source:string;filters:FilterConfig}){
  const path=source||'console.log',live=!source;
- const [filter,setFilter]=useState(''),[errorsOnly,setErrorsOnly]=useState(false),[follow,setFollow]=useState(live),[loading,setLoading]=useState(false),[pending,setPending]=useState(true),[error,setError]=useState(''),[top,setTop]=useState(0),[height,setHeight]=useState(420),[detail,setDetail]=useState<ParsedLog|null>(null);
+ const [filter,setFilter]=useState(''),[errorsOnly,setErrorsOnly]=useState(false),[follow,updateFollow]=useState(live),[loading,setLoading]=useState(false),[pending,setPending]=useState(true),[error,setError]=useState(''),[top,setTop]=useState(0),[height,setHeight]=useState(420),[detail,setDetail]=useState<ParsedLog|null>(null);
  const [total,setTotal]=useState(0),[tick,setTick]=useState(0),[matchEnd,setMatchEnd]=useState<number|null>(null);
  useBackClose(!!detail,()=>setDetail(null),'log-detail');
  const {parse,progress}=useLogParser(),openDetail=useCallback((event:ParsedLog)=>setDetail(event),[]);
  const viewport=useRef<HTMLDivElement>(null),alive=useRef(true),followRef=useRef(live),busy=useRef(false),visibleRows=useRef(0);
  // Whole-file mode keeps a sparse cache keyed by line number; search mode keeps the matches found so far, in order.
  const cache=useRef(new Map<number,ParsedLog>()),requested=useRef(new Set<number>()),matches=useRef<ParsedLog[]>([]),scan=useRef<{from:number|null;generation:number}>({from:1,generation:0});
- const query=useDeferredValue(filter.trim());followRef.current=follow;
+ const query=useDeferredValue(filter.trim());
+ const lastTop=useRef(0);
+ function setFollow(value:boolean){followRef.current=value;updateFollow(value);}
+ function bottom(){setFollow(true);const v=viewport.current;if(v){v.scrollTop=v.scrollHeight;lastTop.current=v.scrollTop;setTop(v.scrollTop);}}
  const appliedFilters=useDeferredValue(filters);
  const searching=!!query||errorsOnly||filters.enabled;
  const url=(from:number,limit:number,q?:string)=>`/instances/${id}/log-window?path=${encodeURIComponent(path)}&from=${from}&limit=${limit}${q?'&q='+encodeURIComponent(q):''}`;
@@ -116,14 +119,14 @@ function ConsoleView({id,enabled,hint,source,filters}:{id:string;enabled:boolean
  useEffect(()=>{if(!viewport.current)return;const observer=new ResizeObserver(entries=>setHeight(entries[0].contentRect.height));observer.observe(viewport.current);return()=>observer.disconnect();},[]);
  const rows=useMemo<ParsedLog[]|null>(()=>searching?matches.current.filter(e=>(!errorsOnly||['warn','error'].includes(e.kind)||['WARN','ERROR','FATAL'].includes(e.level||'')||!!e.frame)&&!hiddenByFilter(e,appliedFilters)):null,[tick,searching,errorsOnly,appliedFilters]);
  const count=rows?rows.length:total;visibleRows.current=count;
- useLayoutEffect(()=>{const v=viewport.current;if(!v)return;if(followRef.current)v.scrollTop=v.scrollHeight;setTop(v.scrollTop);},[count]);
+ useLayoutEffect(()=>{const v=viewport.current;if(!v)return;if(followRef.current)v.scrollTop=v.scrollHeight;lastTop.current=v.scrollTop;setTop(v.scrollTop);},[count,follow]);
  const start=Math.max(0,Math.floor(top/ROW)-8),end=Math.min(count,Math.ceil((top+height)/ROW)+8);
  const shown=[];for(let n=start;n<end;n++){const event=rows?rows[n]:cache.current.get(n+1);shown.push(event?<LogRow key={event.seq} event={event} top={n*ROW} onOpen={openDetail}/>:<div key={'gap'+n} className="log virtual-log output" style={{position:'absolute',top:n*ROW,height:ROW,width:'100%'}}><span className="lineno">{n+1}</span><span className="log-text muted">…</span></div>);}
  const lastMatch=rows?.at(-1)?.seq??0;
- return <section className="console-panel"><div className="toolbar"><div className="panel-title"><span className="green-dot"/>{source?'로그 파일':'실시간 콘솔'} <span className="muted" data-testid="log-count">{searching?`일치 ${count.toLocaleString()}줄${matchEnd===null?' · 검색 중':' · 전체 검색 완료'} · 마지막 일치 #${lastMatch.toLocaleString()} · 전체 ${total.toLocaleString()}줄`:`현재 ${total.toLocaleString()}줄 · 끝 줄 #${total.toLocaleString()}`}</span></div><div className="actions"><input aria-label="로그 검색" placeholder="전체 로그에서 검색…" value={filter} onChange={e=>{setFilter(e.target.value);setFollow(false);setTop(0);if(viewport.current)viewport.current.scrollTop=0;}}/><label><input type="checkbox" checked={errorsOnly} onChange={e=>setErrorsOnly(e.target.checked)}/>오류·경고</label><label><input type="checkbox" checked={follow} onChange={e=>{setFollow(e.target.checked);if(e.target.checked&&viewport.current)viewport.current.scrollTop=viewport.current.scrollHeight;}}/>자동 스크롤</label></div></div>
+ return <section className="console-panel"><div className="toolbar"><div className="panel-title"><span className="green-dot"/>{source?'로그 파일':'실시간 콘솔'} <span className="muted" data-testid="log-count">{searching?`일치 ${count.toLocaleString()}줄${matchEnd===null?' · 검색 중':' · 전체 검색 완료'} · 마지막 일치 #${lastMatch.toLocaleString()} · 전체 ${total.toLocaleString()}줄`:`현재 ${total.toLocaleString()}줄 · 끝 줄 #${total.toLocaleString()}`}</span></div><div className="actions"><button onClick={bottom}>아래로 이동</button><input aria-label="로그 검색" placeholder="전체 로그에서 검색…" value={filter} onChange={e=>{setFilter(e.target.value);setFollow(false);setTop(0);if(viewport.current)viewport.current.scrollTop=0;}}/><label><input type="checkbox" checked={errorsOnly} onChange={e=>setErrorsOnly(e.target.checked)}/>오류·경고</label><label><input type="checkbox" checked={follow} onChange={e=>{if(e.target.checked)bottom();else setFollow(false);}}/>자동 스크롤</label></div></div>
  {error&&<div role="alert" className="alert error-banner">{error}</div>}<div className="log-history"><span>검색은 서버에서 파일 전체를 대상으로 하며 스크롤하면 이어서 불러옵니다 · 표시되는 번호는 원문 줄 번호입니다 · 프레임을 누르면 Mixin 상세 보기</span></div>
  <div className="log-viewport-shell">{loading&&<div className="log-loading" role="status" aria-live="polite"><span className="log-spinner"/>{progress||'로그 파싱 중…'}<small>긴 로그도 필요한 부분만 불러옵니다.</small></div>}
- <div className="logs virtual-logs" aria-busy={pending||loading} ref={viewport} data-testid="log-viewport" onScroll={e=>{const v=e.currentTarget;setTop(v.scrollTop);if(v.scrollHeight-v.scrollTop-v.clientHeight>ROW*2)setFollow(false);}}>{!count?<div className="console-empty"><Terminal size={28}/><p>{pending?'로그를 준비하고 있습니다.':searching?(matchEnd===null?'서버에서 검색하고 있습니다.':'현재 검색·필터에 맞는 로그가 없습니다.'):'표시할 로그가 없습니다.'}</p></div>:<div style={{height:count*ROW,position:'relative'}}>{shown}</div>}</div>
+ <div className="logs virtual-logs" aria-busy={pending||loading} ref={viewport} data-testid="log-viewport" onWheel={e=>{if(e.deltaY<0)setFollow(false);}} onScroll={e=>{const v=e.currentTarget;setTop(v.scrollTop);if(v.scrollHeight-v.scrollTop-v.clientHeight>2)setFollow(false);else if(live&&v.scrollTop>lastTop.current+.5)setFollow(true);lastTop.current=v.scrollTop;}}>{!count?<div className="console-empty"><Terminal size={28}/><p>{pending?'로그를 준비하고 있습니다.':searching?(matchEnd===null?'서버에서 검색하고 있습니다.':'현재 검색·필터에 맞는 로그가 없습니다.'):'표시할 로그가 없습니다.'}</p></div>:<div style={{height:count*ROW,position:'relative'}}>{shown}</div>}</div>
  </div>
  {!source&&<Command key={id} id={id} enabled={enabled} hint={hint}/>}<div className="panel-foot">{source?'저장된 원문 로그를 조회하고 있습니다.':'일반 입력은 서버 채팅으로 전송 · /로 시작하면 명령 실행'}<span>파싱 결과는 디스크에 저장하지 않습니다.</span></div>
  {detail&&<LogDetail event={detail} onClose={()=>setDetail(null)}/>}

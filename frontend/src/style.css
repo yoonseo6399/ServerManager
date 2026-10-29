@@ -22,7 +22,7 @@ select{font:inherit;color:#e4e9f1;background:#11161d;border:1px solid #323b49;bo
 /* Logs retain raw width on narrow screens; scrolling belongs to the viewport. */
 .console-panel,.log-viewport-shell,.grouped-console,.log-source{min-width:0;max-width:100%}
 .grouped-logs{height:460px;max-width:100%;overflow:auto;overscroll-behavior:contain;white-space:pre;font-family:ui-monospace,SFMono-Regular,monospace;font-size:12px;touch-action:pan-x pan-y}
-.log-element{width:max-content;min-width:100%;padding:8px 0;content-visibility:auto;contain-intrinsic-size:auto 150px}
+.log-element{width:max-content;min-width:100%;padding:8px 0}
 .log-element>header{font-weight:600;color:#9aaebe;padding:4px 10px;background:#1a2430;position:static;display:block;height:auto}
 .log-element details>summary{padding:3px 12px;cursor:pointer;color:#b2d8f0}
 .log-record{cursor:pointer;padding:2px 0}.log-record:hover{background:#ffffff08}
