@@ -6,6 +6,7 @@ let downloadServer:Server,completedDownloads=0;
 test.beforeAll(async()=>{downloadServer=createServer((_,response)=>{const body=Buffer.from('zip-fixture');response.writeHead(200,{'Content-Type':'application/zip','Content-Disposition':'attachment; filename=world.zip','Content-Length':body.length});response.end(body);completedDownloads++;});await new Promise<void>((resolve,reject)=>{downloadServer.once('error',reject);downloadServer.listen(8787,'127.0.0.1',resolve);});});
 test.afterAll(async()=>{await new Promise<void>(resolve=>downloadServer.close(()=>resolve()));});
 async function fixture(page:Page,viewer=false,failFirstUpload=false){
+ const uploadJobs=new Map<string,any>();
  const uploads:string[]=[],deletes:string[]=[],updates:any[]=[],exports:any[]=[];let pack:any=null;let downloadStartedAt=completedDownloads,downloadPolls=0;
  let mods=['first.jar','second.jar'];
  const plan={pack:{name:'New Pack',version:'2',minecraft:'1.21.1',loader:'Fabric',loaderVersion:'0.16.14'},currentMods:['mods/first.jar','mods/second.jar'],incomingMods:['mods/first.jar','mods/new.jar','mods/client.jar'],configFiles:['config/test.json'],excludedClientMods:['mods/client.jar'],ignoredFiles:['world/level.dat'],warnings:[]};
@@ -16,7 +17,14 @@ async function fixture(page:Page,viewer=false,failFirstUpload=false){
   else if(p==='/api/memory')body={totalMb:24000,freeMb:14000,reservedMb:2000,maxHeapMb:22000,startableHeapMb:22000};
   else if(p==='/api/game-addresses')body={enabled:false};
   else if(p.endsWith('/mods'))body={remote:true,editable:true,inventoryRevision:mods.join(),inventory:url.searchParams.has('inventory')?{revision:'r',mods:mods.map(filename=>({filename,enabled:true,size:10,sha256:'a'.repeat(64),source:null,warning:null})),warnings:[],dependencyFiles:[],dependencyReasons:{}}:null,job:null,diagnostic:null,next:null,active:false};
-  else if(p.endsWith('/upload')){uploads.push(url.search);if(failFirstUpload&&uploads.length===1)return route.fulfill({status:503,json:{message:'fixture upload failure'}});await new Promise(resolve=>setTimeout(resolve,150));}
+  else if(p.includes('/file-uploads')){
+   const tail=p.split('/file-uploads')[1].split('/').filter(Boolean),token=tail[0],job=uploadJobs.get(token);
+   if(!token&&method==='GET')body=[...uploadJobs.values()];
+   else if(!token){const data=route.request().postDataJSON();uploads.push('?path='+data.path);if(failFirstUpload&&uploads.length===1)return route.fulfill({status:503,json:{message:'fixture upload failure'}});body={...data,token:'upload-'+uploads.length,instanceId:'test',phase:'RECEIVING',received:0,transferred:0,chunkSize:1048576,cancellable:true,revision:0,message:'파일을 받는 중'};uploadJobs.set(body.token,body);}
+   else if(tail[1]==='content'){job.received+=route.request().postDataBuffer()!.length;job.revision++;body=job;}
+   else if(tail[1]==='complete'){job.phase='COMPLETE';job.transferred=job.size;job.cancellable=false;job.message='업로드 완료';job.revision++;body=job;}
+   else body=job;
+  }
   else if(p.endsWith('/files')&&method==='DELETE'){deletes.push(url.searchParams.get('path')!);mods=mods.filter(name=>'mods/'+name!==url.searchParams.get('path'));}
   else if(p.endsWith('/files'))body=[{name:'world',path:'world',directory:true,size:0}];
   else if(p.endsWith('/pack-update/preview')){pack={token:'fixture',phase:'READY',message:'업데이트 방법을 선택하세요',plan,completed:0,total:0};body=pack;}
@@ -37,7 +45,7 @@ async function openMods(page:Page){await page.goto('/');await page.getByRole('bu
 test('mod drag drop uses mods upload endpoint and delete confirms once except Shift',async({page})=>{
  const f=await fixture(page);await openMods(page);
  await page.locator('.mods-panel').evaluate(node=>{const data=new DataTransfer();data.items.add(new File(['jar1'],'a.jar'));data.items.add(new File(['jar2'],'b.jar'));node.dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:data}));});
- await expect.poll(()=>f.uploads.length).toBe(2);await expect(page.locator('.upload-progress')).toContainText('완료 2/2');expect(f.uploads).toEqual(['?path=mods','?path=mods']);
+ await expect.poll(()=>f.uploads.length).toBe(2);await expect(page.locator('.upload-progress:not(.managed-upload)')).toContainText('완료 2/2');expect(f.uploads).toEqual(['?path=mods','?path=mods']);
  let confirmations=0;page.on('dialog',async dialog=>{confirmations++;await dialog.accept();});
  await page.getByRole('button',{name:'first.jar 삭제',exact:true}).click();await expect.poll(()=>f.deletes.length).toBe(1);
  await page.getByRole('button',{name:'second.jar 삭제',exact:true}).click({modifiers:['Shift']});await expect.poll(()=>f.deletes.length).toBe(2);expect(confirmations).toBe(1);
@@ -58,18 +66,18 @@ test('file tab uploads show floating progress and viewer may download current or
  const f=await fixture(page,true);await page.goto('/');await page.getByRole('button',{name:'파일 관리자',exact:true}).click();
  await expect(page.getByRole('button',{name:'업로드',exact:true})).toBeDisabled();
  const snapshotDownload=page.waitForEvent('download');await page.getByRole('button',{name:'world 최근 복사본 ZIP 다운로드',exact:true}).click();await expect.poll(()=>f.exports.length).toBe(1);expect(f.exports[0]).toEqual({path:'world',source:'snapshot'});expect(await (await snapshotDownload).failure()).toBeNull();
- await expect(page.locator('.upload-progress')).toContainText('MiB ZIP 전송 중');await expect(page.locator('.upload-progress')).toContainText('중앙 복사본');await expect(page.locator('.upload-progress')).toContainText('ZIP 전송 완료');
- const currentDownload=page.waitForEvent('download');await page.getByRole('button',{name:'world ZIP 다운로드',exact:true}).click();await expect.poll(()=>f.exports.length).toBe(2);expect(f.exports[1]).toEqual({path:'world',source:'current'});expect(await (await currentDownload).failure()).toBeNull();await expect(page.locator('.upload-progress').last()).toContainText('ZIP 전송 완료');
+ await expect(page.locator('.upload-progress:not(.managed-upload)')).toContainText('MiB ZIP 전송 중');await expect(page.locator('.upload-progress:not(.managed-upload)')).toContainText('중앙 복사본');await expect(page.locator('.upload-progress:not(.managed-upload)')).toContainText('ZIP 전송 완료');
+ const currentDownload=page.waitForEvent('download');await page.getByRole('button',{name:'world ZIP 다운로드',exact:true}).click();await expect.poll(()=>f.exports.length).toBe(2);expect(f.exports[1]).toEqual({path:'world',source:'current'});expect(await (await currentDownload).failure()).toBeNull();await expect(page.locator('.upload-progress:not(.managed-upload)').last()).toContainText('ZIP 전송 완료');
  await page.setViewportSize({width:390,height:844});await expect(page.locator('.upload-progress-stack')).toBeInViewport({ratio:1});await page.screenshot({path:'frontend/test-results/file-export-mobile.png'});
 });
 test('file tab keeps drag drop uploads and displays byte progress in the floating bar',async({page})=>{
  const f=await fixture(page);await page.goto('/');await page.getByRole('button',{name:'파일 관리자',exact:true}).click();
  await page.getByLabel('업로드할 파일',{exact:true}).setInputFiles({name:'notes.txt',mimeType:'text/plain',buffer:Buffer.from('original content')});
- await expect.poll(()=>f.uploads.length).toBe(1);await expect(page.locator('.upload-progress')).toContainText('완료 1/1');expect(f.uploads[0]).toBe('?path=');
+ await expect.poll(()=>f.uploads.length).toBe(1);await expect(page.locator('.upload-progress:not(.managed-upload)')).toContainText('완료 1/1');expect(f.uploads[0]).toBe('?path=');
 });
 
 test('one failed mod upload shows failure and continues uploading remaining files',async({page})=>{
  const f=await fixture(page,false,true);await openMods(page);
  await page.getByLabel('업로드할 모드 파일').setInputFiles([{name:'a.jar',mimeType:'application/java-archive',buffer:Buffer.from('one')},{name:'b.jar',mimeType:'application/java-archive',buffer:Buffer.from('two')}]);
- await expect.poll(()=>f.uploads.length).toBe(2);await expect(page.locator('.upload-progress.failed')).toContainText('완료 1/2 · 실패 1');await expect(page.getByRole('alert')).toContainText('fixture upload failure');
+ await expect.poll(()=>f.uploads.length).toBe(2);await expect(page.locator('.upload-progress.failed:not(.managed-upload)')).toContainText('완료 1/2 · 실패 1');await expect(page.getByRole('alert')).toContainText('fixture upload failure');
 });

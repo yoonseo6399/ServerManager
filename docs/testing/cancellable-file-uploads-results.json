@@ -1,0 +1,61 @@
+{
+  "date": "2026-10-30",
+  "branch": "feat/cancellable-file-uploads",
+  "base": "v0.7.0-beta.27",
+  "backend": [
+    {
+      "name": "FileUploadsTest",
+      "tests": 8,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "name": "FileUploadAccessTest",
+      "tests": 1,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "name": "DeferredWorkspaceEditsTest",
+      "tests": 2,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "name": "RunnerWorkspaceTest",
+      "tests": 3,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "name": "LiveRunnerOperationsTest",
+      "tests": 10,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "name": "RemoteConsoleTest",
+      "tests": 4,
+      "failures": 0,
+      "skipped": 0
+    }
+  ],
+  "browser": {
+    "tests": 9,
+    "failed": 0,
+    "durationSeconds": 12.8,
+    "files": [
+      "cancellable-uploads.spec.ts",
+      "uploads-pack-update.spec.ts"
+    ],
+    "environment": "local API fixtures / desktop and mobile"
+  },
+  "frontendBuild": "passed",
+  "fullSuite": "not run",
+  "productionDeployment": "not performed",
+  "limitations": [
+    "Actual public proxy long upload timing was not measured in production.",
+    "Physical multi-computer upload was not exercised; functional tests use real RunnerWorkspace behind a fixture controller.",
+    "Cannot cancel after atomic apply begins. Manager process restart interrupts unfinished work; browser refresh keeps accepted work running."
+  ]
+}
