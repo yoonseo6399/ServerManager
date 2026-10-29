@@ -12,3 +12,10 @@
 - TS/Vite, bootJar, runtime-security, runner-setup. 기존 사용자 지시에 따라 전체 suite 생략.
 - CI workflow_dispatch skip_full_tests=true로 고정 의존성·서명·Mac/Windows 패키징·격리 bootstrap 검사 후 새 immutable 베타 태그와 9개 자산 게시.
 - 기존 stable latest/main/이미 게시된 태그·자산 보존. 공개 자산 재다운로드/해시 비교 및 운영 서비스/Minecraft 재시작은 하지 않는다.
+
+## 통합 검증 완료
+- testedProductCommit 7a39c99. backend **28/28 통과**, 실패/스킵 0. compileKotlin/bootJar 통과.
+- 로그/업로드/취소/새로고침/모바일 및 기존 팩·ZIP 회귀 **UI18/18 통과**(46.6초). TS/Vite 빌드 통과.
+- runtime-security **11/11 통과**, runner-setup URL/CLI/자동 시작 선택/잠금/단계 복사/rollback/데이터 보존/링크 거부/등록/원본 폴더 검사 통과.
+- docs/testing/release-0.7.0-beta.28-results.json에 집계 보존. 전체 suite·운영 서비스 재시작·공개 파일 재다운로드/해시 검사는 미실행.
+- 기존 서명 secret을 이용하는 CI 수동 빌드 1개로 서명·패키징·새 태그 생성·게시 진행.

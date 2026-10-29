@@ -1,0 +1,57 @@
+{
+  "version": "0.7.0-beta.28",
+  "testedProductCommit": "7a39c99581a75273a68774c0eaf4e707fad6a588",
+  "backend": [
+    {
+      "name": "local.servermanager.DeferredWorkspaceEditsTest",
+      "tests": 2,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "name": "local.servermanager.FileUploadAccessTest",
+      "tests": 1,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "name": "local.servermanager.FileUploadsTest",
+      "tests": 8,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "name": "local.servermanager.LiveRunnerOperationsTest",
+      "tests": 10,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "name": "local.servermanager.RemoteConsoleTest",
+      "tests": 4,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "name": "local.servermanager.RunnerWorkspaceTest",
+      "tests": 3,
+      "failures": 0,
+      "skipped": 0
+    }
+  ],
+  "frontend": {
+    "build": "passed",
+    "browserTests": 18,
+    "failed": 0,
+    "durationSeconds": 46.6
+  },
+  "runtimeSecurity": {
+    "passed": 11
+  },
+  "runnerSetup": "passed",
+  "bootJar": "passed",
+  "fullBackendSuite": "not run per user instruction",
+  "publishedArtifactRedownload": "not performed",
+  "productionRestart": "not performed",
+  "publication": "pending CI"
+}
