@@ -184,6 +184,27 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     private val configs=ConcurrentHashMap<String,Instance>()
     private val uploading=ConcurrentHashMap.newKeySet<String>()
     private val operationLocks=ConcurrentHashMap<String,Any>()
+    private val editPublisher=DeferredWorkspaceEdits(warning={id,e->send(RunnerMessage("log",id,"warn",version(),"파일 변경 복사본 준비 대기: "+e.message.orEmpty().take(300)))})
+    private fun publishEdits(id:String) {
+        editPublisher.mark(id) {
+            synchronized(operationLocks.computeIfAbsent(id){Any()}) {
+                val config=configs[id]
+                if(config==null || !config.syncEnabled() || !localEdits(id).exists())true
+                else if(processes[id]?.isAlive==true || orphanAlive(id) || dirty(id).exists() || workspaces[id]?.busy()==true || preparing.contains(id))false
+                else {
+                    val revision=localEdits(id).readText()
+                    // A ready copy left by a prior failed announcement is re-announced, not duplicated.
+                    val snapshot=snapshots(id).list().firstOrNull {it.ready.editOnly && it.ready.localRevision==revision}
+                        ?: snapshots(id).capture(serverDir(id),null,null,revision,editOnly=true)
+                    val response=http("POST","/api/runners/transfer/$id/snapshot-ready",HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(snapshot.ready)),"application/json")
+                    // A rejected edit revision was never enqueued centrally. Do not let that private copy block newer edits.
+                    if(response.statusCode()==409)snapshots(id).remove(snapshot)
+                    transferResponse(response,"파일 변경 복사본 접수 대기")
+                    workers.submit {uploadSnapshots(id)};true
+                }
+            }
+        }
+    }
     private val stopMonitors=ConcurrentHashMap<String,StopMonitor>()
     private val stopTimeouts=ConcurrentHashMap.newKeySet<String>()
     private val idleStops=ConcurrentHashMap.newKeySet<String>()
@@ -306,6 +327,11 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             else if(System.nanoTime()-lastHostedRelayReport>=java.util.concurrent.TimeUnit.SECONDS.toNanos(10)) {
                 // Restore callback + request a fresh consent/status after any resident-host reconnect.
                 if(resident.relaySession())lastHostedRelayReport=System.nanoTime()
+            }
+            home.resolve("instances").takeIf {it.exists()}?.listDirectoryEntries()?.filter {it.resolve("local-edits.pending").exists()}?.forEach {dir->
+                val id=dir.name
+                if(configs[id]==null)runCatching {configs[id]=mapper.readValue<Instance>(dir.resolve("instance.json").readText())}
+                publishEdits(id)
             }
             reportUpdate()
             reportFolders()
@@ -532,7 +558,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         processes.values.filter {it !is HostedProcess}.forEach { runCatching { it.waitFor() } }
         installationProcesses.values.forEach {runCatching {it.waitFor()}}
         if(!updatePauseRequested)home.resolve("instances").takeIf { it.exists() }?.let { root -> Files.list(root).use { paths -> paths.filter { it.resolve("dirty").exists() || it.resolve("stopped-snapshots").takeIf {p->p.exists()}?.listDirectoryEntries()?.any {p->StoppedSnapshots.valid(p.name)}==true }.forEach { dir -> uploadStopped(dir.fileName.toString()) } } }
-        tcpRelay?.close();directRelay.close();sable.close();workers.shutdown()
+        tcpRelay?.close();directRelay.close();sable.close();editPublisher.close();workers.shutdown()
     }
     override fun onOpen(webSocket:WebSocket) { connection.set(webSocket);webSocket.request(1) }
     override fun onText(webSocket:WebSocket,data:CharSequence,last:Boolean):CompletionStage<*> {
@@ -735,9 +761,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                 try {
                 val result=execute()
                 if(request.op in setOf("WRITE_COMMIT","MKDIR","MOVE","DELETE","MOD_TOGGLE") && instance.syncEnabled() && processes[id]?.isAlive!=true && !orphanAlive(id) && !dirty(id).exists()) {
-                    val snapshot=snapshots(id).capture(serverDir(id),null,null,localEdits(id).takeIf {it.exists()}?.readText(),editOnly=true)
-                    transferResponse(http("POST","/api/runners/transfer/$id/snapshot-ready",HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(snapshot.ready)),"application/json"),"파일 변경 복사본 접수 대기")
-                    workers.submit {uploadSnapshots(id)}
+                    publishEdits(id)
                 }
                 result
                 } finally {preparing.remove(id)}

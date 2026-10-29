@@ -51,13 +51,14 @@ class RemoteFiles(private val manager:ServerManager) {
         val out=java.io.ByteArrayOutputStream();download(id,path,out,2L*1024*1024);val bytes=out.toByteArray();require(!bytes.contains(0)) {"바이너리 파일은 다운로드하세요"}
         return mapOf("content" to EditableText.decode(bytes),"revision" to java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString(""){"%02x".format(it)})
     }
-    fun write(id:String,path:String,input:InputStream,revision:String?=null,limit:Long=RunnerWorkspace.MAX)=manager.withRemoteFiles(id) {
-        writeUnreserved(id,path,input,revision,limit)
+    fun write(id:String,path:String,input:InputStream,revision:String?=null,limit:Long=RunnerWorkspace.MAX,onProgress:(Long)->Unit={},beforeCommit:()->Unit={})=manager.withRemoteFiles(id) {
+        writeUnreserved(id,path,input,revision,limit,onProgress,beforeCommit)
     }
     internal fun revision(id:String,path:String):String=call(id,"STAT",path).path("revision").asText()
-    internal fun writeUnreserved(id:String,path:String,input:InputStream,revision:String?=null,limit:Long=RunnerWorkspace.MAX) {
+    internal fun writeUnreserved(id:String,path:String,input:InputStream,revision:String?=null,limit:Long=RunnerWorkspace.MAX,onProgress:(Long)->Unit={},beforeCommit:()->Unit={}) {
+        onProgress(0)
         val upload=call(id,"WRITE_BEGIN",path,revision=revision).path("uploadId").asText();var offset=0L
-        try {while(true){val bytes=input.readNBytes(RunnerWorkspace.CHUNK);if(bytes.isEmpty())break;require(offset+bytes.size<=limit) {"파일 크기 제한을 초과했습니다"};call(id,"WRITE_CHUNK",path,offset,java.util.Base64.getEncoder().encodeToString(bytes),uploadId=upload);offset+=bytes.size};call(id,"WRITE_COMMIT",path,uploadId=upload);Unit}
+        try {while(true){val bytes=input.readNBytes(RunnerWorkspace.CHUNK);if(bytes.isEmpty())break;onProgress(offset);require(offset+bytes.size<=limit) {"파일 크기 제한을 초과했습니다"};call(id,"WRITE_CHUNK",path,offset,java.util.Base64.getEncoder().encodeToString(bytes),uploadId=upload);offset+=bytes.size;onProgress(offset)};beforeCommit();call(id,"WRITE_COMMIT",path,uploadId=upload);Unit}
         catch(e:Exception){runCatching {call(id,"WRITE_ABORT",path,uploadId=upload)};throw e}
     }
     internal fun changeUnreserved(id:String,op:String,path:String,to:String="") {call(id,op,path,to=to)}

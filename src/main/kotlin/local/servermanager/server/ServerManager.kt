@@ -914,7 +914,7 @@ class ServerManager {
         require(bytes.size<=2*1024*1024) {"텍스트 저장은 2 MiB까지 가능합니다. 큰 파일은 업로드하세요"}
         bytes.inputStream().use {writeStream(id,relative,it,revision,2L*1024*1024)}
     }
-    fun writeStream(id:String,relative:String,input:java.io.InputStream,revision:String?=null,limit:Long=256L*1024*1024) {
+    fun writeStream(id:String,relative:String,input:java.io.InputStream,revision:String?=null,limit:Long=256L*1024*1024,onProgress:(Long)->Unit={},beforeCommit:()->Unit={}) {
         require(limit in 0..256L*1024*1024)
         val r=runtime(id);synchronized(r) {
             checkIdle(r);val p=path(id,relative);require(p!=serverDir(id)) {"파일 경로를 지정하세요"}
@@ -924,8 +924,9 @@ class ServerManager {
             try {
                 tmp.outputStream().use {output->
                     val buffer=ByteArray(64*1024);var total=0L
-                    while(true) {val n=input.read(buffer);if(n<0)break;total+=n;require(total<=limit) {"파일 크기 제한을 초과했습니다"};output.write(buffer,0,n)}
+                    onProgress(0);while(true) {val n=input.read(buffer);if(n<0)break;total+=n;require(total<=limit) {"파일 크기 제한을 초과했습니다"};output.write(buffer,0,n);onProgress(total)}
                 }
+                beforeCommit()
                 if(p.exists()) {val backup=root.resolve(id).resolve("backups").resolve(UUID.randomUUID().toString()+"-"+p.name);backup.parent.createDirectories();Files.copy(p,backup)}
                 Files.move(tmp,p,StandardCopyOption.REPLACE_EXISTING,StandardCopyOption.ATOMIC_MOVE)
             } finally {tmp.deleteIfExists()}
