@@ -42,6 +42,7 @@ test('refresh restores accepted background work and completion without resending
 });
 test('refresh cancels this tabs unfinished reception and leaves another tabs upload intact',async({page})=>{
  const f=await fixture(page);await page.goto('/');
+ await expect.poll(()=>page.evaluate(()=>sessionStorage.getItem('sm.upload-tab'))).toBeTruthy();
  const client=await page.evaluate(()=>sessionStorage.getItem('sm.upload-tab'));
  expect(client).toBeTruthy();const own=f.seed('RECEIVING',client!),other=f.seed('RECEIVING');
  await page.reload();await expect.poll(()=>f.cancelled).toContain(own.token);expect(f.cancelled).not.toContain(other.token);expect(other.phase).toBe('RECEIVING');

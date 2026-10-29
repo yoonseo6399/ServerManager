@@ -32,7 +32,7 @@ class FileUploadAccessTest {
    val mvc=MockMvcBuilders.webAppContextSetup(context).apply<org.springframework.test.web.servlet.setup.DefaultMockMvcBuilder>(springSecurity()).build()
    fun session()=MockHttpSession().also {it.setAttribute("sm.epoch",0);it.setAttribute("sm.started",System.currentTimeMillis())}
    val path="/api/instances/test/file-uploads";val body="""{"filename":"mod.jar","size":3,"path":"mods","clientId":"00000000-0000-0000-0000-000000000001"}"""
-   mvc.perform(post(path).contentType("application/json").content(body)).andExpect(status().isUnauthorized)
+   mvc.perform(post(path).with(csrf()).contentType("application/json").content(body)).andExpect(status().isUnauthorized)
    mvc.perform(post(path).with(user(owner)).session(session()).contentType("application/json").content(body)).andExpect(status().isForbidden)
    mvc.perform(post(path).with(user(viewer)).session(session()).with(csrf()).contentType("application/json").content(body)).andExpect(status().isForbidden)
    val result=mvc.perform(post(path).with(user(owner)).session(session()).with(csrf()).contentType("application/json").content(body)).andExpect(status().isOk).andExpect(header().string("Cache-Control","no-store")).andReturn()
