@@ -1,4 +1,4 @@
-상태: 두 브랜치 통합·병합 빌드 성공, 통합 기능 검증 예정
+상태: beta.28 게시 완료, 통합 backend28/UI18·보안11·설치·서명·패키징·bootstrap 통과
 # release/0.7.0-beta.28
 
 - 기준 origin/release/0.7.0-beta.27. solo.
@@ -19,3 +19,10 @@
 - runtime-security **11/11 통과**, runner-setup URL/CLI/자동 시작 선택/잠금/단계 복사/rollback/데이터 보존/링크 거부/등록/원본 폴더 검사 통과.
 - docs/testing/release-0.7.0-beta.28-results.json에 집계 보존. 전체 suite·운영 서비스 재시작·공개 파일 재다운로드/해시 검사는 미실행.
 - 기존 서명 secret을 이용하는 CI 수동 빌드 1개로 서명·패키징·새 태그 생성·게시 진행.
+
+## 서명 릴리즈 게시 완료
+- CI **40922205782 success**. 태그 `v0.7.0-beta.28`은 정확히 `2294d158caf13b4249d274872b91cd875e1fe3c8`에 고정.
+- 공개 시각 2026-10-29T17:36:45Z (KST 2026-10-30 02:36:45), draft=false/prerelease=true. 필수 자산 9개가 모두 uploaded/양수 크기임을 GitHub 메타데이터로 확인.
+- CI에서 Mac/Windows 패키징, runtime security/runner setup, isolated bootstrap, 서명, 태그 생성, 게시 성공. Full backend suite는 요청대로 skipped.
+- stable latest **v0.6.3** 유지, main 변경 없음. 공개 자산 재다운로드/해시 비교와 운영 앱·실행기·Minecraft 재시작은 하지 않음.
+- 릴리즈: https://github.com/yoonseo6399/ServerManager/releases/tag/v0.7.0-beta.28

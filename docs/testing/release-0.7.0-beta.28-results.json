@@ -53,5 +53,67 @@
   "fullBackendSuite": "not run per user instruction",
   "publishedArtifactRedownload": "not performed",
   "productionRestart": "not performed",
-  "publication": "pending CI"
+  "publication": {
+    "url": "https://github.com/yoonseo6399/ServerManager/releases/tag/v0.7.0-beta.28",
+    "tag": "v0.7.0-beta.28",
+    "publishedAt": "2026-10-29T17:36:45Z",
+    "prerelease": true,
+    "ciRunId": "40922205782",
+    "ciConclusion": "success",
+    "tagCommit": "2294d158caf13b4249d274872b91cd875e1fe3c8",
+    "stableLatestPreserved": "v0.6.3",
+    "assets": [
+      {
+        "name": "server-manager-0.7.0-beta.28.jar",
+        "size": 94899251,
+        "state": "uploaded"
+      },
+      {
+        "name": "ServerManager-0.7.0-beta.28-universal.pkg",
+        "size": 179435040,
+        "state": "uploaded"
+      },
+      {
+        "name": "ServerManager-Runner-0.7.0-beta.28-mac-universal.zip",
+        "size": 180323661,
+        "state": "uploaded"
+      },
+      {
+        "name": "ServerManager-Runner-0.7.0-beta.28-windows-x64.zip",
+        "size": 138232212,
+        "state": "uploaded"
+      },
+      {
+        "name": "ServerManager-Runner-UI-0.7.0-beta.28-mac-universal.zip",
+        "size": 180387767,
+        "state": "uploaded"
+      },
+      {
+        "name": "ServerManager-Runner-UI-0.7.0-beta.28-windows-x64.zip",
+        "size": 138234407,
+        "state": "uploaded"
+      },
+      {
+        "name": "SHA256SUMS",
+        "size": 846,
+        "state": "uploaded"
+      },
+      {
+        "name": "update.properties",
+        "size": 157,
+        "state": "uploaded"
+      },
+      {
+        "name": "update.sig",
+        "size": 64,
+        "state": "uploaded"
+      }
+    ],
+    "requiredSteps": {
+      "Full backend suite": "skipped",
+      "Verify isolated bootstrap after packaging": "success",
+      "Sign update manifest": "success",
+      "Publish immutable version assets": "success"
+    }
+  }
 }
