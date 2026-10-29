@@ -2,7 +2,8 @@ import {useEffect,useState} from 'react';
 import {api} from './http';
 import {Upload,Check,X} from 'lucide-react';
 import type {UploadItem} from './dropFiles';
-export type UploadStatus={token:string;instanceId:string;filename:string;path:string;size:number;clientId:string;phase:string;received:number;transferred:number;message:string;chunkSize:number;cancellable:boolean;revision:number};
+export type UploadStatus={token:string;instanceId:string;filename:string;path:string;size:number;clientId:string;documentId?:string;phase:string;received:number;transferred:number;message:string;chunkSize:number;cancellable:boolean;revision:number};
+const documentId=crypto.randomUUID();
 const terminal=(s:UploadStatus)=>['COMPLETE','CANCELLED','FAILED'].includes(s.phase);
 let active:UploadStatus[]=[],client='',account='';
 const listeners=new Set<()=>void>(),sending=new Map<string,AbortController>();
@@ -21,7 +22,7 @@ async function cancel(s:UploadStatus){
 }
 /** File contents use bounded HTTP requests. No browser request waits for the runner's entire transfer. */
 export async function uploadManagedFile(id:string,path:string,item:UploadItem){
- let s=await api<UploadStatus>(endpoint(id),'POST',{filename:item.file.name,size:item.file.size,path,clientId:clientId()});publish(s);
+ let s=await api<UploadStatus>(endpoint(id),'POST',{filename:item.file.name,size:item.file.size,path,clientId:clientId(),documentId});publish(s);
  const controller=new AbortController();sending.set(s.token,controller);
  try{
   while(s.received<s.size){
@@ -49,14 +50,14 @@ export function ManagedUploadProgress({instanceIds,owner}:{instanceIds:string[];
  useEffect(()=>{const fn=()=>setRows(active);listeners.add(fn);return()=>{listeners.delete(fn);};},[]);
  useEffect(()=>{
   let closed=false,timer:ReturnType<typeof setTimeout>;
-  const ids=key?key.split(','):[];const restored=new Set<string>();
+  const ids=key?key.split(','):[];const tabId=clientId();const reloaded=(performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming|undefined)?.type==='reload';const restored=new Set<string>();
   const load=async()=>{
    try{
     const fetched=(await Promise.all(ids.map(id=>api<UploadStatus[]>(endpoint(id))))).flat();
     for(let s of fetched){
      if(closed)return;
      // A fresh page cannot reuse File objects from the previous document. Only cancel this tab's abandoned receiver.
-     if(s.phase==='RECEIVING'&&s.clientId===clientId()&&!sending.has(s.token)&&!restored.has(s.token)){
+     if(s.phase==='RECEIVING'&&reloaded&&s.clientId===tabId&&s.documentId!==documentId&&!sending.has(s.token)&&!restored.has(s.token)){
       restored.add(s.token);s=await cancel(s);
      }
      if(!closed)publish(s);

@@ -15,9 +15,9 @@ import java.util.UUID
 import java.util.concurrent.Executors
 import kotlin.io.path.*
 
-data class FileUploadRequest(val filename:String,val size:Long,val path:String="",val clientId:String)
+data class FileUploadRequest(val filename:String,val size:Long,val path:String="",val clientId:String,val documentId:String="")
 @com.fasterxml.jackson.annotation.JsonIgnoreProperties(value=["cancellable"],allowGetters=true)
-data class FileUploadStatus(val token:String,val instanceId:String,val filename:String,val path:String,val size:Long,val clientId:String,
+data class FileUploadStatus(val token:String,val instanceId:String,val filename:String,val path:String,val size:Long,val clientId:String,val documentId:String="",
     val phase:String="RECEIVING",val received:Long=0,val transferred:Long=0,val message:String="파일을 받는 중",val updatedAt:String=Instant.now().toString(),val chunkSize:Int=1024*1024,val revision:Long=0) {
     val cancellable:Boolean get()=phase in setOf("RECEIVING","QUEUED","TRANSFERRING")
 }
@@ -54,7 +54,7 @@ class FileUploads(private val manager:ServerManager,private val remote:RemoteFil
     private fun access(owner:String,id:String){if(!accounts.allowed(owner,id,true))throw ResponseStatusException(HttpStatus.FORBIDDEN,"파일 변경 권한이 없습니다");manager.instance(id)}
     private fun owned(owner:String,id:String,token:String):SavedFileUpload {
         access(owner,id);val job=jobs[token]
-        if(job==null || job.owner!=owner || job.status.instanceId!=id || job.dismissed)throw ResponseStatusException(HttpStatus.NOT_FOUND,"업로드를 찾을 수 없습니다")
+        if(job==null || job.owner!=owner || job.status.instanceId!=id)throw ResponseStatusException(HttpStatus.NOT_FOUND,"업로드를 찾을 수 없습니다")
         return job
     }
     @Synchronized fun list(owner:String,id:String):List<FileUploadStatus> {access(owner,id);return jobs.values.filter {it.owner==owner && it.status.instanceId==id && !it.dismissed}.map {it.status}}
@@ -63,13 +63,13 @@ class FileUploads(private val manager:ServerManager,private val remote:RemoteFil
         access(owner,id);cleanup()
         require(req.filename.length in 1..255 && req.filename !in setOf(".","..") && req.filename.none {it.isISOControl()||it=='/'||it=='\\'}) {"파일 이름을 확인하세요"}
         require(req.path.isEmpty() || PackFormat.relative(req.path)==req.path) {"업로드 폴더 경로를 확인하세요"}
-        require(req.size in 0..MAX) {"파일 업로드는 최대 256 MiB입니다"};require(validToken(req.clientId)) {"업로드 탭 식별자가 올바르지 않습니다"}
+        require(req.size in 0..MAX) {"파일 업로드는 최대 256 MiB입니다"};require(validToken(req.clientId) && (req.documentId.isEmpty() || validToken(req.documentId))) {"업로드 탭 식별자가 올바르지 않습니다"}
         val active=jobs.values.filter {it.status.phase !in TERMINAL}
         check(active.size<32 && active.count {it.owner==owner}<16) {"진행 중인 업로드가 많습니다. 완료하거나 취소한 뒤 다시 시도하세요"}
         val reserved=active.sumOf {it.status.size}
         check(Files.getFileStore(directory).usableSpace>req.size+reserved+128L*1024*1024) {"업로드 임시 공간이 부족합니다"}
         val token=UUID.randomUUID().toString();val dir=directory.resolve(token).createDirectory();dir.resolve("content.part").createFile()
-        val status=FileUploadStatus(token,id,req.filename,req.path,req.size,req.clientId)
+        val status=FileUploadStatus(token,id,req.filename,req.path,req.size,req.clientId,documentId=req.documentId)
         jobs[token]=SavedFileUpload(owner,manager.instance(id).runnerId,status);persist(token);return status
     }
     /** One bounded HTTP body is read before taking the registry lock, so cancel never waits on the network. */
