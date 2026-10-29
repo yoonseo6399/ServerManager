@@ -767,3 +767,9 @@ Beta26 기반 fix/music-autoplay-skip 및 feat/mod-upload-pack-update를 포함�
 Beta27 통합에서도 backend14클래스92통과/0실패/0스킵, UI14통과, TS/Vite·bootJar 및 Java 보안11·runner-setup 성공. 메뉴 테스트2개 모두 해결. 상세 docs/testing/release-0.7.0-beta.27-results.json. 서명/패키징/게시 CI를 실행한다.
 
 Beta27 게시 완료: https://github.com/yoonseo6399/ServerManager/actions/runs/40787998555 success. 서명·Mac/Windows 패키징·isolated bootstrap·9개 자산 게시 성공, 태그 604eef92430dcd7e19c394cd2d02c8aaf04bb00b 불변. GitHub 메타데이터로 공개 이름/크기/상태/태그 일치 확인, stable latest v0.6.3 유지. 공개 파일 재다운로드/해시 비교·운영 재시작 없음.
+
+## 2026-10-30 — 0.7.0-beta.28 업로드 작업과 로그 위치 유지
+
+Beta27 기반 fix/console-follow-scroll 및 feat/cancellable-file-uploads를 통합한다(solo). 파일·모드 업로드를 분할 수신/작업 ID/서버별 순차 비동기 반영으로 분리하고, 원자적 반영 전 취소·원본 보존·현재 권한/소유권/CSRF 검사·새로고침 복원을 제공한다. 관리웹 프로세스 재시작은 미완료 상태를 중단으로 보존하며 자동 덮어쓰기 재시도는 하지 않는다. 실행기 파일 커밋 응답을 전체 복구 복사본 준비와 분리한다. 로그를 위로 읽는 동안 자동 추적/구간 교체를 멈추고 ‘아래로 이동’으로 최신 구간에 복귀한다.
+
+각 작업에서 관련 backend28/UI9 및 별도 로그UI9가 통과했으며 릴리즈 통합에서 다시 검증한다. 상세 docs/dev-notes/release-0.7.0-beta.28.md. 전체 suite/운영 설치·게임 재시작/공개 자산 재다운로드 해시는 생략. 기존 서명 secret과 workflow_dispatch skip_full_tests=true 사용, prerelease 및 stable latest/main과 게시된 자산 보존.

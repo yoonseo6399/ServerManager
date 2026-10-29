@@ -9,6 +9,7 @@ async function fixture(page:Page){
   else if(path==='/api/runners')body=[{id:'runner',name:'Runner',online:true,allowedInstanceIds:['test']}];
   else if(path==='/api/memory')body={totalMb:16000,freeMb:8000,reservedMb:1600,maxHeapMb:14400,startableHeapMb:14400};
   else if(path==='/api/game-addresses')body={enabled:false};
+  else if(path.endsWith('/file-uploads'))body=[];
   else if(path.endsWith('/log-files'))body=[];
   else if(path==='/api/log-filters/test')body={revision:0,config:{enabled:false,rules:{keywords:[],mods:[],onlyDebug:false},presets:[],activeId:null}};
   else if(path.endsWith('/log-window')){
