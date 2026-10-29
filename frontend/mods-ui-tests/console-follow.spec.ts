@@ -30,6 +30,8 @@ for(const raw of [false,true])for(const mobile of [false,true])test(`${raw?'raw'
  if(mobile)await page.setViewportSize({width:390,height:844});
  const f=await fixture(page);await page.goto('/');
  if(raw)await page.getByRole('button',{name:'원문 줄 보기',exact:true}).click();
+ await page.getByTestId('log-viewport').scrollIntoViewIfNeeded();
+ await expect.poll(()=>page.getByTestId('log-viewport').evaluate(v=>v.scrollHeight-v.clientHeight)).toBeGreaterThan(1000);
  await expect(page.locator('[data-event-seq="600"]')).toBeVisible();
  await expect.poll(async()=>(await position(page)).bottom).toBeLessThanOrEqual(2);
  await scroll(page,'up');
