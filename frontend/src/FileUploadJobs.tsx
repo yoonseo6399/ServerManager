@@ -5,9 +5,9 @@ import type {UploadItem} from './dropFiles';
 export type UploadStatus={token:string;instanceId:string;filename:string;path:string;size:number;clientId:string;documentId?:string;phase:string;received:number;transferred:number;message:string;chunkSize:number;cancellable:boolean;revision:number};
 const documentId=crypto.randomUUID();
 const terminal=(s:UploadStatus)=>['COMPLETE','CANCELLED','FAILED'].includes(s.phase);
-let active:UploadStatus[]=[],client='',account='';
+let active:UploadStatus[]=[],client='',account='',generation=0;
 const listeners=new Set<()=>void>(),sending=new Map<string,AbortController>();
-function publish(status:UploadStatus){if((active.find(s=>s.token===status.token)?.revision??-1)>status.revision)return;active=[...active.filter(s=>s.token!==status.token),status];listeners.forEach(f=>f());}
+function publish(status:UploadStatus,scope=generation){if(scope!==generation)return;if((active.find(s=>s.token===status.token)?.revision??-1)>status.revision)return;active=[...active.filter(s=>s.token!==status.token),status];listeners.forEach(f=>f());}
 function clientId(){
  if(!client){try{client=sessionStorage.getItem('sm.upload-tab')||'';}catch{/* Storage can be disabled. */}if(!client){client=crypto.randomUUID();try{sessionStorage.setItem('sm.upload-tab',client);}catch{/* In-memory identity still works this visit. */}}}
  return client;
@@ -15,41 +15,44 @@ function clientId(){
 const endpoint=(id:string,token?:string)=>`/instances/${encodeURIComponent(id)}/file-uploads${token?'/'+encodeURIComponent(token):''}`;
 const pause=()=>new Promise<void>(resolve=>setTimeout(resolve,700));
 async function cancel(s:UploadStatus){
+ const scope=generation;
  // Confirm server cancellation before aborting a browser request; never claim cancellation after commit began.
- const status=await api<UploadStatus>(endpoint(s.instanceId,s.token)+'/cancel','POST');publish(status);
+ const status=await api<UploadStatus>(endpoint(s.instanceId,s.token)+'/cancel','POST');publish(status,scope);
  if(status.phase==='CANCELLED')sending.get(s.token)?.abort();
  return status;
 }
 /** File contents use bounded HTTP requests. No browser request waits for the runner's entire transfer. */
 export async function uploadManagedFile(id:string,path:string,item:UploadItem){
- let s=await api<UploadStatus>(endpoint(id),'POST',{filename:item.file.name,size:item.file.size,path,clientId:clientId(),documentId});publish(s);
+ const scope=generation;const current=()=>{if(scope!==generation)throw Error('로그인 계정이 변경되어 브라우저 전송을 중단했습니다.');};
+ let s=await api<UploadStatus>(endpoint(id),'POST',{filename:item.file.name,size:item.file.size,path,clientId:clientId(),documentId});current();publish(s,scope);
  const controller=new AbortController();sending.set(s.token,controller);
  try{
   while(s.received<s.size){
+   current();
    if(active.find(v=>v.token===s.token)?.phase==='CANCELLED')throw Error('업로드가 취소되었습니다.');
    const chunk=item.file.slice(s.received,Math.min(s.size,s.received+s.chunkSize));
    s=await api<UploadStatus>(endpoint(id,s.token)+`/content?offset=${s.received}`,'PUT',chunk,controller.signal);
    // A cancel may have completed while this response was arriving.
    if(active.find(v=>v.token===s.token)?.phase==='CANCELLED')throw Error('업로드가 취소되었습니다.');
-   publish(s);
+   current();publish(s,scope);
   }
-  s=await api<UploadStatus>(endpoint(id,s.token)+'/complete','POST');publish(s);
+  s=await api<UploadStatus>(endpoint(id,s.token)+'/complete','POST');current();publish(s,scope);
   while(!terminal(s)){
-   await pause();s=await api<UploadStatus>(endpoint(id,s.token));publish(s);
+   await pause();current();s=await api<UploadStatus>(endpoint(id,s.token));current();publish(s,scope);
   }
   if(s.phase!=='COMPLETE')throw Error(s.message);
  }catch(e){
-  if(s.phase==='RECEIVING')await cancel(s).catch(()=>{});
+  if(scope===generation&&s.phase==='RECEIVING')await cancel(s).catch(()=>{});
   throw e;
  }finally{sending.delete(s.token);}
 }
 export function ManagedUploadProgress({instanceIds,owner}:{instanceIds:string[];owner?:string}){
- if(account!==owner){active=[];account=owner||'';}
+ if(account!==owner){active=[];account=owner||'';generation++;}
  const [rows,setRows]=useState<UploadStatus[]>([]),[error,setError]=useState('');
  const key=instanceIds.slice().sort().join(',');
  useEffect(()=>{const fn=()=>setRows(active);listeners.add(fn);return()=>{listeners.delete(fn);};},[]);
  useEffect(()=>{
-  let closed=false,timer:ReturnType<typeof setTimeout>;
+  let closed=false,timer:ReturnType<typeof setTimeout>;const scope=generation;
   const ids=key?key.split(','):[];const tabId=clientId();const reloaded=(performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming|undefined)?.type==='reload';const restored=new Set<string>();
   const load=async()=>{
    try{
@@ -60,7 +63,7 @@ export function ManagedUploadProgress({instanceIds,owner}:{instanceIds:string[];
      if(s.phase==='RECEIVING'&&reloaded&&s.clientId===tabId&&s.documentId!==documentId&&!sending.has(s.token)&&!restored.has(s.token)){
       restored.add(s.token);s=await cancel(s);
      }
-     if(!closed)publish(s);
+     if(!closed)publish(s,scope);
     }
     if(!closed)setError('');
    }catch(e){if(!closed)setError((e as Error).message);}
