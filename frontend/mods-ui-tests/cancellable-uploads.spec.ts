@@ -51,3 +51,30 @@ test('atomic applying stage has no cancel button and progress fits a mobile view
  await page.setViewportSize({width:390,height:844});const f=await fixture(page);f.seed('APPLYING');await page.goto('/');
  const card=page.locator('.managed-upload');await expect(card).toContainText('취소할 수 없습니다');await expect(card.getByRole('button',{name:'취소',exact:true})).toHaveCount(0);await expect(card).toBeInViewport({ratio:1});
 });
+
+test('nested folder jobs restore as one card without individual filenames and dismiss together',async({page})=>{
+ const f=await fixture(page),group={id:randomUUID(),name:'kubejs',files:40,bytes:100000000};
+ for(let i=0;i<40;i++){const s=f.seed(i===39?'TRANSFERRING':'COMPLETE');Object.assign(s,{filename:`hidden-${i}.js`,path:'kubejs/server_scripts/deep',folderGroup:group,cancellable:i===39});}
+ await page.goto('/');const card=page.locator('.folder-upload');await expect(card).toHaveCount(1);await expect(card).toContainText('폴더 업로드 · kubejs');await expect(card).toContainText('39/40개 완료');await expect(page.locator('.managed-upload:not(.folder-upload)')).toHaveCount(0);await expect(card).not.toContainText('hidden-');await expect(card).not.toContainText('server_scripts');
+ await page.reload();await expect(card).toHaveCount(1);await expect(card).toContainText('39/40개 완료');
+ for(const s of f.jobs.values())Object.assign(s,{phase:'COMPLETE',transferred:s.size,cancellable:false,revision:s.revision+1});
+ await expect(card).toContainText('폴더 업로드 완료');await card.getByRole('button',{name:'업로드 알림 닫기'}).click();await expect(card).toHaveCount(0);expect(f.jobs.size).toBe(0);
+});
+
+test('dropping a folder creates one progress row and cancellation stops remaining files',async({page})=>{
+ const f=await fixture(page);await page.goto('/');await page.getByRole('button',{name:'파일 관리자',exact:true}).click();await expect(page.getByLabel('파일 목록 새로고침')).toBeEnabled();
+ await page.locator('.files-panel').evaluate(element=>{
+  const children=Array.from({length:12},(_,i)=>({isFile:true,isDirectory:false,name:`script-${i}.js`,file:(done:(f:File)=>void)=>done(new File(['test'],`script-${i}.js`))}));
+  let read=false;const entry={isFile:false,isDirectory:true,name:'kubejs',createReader:()=>({readEntries:(done:(items:unknown[])=>void)=>{done(read?[]:children);read=true;}})};
+  const transfer=new DataTransfer();transfer.items.add(new File(['stub'],'stub'));Object.defineProperty(transfer,'items',{value:[{webkitGetAsEntry:()=>entry}]});
+  element.dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:transfer}));
+ });
+ const card=page.locator('.folder-upload');await expect(card).toContainText('kubejs');await expect(card).toHaveCount(1);await expect(page.locator('.upload-progress')).toHaveCount(1);await expect(card).not.toContainText('script-');
+ const first=[...f.jobs.values()][0];expect(first.folderGroup.files).toBe(12);expect(first.folderGroup.name).toBe('kubejs');
+ await card.getByRole('button',{name:'취소',exact:true}).click();await expect(card).toContainText('남은 파일 전송 중단');await page.waitForTimeout(1700);expect(f.jobs.size).toBe(1);expect(f.cancelled).toEqual([first.token]);
+});
+
+test('distinct folders remain separate cards with no nested file rows on mobile',async({page})=>{
+ const f=await fixture(page);for(const name of ['world','config'])for(let i=0;i<4;i++)Object.assign(f.seed('TRANSFERRING'),{folderGroup:{id:name==='world'?'11111111-1111-4111-8111-111111111111':'22222222-2222-4222-8222-222222222222',name,files:4,bytes:10000000}});
+ await page.setViewportSize({width:390,height:844});await page.goto('/');await expect(page.locator('.folder-upload')).toHaveCount(2);await expect(page.locator('.folder-upload').first()).toBeInViewport({ratio:1});await expect(page.locator('.folder-upload').last()).toBeInViewport({ratio:1});
+});
