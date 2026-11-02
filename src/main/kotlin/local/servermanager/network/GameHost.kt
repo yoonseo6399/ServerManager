@@ -143,7 +143,7 @@ class GameHostService(private val home:Path,private val version:String,private v
     @Synchronized private fun relay():DirectRelayRunnerRole=relayRole ?: DirectRelayRunnerRole(home,
         {message->controller?.send(mapOf("t" to "relay","body" to mapper.writeValueAsString(message))) ?: false},
         {id->games[id]?.takeIf {it.alive() && it.ready && !it.stopping}?.port},
-        {id->games[id]?.let {it.alive() && it.ready && !it.stopping}==true}).also {
+        {id->games[id]?.let {it.alive() && it.ready && !it.stopping}==true},diagnosticName="relay-host").also {
         relayRole=it
         io.submit {while(!closed){try {Thread.sleep(1000)} catch(_:InterruptedException){break};runCatching {it.tick()}}}
     }
