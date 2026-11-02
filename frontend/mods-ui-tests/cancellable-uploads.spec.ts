@@ -66,7 +66,7 @@ test('dropping a folder creates one progress row and cancellation stops remainin
  await page.locator('.files-panel').evaluate(element=>{
   const children=Array.from({length:12},(_,i)=>({isFile:true,isDirectory:false,name:`script-${i}.js`,file:(done:(f:File)=>void)=>done(new File(['test'],`script-${i}.js`))}));
   let read=false;const entry={isFile:false,isDirectory:true,name:'kubejs',createReader:()=>({readEntries:(done:(items:unknown[])=>void)=>{done(read?[]:children);read=true;}})};
-  const transfer=new DataTransfer();transfer.items.add(new File(['stub'],'stub'));Object.defineProperty(transfer.items[0],'webkitGetAsEntry',{value:()=>entry});
+  const transfer=new DataTransfer();transfer.items.add(new File(['stub'],'stub'));Object.defineProperty(transfer,'items',{value:[{webkitGetAsEntry:()=>entry}]});
   element.dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:transfer}));
  });
  const card=page.locator('.folder-upload');await expect(card).toContainText('kubejs');await expect(card).toHaveCount(1);await expect(page.locator('.upload-progress')).toHaveCount(1);await expect(card).not.toContainText('script-');
