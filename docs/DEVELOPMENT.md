@@ -775,3 +775,11 @@ Beta27 기반 fix/console-follow-scroll 및 feat/cancellable-file-uploads를 통
 각 작업에서 관련 backend28/UI9 및 별도 로그UI9가 통과했으며 릴리즈 통합에서 다시 검증한다. 상세 docs/dev-notes/release-0.7.0-beta.28.md. 전체 suite/운영 설치·게임 재시작/공개 자산 재다운로드 해시는 생략. 기존 서명 secret과 workflow_dispatch skip_full_tests=true 사용, prerelease 및 stable latest/main과 게시된 자산 보존.
 
 Beta28 통합 backend28/UI18/보안11/runner-setup·TS/Vite·bootJar 통과, CI40922205782 성공. 격리 bootstrap·Mac/Windows 패키징·서명·immutable tag2294d15 및 공개 자산9개 게시를 확인했다. Full backend suite skipped, stable latest v0.6.3/main·기존 게시 자산 유지, 게시 후 재다운로드 해시 검사와 운영 서비스/Minecraft 재시작 없음. 관리웹과 실행기 동시 업데이트가 업로드 개선 전체 적용에 필요하다.
+
+## 2026-11-02 — 0.7.0-beta.29 중계 격리·진단과 폴더 업로드 표시
+
+Beta28 기반 fix/relay-stream-isolation(d13ffc6) 및 fix/folder-upload-progress(a6b069c) 통합(solo). 실제 동시 끊김 원인은 미확정이며 확인된 endpoint 동기 쓰기 구조를 분리한다. 접속별512KiB/역할16MiB bounded endpoint writer, 공통 터널 round-robin FIFO 데이터4MiB/stream512KiB, 제한된 reader backpressure와10초 쓰기 deadline, 정상 EOF drain 및 유휴 교체 보호. packet/secret 없는 UTC/PID/연결·접속·인스턴스/양방향 바이트·큐·마지막 활동·원인 타입/60초 snapshot의 비동기 회전 JSONL 로그를 상주/제어 프로세스별로 분리한다. 같은 물리 TCP의 네트워크 정체는 여전히 공유 영향이 있다.
+
+폴더 업로드는 영속 그룹 ID/이름/파일 수/총바이트로 단일 진행 카드를 구성하고 하위 파일 카드를 숨긴다. 새로고침 복원·그룹 취소/알림 닫기·APPLYING 비가역 경계와 기존 ACL 유지. 기존 파일 요청·상태는 null 기본값으로 호환.
+
+기능 검증은 중계68/업로드10/UI12 통과. 초기 manager-outage1회 실패는 원인 미확정으로 원문 보존, 단독100 및 관련 suite100회 반 복은 통과했다. 통합과 게시 결과는 릴리즈 노트에 추가한다. 전체 suite/다른OS 실기/운영 재시작/공개 자산 재다운로드 해시는 생략. existing서명 secret과 workflow_dispatch skip_full_tests=true, stable latest/main 및 게시태그·자산 보존.
