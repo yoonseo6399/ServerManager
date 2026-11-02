@@ -75,8 +75,10 @@ data class RunnerRelayReport(val consent:RelayConsentState,val hub:RelayHubStatu
  * Local consent is re-read on every [tick]; revoking it tears the hub down immediately regardless of what the manager says.
  */
 class DirectRelayRunnerRole(home:Path,private val send:(RunnerMessage)->Boolean,private val gamePort:(String)->Int?,private val ready:(String)->Boolean,
-        private val consent:RelayConsentStore=RelayConsentStore(home),private val backoff:LongArray=longArrayOf(500,1000,2000,5000,10000),private val bindAddress:String="0.0.0.0") {
+        private val consent:RelayConsentStore=RelayConsentStore(home),private val backoff:LongArray=longArrayOf(500,1000,2000,5000,10000),private val bindAddress:String="0.0.0.0",private val diagnosticName:String="relay") {
     private val mapper=jacksonObjectMapper()
+    private val diagnostics=RelayFileLog(home.resolve("logs"),name=diagnosticName)
+    private var lastDiagnostic=0L
     private val voiceFiles=VoiceChatFiles(home.resolve("voicechat-backups"))
     @Volatile private var voiceTargets:List<VoiceChatTarget> =emptyList()
     private val voiceStates=ConcurrentHashMap<String,VoiceChatStatus>()
@@ -107,12 +109,20 @@ class DirectRelayRunnerRole(home:Path,private val send:(RunnerMessage)->Boolean,
         announced=state
         send(RunnerMessage("relay-consent",state=if(state.allowed)"ALLOWED" else "DENIED",version="DRP1_VOICE1",detail=mapper.writeValueAsString(state)))
     }
-    fun onSession(){reportConsent(consent.read());report()}
+    internal fun controlEvent(event:String,fields:Map<String,Any?>){diagnostics.emit(event,fields)}
+    fun onSession(){diagnostics.emit("manager_session_ready",emptyMap());reportConsent(consent.read());report()}
     /** Called every heartbeat. Honours a local revocation within one tick without waiting for the manager. */
     fun tick() {
         val state=consent.read()
         if(announced!=state)reportConsent(state)
         if(!state.allowed && hub!=null){hub?.close();hub=null;hubConfig=null}
+        if(System.nanoTime()-lastDiagnostic>60_000_000_000L) {
+            lastDiagnostic=System.nanoTime()
+            val h=hub?.status()
+            diagnostics.emit("relay_snapshot",mapOf("hubActive" to (hub!=null),"streams" to streamTotal(),"gamePort" to h?.gamePort,
+                "securePort" to h?.securePort,"sableState" to h?.sableUdp?.state,"sableDropped" to h?.sableUdp?.dropped,
+                "agents" to agents.mapValues {(_,a)->mapOf("state" to a.state.name,"streams" to a.streamCount(),"connectedAt" to a.connectedAt)}))
+        }
         report()
     }
     fun report() {
@@ -142,12 +152,13 @@ class DirectRelayRunnerRole(home:Path,private val send:(RunnerMessage)->Boolean,
         require(UUID.fromString(config.relayId).toString()==config.relayId && config.gamePort in 1024..65535 && config.securePort in 1024..65535 && config.gamePort!=config.securePort)
         val secret=Base64.getUrlDecoder().decode(config.secret);require(secret.size==32)
         var active=hub
-        if(active==null || hubConfig?.relayId!=config.relayId){active?.close();active=DirectRelayHub(config.relayId,secret);hub=active}
+        if(active==null || hubConfig?.relayId!=config.relayId){active?.close();active=DirectRelayHub(config.relayId,secret,events=diagnostics);hub=active}
         active.rotateSecret(secret)
         lastBindOk=active.listen(config.gamePort,config.securePort,bindAddress)
         active.applyPolicy(config.policy)
         active.sableUdp(config.sableUdpEnabled,config.gamePort,bindAddress)
         active.voiceChat(config.voicechat,bindAddress)
+        if(hubConfig!=config)diagnostics.emit("relay_config_applied",mapOf("relayId" to config.relayId,"gamePort" to config.gamePort,"securePort" to config.securePort,"generation" to config.policy.generation,"sableEnabled" to config.sableUdpEnabled))
         hubConfig=config
     }
     private fun ticketFor(relayId:String):RelayTicket? {
@@ -192,13 +203,13 @@ class DirectRelayRunnerRole(home:Path,private val send:(RunnerMessage)->Boolean,
             if(agents.containsKey(target.relayId))return@forEach
             val relayId=target.relayId
             val agent=DirectRelayAgent({endpointFor(target)},
-                {id->if(id in allowedInstances)gamePort(id) else null},{id->id in allowedInstances && ready(id)},backoff,{sableEnabled},{voiceTargets})
+                {id->if(id in allowedInstances)gamePort(id) else null},{id->id in allowedInstances && ready(id)},backoff,{sableEnabled},{voiceTargets},diagnostics)
             agents[relayId]=agent;agent.start()
         }
         // Targets the manager no longer lists are drained, never cut mid-game.
         agents.keys.filter {id->config.relays.none {it.relayId==id}}.forEach {id->agents.remove(id)?.drain(config.drainSeconds*1000)}
     }
-    fun close() {sableBridge.close();hub?.close();hub=null;agents.values.forEach {it.close()};agents.clear()}
+    fun close() {sableBridge.close();hub?.close();hub=null;agents.values.forEach {it.close()};agents.clear();diagnostics.close()}
 }
 
 /** Private IPv4 addresses to enter in the router's port-forward rule. Never includes loopback or link-local. */

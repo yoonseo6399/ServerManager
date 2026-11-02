@@ -1,0 +1,50 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :sableBridgeBuild UP-TO-DATE
+> Task :processResources UP-TO-DATE
+> Task :processTestResources NO-SOURCE
+> Task :compileKotlin
+> Task :compileJava NO-SOURCE
+> Task :classes UP-TO-DATE
+> Task :resolveMainClassName
+> Task :bootJar
+> Task :jar
+> Task :compileTestKotlin
+> Task :compileTestJava NO-SOURCE
+> Task :testClasses UP-TO-DATE
+
+> Task :test
+
+DirectRelayTest > manager outage keeps the established tunnel and reports an explicit reason for new attempts() FAILED
+    org.opentest4j.AssertionFailedError: approved traffic continues while the manager is away
+        at app//org.junit.jupiter.api.AssertionUtils.fail(AssertionUtils.java:38)
+        at app//org.junit.jupiter.api.Assertions.fail(Assertions.java:138)
+        at app//kotlin.test.junit5.JUnit5Asserter.fail(JUnitSupport.kt:56)
+        at app//kotlin.test.Asserter.assertTrue(Assertions.kt:694)
+        at app//kotlin.test.junit5.JUnit5Asserter.assertTrue(JUnitSupport.kt:30)
+        at app//kotlin.test.Asserter.assertTrue(Assertions.kt:704)
+        at app//kotlin.test.junit5.JUnit5Asserter.assertTrue(JUnitSupport.kt:30)
+        at app//kotlin.test.AssertionsKt__AssertionsKt.assertTrue(Assertions.kt:44)
+        at app//kotlin.test.AssertionsKt.assertTrue(Unknown Source)
+        at app//local.servermanager.DirectRelayTest.manager outage keeps the established tunnel and reports an explicit reason for new attempts(DirectRelayTest.kt:160)
+
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+
+> Task :test
+
+68 tests completed, 1 failed
+
+> Task :test FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':test'.
+> There were failing tests. See the report at: file:///Users/mini/.codex/.chatgpt-projects/g-p-6ad09a1ec0408191b8638c9cc45d7289/ServerManager-relay-stream-isolation/build/reports/tests/test/index.html
+
+* Try:
+> Run with --scan to get full insights.
+
+BUILD FAILED in 32s
+8 actionable tasks: 6 executed, 2 up-to-date

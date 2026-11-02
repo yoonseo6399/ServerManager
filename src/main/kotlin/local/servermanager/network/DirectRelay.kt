@@ -82,16 +82,52 @@ class SecureChannel(private val socket:Socket,private val sendKey:ByteArray,priv
     private val input=DataInputStream(socket.getInputStream().buffered())
     private val output=DataOutputStream(socket.getOutputStream().buffered())
     private var sent=0L;private var received=0L
+    @Volatile private var writer:RelayFrameWriter?=null
+    private var events:RelayEvents=RelayEvents.NONE
+    private var context:Map<String,Any?> =emptyMap()
+    private val opened=System.nanoTime()
+    private val tx=AtomicLong();private val rx=AtomicLong()
+    @Volatile private var lastTx=opened
+    @Volatile private var lastRx=opened
+    private val ended=java.util.concurrent.atomic.AtomicBoolean()
+    @Volatile private var lastSnapshot=opened
+    internal fun queuedWrites(events:RelayEvents,context:Map<String,Any?>) {
+        this.events=events;this.context=context
+        writer=RelayFrameWriter(::writeFrame,{close(it)},events,context)
+        events.emit("tunnel_opened",context)
+        RelayIoWatchdog.register(this) {
+            if(TimeUnit.NANOSECONDS.toSeconds(System.nanoTime()-lastSnapshot)>=60) {
+                lastSnapshot=System.nanoTime();events.emit("tunnel_snapshot",context+stats())
+            }
+        }
+    }
+    internal fun diagnosticFields()=context
+    private fun stats():Map<String,Any?> =mapOf("durationMs" to TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-opened),
+        "txBytes" to tx.get(),"rxBytes" to rx.get(),"lastTxAgeMs" to TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-lastTx),
+        "lastRxAgeMs" to TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-lastRx))+(writer?.snapshot() ?: emptyMap())
     private fun cipher(mode:Int,key:ByteArray,counter:Long)=Cipher.getInstance("AES/GCM/NoPadding").apply {
         val iv=ByteArray(12);java.nio.ByteBuffer.wrap(iv).putInt(0).putLong(counter)
         init(mode,SecretKeySpec(key,"AES"),GCMParameterSpec(128,iv))
     }
     fun send(type:Int,stream:Int,payload:ByteArray=ByteArray(0),offset:Int=0,length:Int=payload.size) {
-        require(length<=MAX_PAYLOAD)
-        val plain=java.nio.ByteBuffer.allocate(5+length).put(type.toByte()).putInt(stream).put(payload,offset,length).array()
+        dispatch(type,stream,payload,offset,length,false)
+    }
+    /** Only endpoint reader tasks may wait for queue room, never the shared tunnel receive loop. */
+    internal fun sendData(stream:Int,payload:ByteArray,offset:Int=0,length:Int=payload.size) {
+        dispatch(DATA,stream,payload,offset,length,true)
+    }
+    private fun dispatch(type:Int,stream:Int,payload:ByteArray,offset:Int,length:Int,wait:Boolean) {
+        require(length in 0..MAX_PAYLOAD && offset>=0 && offset<=payload.size-length)
+        val frame=Frame(type,stream,payload.copyOfRange(offset,offset+length))
+        val out=writer
+        if(out==null)writeFrame(frame)else out.send(frame,wait)
+    }
+    private fun writeFrame(frame:Frame) {
+        val plain=java.nio.ByteBuffer.allocate(5+frame.payload.size).put(frame.type.toByte()).putInt(frame.stream).put(frame.payload).array()
         synchronized(this) {
             val encrypted=cipher(Cipher.ENCRYPT_MODE,sendKey,sent++).doFinal(plain)
             output.writeInt(encrypted.size);output.write(encrypted);output.flush()
+            tx.addAndGet(frame.payload.size.toLong());lastTx=System.nanoTime()
         }
     }
     /** Single reader only. Returns null at a clean end of stream. */
@@ -100,10 +136,17 @@ class SecureChannel(private val socket:Socket,private val sendKey:ByteArray,priv
         require(size in 21..MAX_PAYLOAD+5+16) {"잘못된 프레임 크기"}
         val encrypted=ByteArray(size);input.readFully(encrypted)
         val plain=cipher(Cipher.DECRYPT_MODE,receiveKey,received++).doFinal(encrypted)
+        rx.addAndGet((plain.size-5).toLong());lastRx=System.nanoTime()
         val buffer=java.nio.ByteBuffer.wrap(plain)
         return Frame(buffer.get().toInt() and 0xff,buffer.int,ByteArray(buffer.remaining()).also(buffer::get))
     }
-    override fun close() {runCatching {socket.close()}}
+    internal fun close(reason:String) {
+        if(!ended.compareAndSet(false,true))return
+        RelayIoWatchdog.remove(this);runCatching {socket.close()};writer?.close()
+        events.emit("tunnel_closed",context+stats()+mapOf("reason" to reason))
+    }
+    internal fun finish(reason:String){val out=writer;if(out==null)close(reason)else out.finish {close(reason)}}
+    override fun close() {close("LOCAL_CLOSE")}
     companion object {
         const val OPEN=1;const val OPENED=2;const val OPEN_FAIL=3;const val DATA=4;const val CLOSE=5;const val PING=6;const val PONG=7
         const val GOAWAY=8;const val READY_QUERY=9;const val READY=10;const val NOT_READY=11
@@ -170,7 +213,7 @@ data class RelayHubStatus(val gameListening:Boolean,val gamePort:Int?,val secure
     @get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) val sableInstances:Map<String,SableRelayStatus>?=null,
     @get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY) val voicechat:Map<String,VoiceChatStatus> =emptyMap())
 
-class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clock:()->Long={System.currentTimeMillis()},private val playerReadTimeoutMillis:Int=60000):AutoCloseable {
+class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clock:()->Long={System.currentTimeMillis()},private val playerReadTimeoutMillis:Int=60000,private val events:RelayEvents=RelayEvents.NONE):AutoCloseable {
     private inner class Tunnel(val agentId:String,val epoch:Long,val channel:SecureChannel,val connectedAt:Long) {
         val players=ConcurrentHashMap<Int,Socket>();val instances=ConcurrentHashMap<Int,String>();val opens=ConcurrentHashMap<Int,CountDownLatch>();val failed=ConcurrentHashMap<Int,String>()
         val readyReplies=ConcurrentHashMap<String,java.util.concurrent.CompletableFuture<Boolean>>()
@@ -182,15 +225,27 @@ class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clo
             val b=java.nio.ByteBuffer.wrap(frame);val stream=b.int
             channel.send(SecureChannel.VOICE_UP,stream,ByteArray(b.remaining()).also(b::get));true
         }.getOrDefault(false)}
+        val writers=ConcurrentHashMap<Int,RelaySocketWriter>()
         val ids=AtomicInteger(1)
-        fun end(stream:Int,notify:Boolean) {
+        fun end(stream:Int,notify:Boolean,reason:String="LOCAL_CLOSE",graceful:Boolean=false) {
             instances.remove(stream);sable.removeStream(agentId,stream)
-            players.remove(stream)?.let {runCatching {it.close()};if(notify)runCatching {channel.send(SecureChannel.CLOSE,stream)}}
+            // Keep the endpoint counted as busy until its accepted output has actually drained.
+            if(graceful){writers[stream]?.let {it.finish(reason);return}}
+            val socket=players.remove(stream)
+            val writer=writers.remove(stream)
+            writer?.close(reason);runCatching {socket?.close()}
+            if(socket!=null && notify)runCatching {channel.send(SecureChannel.CLOSE,stream)}
         }
-        fun close() {voiceDatagrams.close();voicechat.removeRunner(agentId);datagrams.close();sable.removeRunner(agentId);channel.close();players.keys.toTypedArray().forEach {end(it,false)};opens.values.forEach {it.countDown()}}
+        fun close(reason:String="TUNNEL_CLOSED") {
+            voiceDatagrams.close();voicechat.removeRunner(agentId);datagrams.close();sable.removeRunner(agentId)
+            if(reason=="POLICY_REVOKED")channel.finish(reason)else channel.close(reason);players.keys.toTypedArray().forEach {end(it,false,reason)};opens.values.forEach {it.countDown()}
+            readyReplies.values.forEach {it.complete(false)}
+        }
     }
+
     private val io=Executors.newVirtualThreadPerTaskExecutor()
     private val tunnels=ConcurrentHashMap<String,Tunnel>()
+    private val writeBudget=RelayByteBudget()
     private val sable=SableRelay({agent,stream->
         val t=tunnels[agent];val socket=t?.players?.get(stream);val instance=t?.instances?.get(stream)
         if(!udpEnabled || t==null || socket==null || instance==null || policy.agents[agent]!=t.epoch || policy.routes.none {it.agentId==agent && it.instanceId==instance})null
@@ -220,7 +275,10 @@ class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clo
     @Volatile private var secure:ServerSocket?=null
     @Volatile private var closed=false
     @Volatile private var bindError:String?=null
-    private fun reject(reason:String){rejects.computeIfAbsent(reason){AtomicLong()}.incrementAndGet()}
+    private fun reject(reason:String){
+        val count=rejects.computeIfAbsent(reason){AtomicLong()}.incrementAndGet()
+        if(count<=3 || count%100==0L)events.emit("relay_rejected",mapOf("side" to "hub","relayId" to relayId,"reason" to reason,"count" to count))
+    }
     private fun bind(port:Int,address:String):ServerSocket? {
         val server=ServerSocket();server.reuseAddress=true
         return try {server.bind(InetSocketAddress(address,port),50);server}
@@ -242,7 +300,7 @@ class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clo
         policy=next
         tunnels.values.filter {next.agents[it.agentId]!=it.epoch}.forEach {revoked->
             runCatching {revoked.channel.send(SecureChannel.GOAWAY,0,"REVOKED".toByteArray())}
-            if(tunnels.remove(revoked.agentId,revoked))revoked.close()
+            if(tunnels.remove(revoked.agentId,revoked))revoked.close("POLICY_REVOKED")
         }
         return true
     }
@@ -277,19 +335,21 @@ class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clo
             if(!handshakeSlots.tryAcquire()){socket.close();reject("TOO_MANY_HANDSHAKES");continue}
             io.submit {
                 var tunnel:Tunnel?=null
+                var endedBy="TUNNEL_EOF"
                 try {
                     socket.soTimeout=5000
                     val (channel,ticket)=DirectRelayHandshake.server(socket,secret) {body->check(body)}
                     socket.soTimeout=0;handshakeSlots.release()
                     tunnel=Tunnel(ticket.agentId,ticket.epoch,channel,clock())
-                    tunnels.put(ticket.agentId,tunnel)?.close()
+                    channel.queuedWrites(events,mapOf("side" to "hub","relayId" to relayId,"agentId" to ticket.agentId,"connectionId" to java.util.UUID.randomUUID().toString()))
+                    tunnels.put(ticket.agentId,tunnel)?.close("TUNNEL_REPLACED")
                     // Policy may have changed between ticket check and registration.
                     if(policy.agents[ticket.agentId]!=ticket.epoch){reject("STALE_EPOCH");return@submit}
                     serve(tunnel)
-                } catch(e:DirectRelayRejected){reject(e.reason)}
-                catch(e:Exception){reject("PROTOCOL_ERROR")}
+                } catch(e:DirectRelayRejected){endedBy=e.reason;reject(e.reason)}
+                catch(e:Exception){endedBy=relayError(e) ?: "PROTOCOL_ERROR";reject("PROTOCOL_ERROR")}
                 finally {
-                    if(tunnel==null)handshakeSlots.release() else {tunnels.remove(tunnel.agentId,tunnel);tunnel.close()}
+                    if(tunnel==null)handshakeSlots.release() else {tunnels.remove(tunnel.agentId,tunnel);tunnel.close(endedBy)}
                     runCatching {socket.close()}
                 }
             }
@@ -311,8 +371,8 @@ class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clo
             when(frame.type) {
                 SecureChannel.OPENED -> tunnel.opens[frame.stream]?.countDown()
                 SecureChannel.OPEN_FAIL -> {tunnel.failed[frame.stream]=frame.payload.toString(Charsets.US_ASCII).take(40);tunnel.opens[frame.stream]?.countDown()}
-                SecureChannel.DATA -> tunnel.players[frame.stream]?.let {s->runCatching {s.getOutputStream().write(frame.payload);s.getOutputStream().flush()}.onFailure {tunnel.end(frame.stream,true)}}
-                SecureChannel.CLOSE -> tunnel.end(frame.stream,false)
+                SecureChannel.DATA -> tunnel.writers[frame.stream]?.offer(frame.payload)
+                SecureChannel.CLOSE -> tunnel.end(frame.stream,false,"REMOTE_CLOSE",graceful=true)
                 SecureChannel.UDP_REGISTER -> {
                     val token=runCatching {java.util.UUID.fromString(frame.payload.toString(Charsets.US_ASCII)).takeIf {it.toString()==frame.payload.toString(Charsets.US_ASCII)}}.getOrNull()
                     val instance=tunnel.instances[frame.stream]
@@ -336,6 +396,7 @@ class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clo
                 fun release(){if(!released){released=true;handshakeSlots.release()}}
                 var handed=false
                 var cleanup:(()->Unit)?=null
+                var endedBy="PLAYER_EOF"
                 try {
                     player.soTimeout=5000
                     val handshake=MinecraftHandshake.read(player.getInputStream())
@@ -345,27 +406,31 @@ class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clo
                     if(tunnel.players.size>=200){reject("TOO_MANY_STREAMS");return@submit}
                     val stream=tunnel.ids.getAndIncrement();val latch=CountDownLatch(1)
                     tunnel.opens[stream]=latch;tunnel.players[stream]=player;tunnel.instances[stream]=route.instanceId
-                    cleanup={tunnel.end(stream,true)}
+                    val details=tunnel.channel.diagnosticFields()+mapOf("instanceId" to route.instanceId,"stream" to stream)
+                    val writer=RelaySocketWriter(player,writeBudget,events,details,{reason->tunnel.end(stream,true,reason)})
+                    tunnel.writers[stream]=writer
+                    events.emit("stream_opened",details)
+                    cleanup={tunnel.end(stream,true,endedBy)}
                     try {
                         tunnel.channel.send(SecureChannel.OPEN,stream,route.instanceId.toByteArray())
                         if(!latch.await(3,TimeUnit.SECONDS)){reject("OPEN_TIMEOUT");tunnel.end(stream,true);return@submit}
-                        tunnel.failed.remove(stream)?.let {reject("AGENT_$it");tunnel.players.remove(stream);return@submit}
+                        tunnel.failed.remove(stream)?.let {reject("AGENT_$it");tunnel.end(stream,false,"AGENT_${it}");return@submit}
                     } finally {tunnel.opens.remove(stream)}
                     handed=true;release()
                     player.soTimeout=playerReadTimeoutMillis
-                    tunnel.channel.send(SecureChannel.DATA,stream,handshake.bytes)
+                    tunnel.channel.sendData(stream,handshake.bytes)
                     val input=player.getInputStream();val buffer=ByteArray(32*1024)
-                    while(true) {val count=input.read(buffer);if(count<0)break;tunnel.channel.send(SecureChannel.DATA,stream,buffer,0,count)}
-                    tunnel.end(stream,true)
-                } catch(e:DirectRelayRejected){reject(e.reason)}
-                catch(e:Exception){if(!handed)reject("HANDSHAKE_REJECTED")}
+                    while(true) {val count=input.read(buffer);if(count<0)break;writer.read(count);tunnel.channel.sendData(stream,buffer,0,count)}
+                    tunnel.end(stream,true,endedBy)
+                } catch(e:DirectRelayRejected){endedBy=e.reason;reject(e.reason)}
+                catch(e:Exception){endedBy=relayError(e) ?: "PLAYER_ERROR";if(!handed)reject("HANDSHAKE_REJECTED")}
                 finally {release();runCatching {cleanup?.invoke()};runCatching {player.close()}}
             }
         }
     }
     override fun close() {
         closed=true;voicechat.close();sable.close();runCatching {game?.close()};runCatching {secure?.close()}
-        tunnels.values.forEach {it.close()};tunnels.clear();io.shutdownNow()
+        tunnels.values.forEach {it.close("HUB_SHUTDOWN")};tunnels.clear();io.shutdownNow()
     }
 }
 
@@ -375,9 +440,11 @@ data class RelayEndpoint(val host:String,val port:Int,val ticket:RelayTicket)
 
 /** Game runner side: dials out to the relay, then serves OPEN requests only for instances it owns. */
 class DirectRelayAgent(private val endpoint:()->RelayEndpoint?,private val gamePort:(String)->Int?,private val ready:(String)->Boolean={true},
-        private val backoffMillis:LongArray=longArrayOf(500,1000,2000,5000,10000),private val sableAllowed:()->Boolean={false},private val voiceTargets:()->List<VoiceChatTarget> ={emptyList()}):AutoCloseable {
+        private val backoffMillis:LongArray=longArrayOf(500,1000,2000,5000,10000),private val sableAllowed:()->Boolean={false},private val voiceTargets:()->List<VoiceChatTarget> ={emptyList()},private val events:RelayEvents=RelayEvents.NONE):AutoCloseable {
     private val io=Executors.newVirtualThreadPerTaskExecutor()
     private val streams=ConcurrentHashMap<Int,Socket>()
+    private val writers=ConcurrentHashMap<Int,RelaySocketWriter>()
+    private val writeBudget=RelayByteBudget()
     private val streamInstances=ConcurrentHashMap<Int,String>()
     private val udp=ConcurrentHashMap<Int,java.net.DatagramSocket>()
     private val udpTokens=ConcurrentHashMap<Int,String>()
@@ -451,15 +518,19 @@ class DirectRelayAgent(private val endpoint:()->RelayEndpoint?,private val gameP
             else try {
                 val socket=Socket();socket.connect(InetSocketAddress(target.host,target.port),5000);socket.soTimeout=10000;socket.tcpNoDelay=true
                 val tunnel=try {DirectRelayHandshake.client(socket,target.ticket)} catch(e:Exception){runCatching {socket.close()};throw e}
-                socket.soTimeout=0;channel=tunnel;connectedAt=System.currentTimeMillis();state=RelayAgentState.CONNECTED;reason=null;failures=0
+                socket.soTimeout=0
+                tunnel.queuedWrites(events,mapOf("side" to "agent","connectionId" to java.util.UUID.randomUUID().toString(),"host" to target.host,"port" to target.port))
+                channel=tunnel;connectedAt=System.currentTimeMillis();state=RelayAgentState.CONNECTED;reason=null;failures=0
                 datagrams=DatagramOutbox {bytes->runCatching {val b=java.nio.ByteBuffer.wrap(bytes);val stream=b.int;tunnel.send(SecureChannel.UDP_DOWN,stream,ByteArray(b.remaining()).also(b::get));true}.getOrDefault(false)}
                 voiceOutbox=DatagramOutbox {bytes->runCatching {val b=java.nio.ByteBuffer.wrap(bytes);val session=b.int;tunnel.send(SecureChannel.VOICE_DOWN,session,ByteArray(b.remaining()).also(b::get));true}.getOrDefault(false)}
-                try {serve(tunnel)} finally {voiceOutbox?.close();voiceOutbox=null;voicechat.close();datagrams?.close();datagrams=null;disableSable();channel=null;connectedAt=null;streams.keys.toTypedArray().forEach {end(it)};tunnel.close()}
+                try {serve(tunnel)} finally {voiceOutbox?.close();voiceOutbox=null;voicechat.close();datagrams?.close();datagrams=null;disableSable();channel=null;connectedAt=null;streams.keys.toTypedArray().forEach {end(it,"TUNNEL_CLOSED")};tunnel.close("AGENT_SESSION_ENDED")}
                 if(!stopped && state==RelayAgentState.CONNECTED){state=RelayAgentState.UNREACHABLE;reason="중계 실행기 연결이 끊겼습니다"}
             } catch(e:DirectRelayRejected){state=RelayAgentState.REJECTED;reason=e.reason}
-            catch(e:Exception){state=RelayAgentState.UNREACHABLE;reason="중계 실행기에 연결하지 못했습니다: ${e.javaClass.simpleName}"}
+            catch(e:Exception){state=RelayAgentState.UNREACHABLE;reason="중계 실행기에 연결하지 못했습니다: ${e.javaClass.simpleName}";events.emit("agent_connection_failed",mapOf("errorType" to relayError(e)))}
             if(stopped)break
-            try {Thread.sleep(backoffMillis[minOf(failures++,backoffMillis.size-1)])} catch(_:InterruptedException){break}
+            val retryMillis=backoffMillis[minOf(failures++,backoffMillis.size-1)]
+            events.emit("agent_retry",mapOf("state" to state.name,"attempt" to failures,"retryMs" to retryMillis,"errorType" to relayError(lookup.exceptionOrNull())))
+            try {Thread.sleep(retryMillis)} catch(_:InterruptedException){break}
         }
     }
     private fun serve(tunnel:SecureChannel) {
@@ -467,8 +538,8 @@ class DirectRelayAgent(private val endpoint:()->RelayEndpoint?,private val gameP
             val frame=tunnel.receive() ?: return
             when(frame.type) {
                 SecureChannel.OPEN -> open(tunnel,frame.stream,frame.payload.toString(Charsets.UTF_8))
-                SecureChannel.DATA -> streams[frame.stream]?.let {s->runCatching {s.getOutputStream().write(frame.payload);s.getOutputStream().flush()}.onFailure {end(frame.stream);runCatching {tunnel.send(SecureChannel.CLOSE,frame.stream)}}}
-                SecureChannel.CLOSE -> end(frame.stream)
+                SecureChannel.DATA -> writers[frame.stream]?.offer(frame.payload)
+                SecureChannel.CLOSE -> end(frame.stream,"REMOTE_CLOSE",graceful=true)
                 SecureChannel.VOICE_UP -> voicechat.receive(frame.stream,frame.payload)
                 SecureChannel.UDP_UP -> receiveDatagram(tunnel,frame)
                 SecureChannel.UDP_REGISTERED,SecureChannel.UDP_DENIED -> registrations[frame.payload.toString(Charsets.US_ASCII)]?.complete(frame.type==SecureChannel.UDP_REGISTERED)
@@ -483,15 +554,32 @@ class DirectRelayAgent(private val endpoint:()->RelayEndpoint?,private val gameP
         if(port==null || !ready(instanceId) || streams.size>=200 || streams.containsKey(stream)){tunnel.send(SecureChannel.OPEN_FAIL,stream,(if(port==null)"NOT_ALLOWED" else "NOT_READY").toByteArray());return}
         io.submit {
             val socket=Socket()
+            var endedBy="BACKEND_EOF"
             try {
+                if(stopped || channel!==tunnel)return@submit
                 socket.connect(InetSocketAddress("127.0.0.1",port),3000);socket.soTimeout=60000;socket.tcpNoDelay=true
-                streams[stream]=socket;streamInstances[stream]=instanceId;tunnel.send(SecureChannel.OPENED,stream)
+                if(stopped || channel!==tunnel)return@submit
+                val details=tunnel.diagnosticFields()+mapOf("instanceId" to instanceId,"stream" to stream)
+                val writer=RelaySocketWriter(socket,writeBudget,events,details,{reason->
+                    end(stream,reason);runCatching {tunnel.send(SecureChannel.CLOSE,stream)}
+                })
+                streams[stream]=socket;streamInstances[stream]=instanceId;writers[stream]=writer
+                events.emit("stream_opened",details);tunnel.send(SecureChannel.OPENED,stream)
                 val input=socket.getInputStream();val buffer=ByteArray(32*1024)
-                while(true) {val count=input.read(buffer);if(count<0)break;tunnel.send(SecureChannel.DATA,stream,buffer,0,count)}
-            } catch(e:Exception){if(!streams.containsKey(stream))runCatching {tunnel.send(SecureChannel.OPEN_FAIL,stream,"CONNECT_FAILED".toByteArray())}}
-            finally {streamInstances.remove(stream);udpTokens.remove(stream);udp.remove(stream)?.close();if(streams.remove(stream,socket))runCatching {tunnel.send(SecureChannel.CLOSE,stream)};runCatching {socket.close()}}
+                while(true) {val count=input.read(buffer);if(count<0)break;writer.read(count);tunnel.sendData(stream,buffer,0,count)}
+            } catch(e:Exception){
+                endedBy=relayError(e) ?: "BACKEND_ERROR"
+                events.emit("backend_read_ended",mapOf("stream" to stream,"instanceId" to instanceId,"errorType" to relayError(e)))
+                if(!streams.containsKey(stream))runCatching {tunnel.send(SecureChannel.OPEN_FAIL,stream,"CONNECT_FAILED".toByteArray())}
+            }
+            finally {end(stream,endedBy);runCatching {tunnel.send(SecureChannel.CLOSE,stream)};runCatching {socket.close()}}
         }
     }
-    private fun end(stream:Int){streamInstances.remove(stream);udpTokens.remove(stream);udp.remove(stream)?.close();streams.remove(stream)?.let {runCatching {it.close()}}}
+    private fun end(stream:Int,reason:String="LOCAL_CLOSE",graceful:Boolean=false){
+        streamInstances.remove(stream);udpTokens.remove(stream);udp.remove(stream)?.close()
+        if(graceful){writers[stream]?.let {it.finish(reason);return}}
+        val socket=streams.remove(stream);val writer=writers.remove(stream)
+        writer?.close(reason);runCatching {socket?.close()}
+    }
     override fun close() {stopped=true;voicechat.close();voiceOutbox?.close();disableSable();datagrams?.close();channel?.close();loop?.interrupt();streams.keys.toTypedArray().forEach {end(it)};io.shutdownNow();state=RelayAgentState.IDLE}
 }

@@ -91,7 +91,7 @@ object RunnerMain {
                         agent=next;currentId=identity.id
                     }
                     try { agent!!.connectLoop() }
-                    catch(e:Exception) { System.err.println("중앙 서버 연결 대기: ${e.javaClass.simpleName}");Thread.sleep(5000) }
+                    catch(e:Exception) { System.err.println("${java.time.Instant.now()} 중앙 서버 연결 대기: ${relayError(e)}");Thread.sleep(5000) }
                     if(agent!!.restartForUpdate()) kotlin.system.exitProcess(75)
                 }
             }
@@ -178,7 +178,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     @Volatile private var sessionToken:String?=null
     /** Direct relay (DRP1) survives manager disconnects; only local consent withdrawal or process exit tears it down. */
     @Volatile private var directSable=false
-    private val directRelay=DirectRelayRunnerRole(home,::send,{id->configs[id]?.takeIf {processes[id]?.isAlive==true && id in ready && id !in stopping}?.port},{id->processes[id]?.isAlive==true && id in ready && id !in stopping})
+    private val directRelay=DirectRelayRunnerRole(home,::send,{id->configs[id]?.takeIf {processes[id]?.isAlive==true && id in ready && id !in stopping}?.port},{id->processes[id]?.isAlive==true && id in ready && id !in stopping},diagnosticName="relay-runner")
     private val processes=ConcurrentHashMap<String,Process>()
     private val gameStreams=ConcurrentHashMap<Int,Socket>()
     private val configs=ConcurrentHashMap<String,Instance>()
@@ -306,10 +306,10 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         val signature=Signature.getInstance("Ed25519").apply { initSign(signingKey());update(bytes) }.sign()
         val encoded=Base64.getUrlEncoder().withoutPadding().encodeToString(signature)
         val uri=URI(identity.managerUrl.replaceFirst("https://","wss://")+"/api/runners/connect")
-        val socket=client.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(20))
+        val socket=try {client.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(20))
             .header("X-SM-Runner-Id",identity.id).header("X-SM-Timestamp",timestamp.toString())
             .header("X-SM-Nonce",nonce).header("X-SM-Signature",encoded)
-            .buildAsync(uri,this).join()
+            .buildAsync(uri,this).join()}catch(e:Exception){directRelay.controlEvent("manager_connect_failed",mapOf("errorType" to relayError(e)));throw e}
         connection.set(socket)
         if(socket.isOutputClosed) closed.countDown()
         while(closed.count>0 && socket.isOutputClosed.not()) {
@@ -560,7 +560,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         if(!updatePauseRequested)home.resolve("instances").takeIf { it.exists() }?.let { root -> Files.list(root).use { paths -> paths.filter { it.resolve("dirty").exists() || it.resolve("stopped-snapshots").takeIf {p->p.exists()}?.listDirectoryEntries()?.any {p->StoppedSnapshots.valid(p.name)}==true }.forEach { dir -> uploadStopped(dir.fileName.toString()) } } }
         tcpRelay?.close();directRelay.close();sable.close();editPublisher.close();workers.shutdown()
     }
-    override fun onOpen(webSocket:WebSocket) { connection.set(webSocket);webSocket.request(1) }
+    override fun onOpen(webSocket:WebSocket) { directRelay.controlEvent("manager_socket_opened",emptyMap());connection.set(webSocket);webSocket.request(1) }
     override fun onText(webSocket:WebSocket,data:CharSequence,last:Boolean):CompletionStage<*> {
         synchronized(textBuffer) {
             if(textBuffer.length+data.length>4*PiWire.MAX_REQUEST_BYTES){textBuffer.setLength(0);webSocket.abort();return CompletableFuture.completedFuture(null)}
@@ -635,8 +635,8 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         }
         webSocket.request(1);return CompletableFuture.completedFuture(null)
     }
-    override fun onClose(webSocket:WebSocket,statusCode:Int,reason:String):CompletionStage<*> { if(connection.get()===webSocket){cancelLlmTasks();closed.countDown()};return CompletableFuture.completedFuture(null) }
-    override fun onError(webSocket:WebSocket,error:Throwable) { if(connection.get()===webSocket){cancelLlmTasks();closed.countDown()} }
+    override fun onClose(webSocket:WebSocket,statusCode:Int,reason:String):CompletionStage<*> { directRelay.controlEvent("manager_socket_closed",mapOf("statusCode" to statusCode));if(connection.get()===webSocket){cancelLlmTasks();closed.countDown()};return CompletableFuture.completedFuture(null) }
+    override fun onError(webSocket:WebSocket,error:Throwable) { directRelay.controlEvent("manager_socket_error",mapOf("errorType" to relayError(error)));if(connection.get()===webSocket){cancelLlmTasks();closed.countDown()} }
     private fun send(message:RunnerMessage):Boolean {
         val socket=connection.get() ?: return false
         return runCatching { synchronized(sendLock) { socket.sendText(mapper.writeValueAsString(message),true).join() };true }.getOrDefault(false)
