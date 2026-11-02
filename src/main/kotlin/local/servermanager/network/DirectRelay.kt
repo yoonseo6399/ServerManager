@@ -101,6 +101,7 @@ class SecureChannel(private val socket:Socket,private val sendKey:ByteArray,priv
             }
         }
     }
+    internal fun diagnosticFields()=context
     private fun stats():Map<String,Any?> =mapOf("durationMs" to TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-opened),
         "txBytes" to tx.get(),"rxBytes" to rx.get(),"lastTxAgeMs" to TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-lastTx),
         "lastRxAgeMs" to TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-lastRx))
@@ -403,7 +404,7 @@ class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clo
                     if(tunnel.players.size>=200){reject("TOO_MANY_STREAMS");return@submit}
                     val stream=tunnel.ids.getAndIncrement();val latch=CountDownLatch(1)
                     tunnel.opens[stream]=latch;tunnel.players[stream]=player;tunnel.instances[stream]=route.instanceId
-                    val details=mapOf("side" to "hub","relayId" to relayId,"agentId" to route.agentId,"instanceId" to route.instanceId,"stream" to stream)
+                    val details=tunnel.channel.diagnosticFields()+mapOf("instanceId" to route.instanceId,"stream" to stream)
                     val writer=RelaySocketWriter(player,writeBudget,events,details,{reason->tunnel.end(stream,true,reason)})
                     tunnel.writers[stream]=writer
                     events.emit("stream_opened",details)
@@ -523,7 +524,7 @@ class DirectRelayAgent(private val endpoint:()->RelayEndpoint?,private val gameP
                 try {serve(tunnel)} finally {voiceOutbox?.close();voiceOutbox=null;voicechat.close();datagrams?.close();datagrams=null;disableSable();channel=null;connectedAt=null;streams.keys.toTypedArray().forEach {end(it,"TUNNEL_CLOSED")};tunnel.close("AGENT_SESSION_ENDED")}
                 if(!stopped && state==RelayAgentState.CONNECTED){state=RelayAgentState.UNREACHABLE;reason="중계 실행기 연결이 끊겼습니다"}
             } catch(e:DirectRelayRejected){state=RelayAgentState.REJECTED;reason=e.reason}
-            catch(e:Exception){state=RelayAgentState.UNREACHABLE;reason="중계 실행기에 연결하지 못했습니다: ${e.javaClass.simpleName}"}
+            catch(e:Exception){state=RelayAgentState.UNREACHABLE;reason="중계 실행기에 연결하지 못했습니다: ${e.javaClass.simpleName}";events.emit("agent_connection_failed",mapOf("errorType" to relayError(e)))}
             if(stopped)break
             val retryMillis=backoffMillis[minOf(failures++,backoffMillis.size-1)]
             events.emit("agent_retry",mapOf("state" to state.name,"attempt" to failures,"retryMs" to retryMillis,"errorType" to relayError(lookup.exceptionOrNull())))
@@ -556,7 +557,7 @@ class DirectRelayAgent(private val endpoint:()->RelayEndpoint?,private val gameP
                 if(stopped || channel!==tunnel)return@submit
                 socket.connect(InetSocketAddress("127.0.0.1",port),3000);socket.soTimeout=60000;socket.tcpNoDelay=true
                 if(stopped || channel!==tunnel)return@submit
-                val details=mapOf("side" to "agent","instanceId" to instanceId,"stream" to stream)
+                val details=tunnel.diagnosticFields()+mapOf("instanceId" to instanceId,"stream" to stream)
                 val writer=RelaySocketWriter(socket,writeBudget,events,details,{reason->
                     end(stream,reason);runCatching {tunnel.send(SecureChannel.CLOSE,stream)}
                 })

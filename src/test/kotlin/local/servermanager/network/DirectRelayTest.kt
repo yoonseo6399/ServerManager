@@ -219,4 +219,36 @@ class DirectRelayTest {
         assertEquals("once",String(receiver.receive()!!.payload))
         assertFailsWith<javax.crypto.AEADBadTagException> {receiver.receive()}
     }
+    @Test fun `one non-reading player cannot stall another player on the same encrypted tunnel`() {slowEndpoint("hub")}
+    @Test fun `one non-reading game backend cannot stall another instance stream on the same tunnel`() {slowEndpoint("agent")}
+    private fun slowEndpoint(side:String) {
+        val observed=java.util.concurrent.CopyOnWriteArrayList<Pair<String,Map<String,Any?>>>()
+        val events=RelayEvents {event,fields->observed.add(event to fields)}
+        val server=ServerSocket(0).track();val sockets=java.util.concurrent.CopyOnWriteArrayList<Socket>()
+        val ordinal=AtomicInteger();val secondId="second"
+        Thread.ofVirtual().start {while(!server.isClosed) {
+            val s=runCatching {server.accept()}.getOrNull() ?: break;sockets.add(s);val first=ordinal.incrementAndGet()==1
+            Thread.ofVirtual().start {runCatching {
+                if(first) {
+                    if(side=="hub")repeat(1024){s.getOutputStream().write(ByteArray(16*1024){7})}
+                    else while(!s.isClosed)Thread.sleep(50)
+                } else {val buffer=ByteArray(4096);while(true){val n=s.getInputStream().read(buffer);if(n<0)break;s.getOutputStream().write(buffer,0,n);s.getOutputStream().flush()}}
+            }}
+        }}
+        val hub=DirectRelayHub(relayId,secret,events=events).track().also {it.listen(0,0,"127.0.0.1");it.applyPolicy(RelayPolicy(1,mapOf(agentId to 1),listOf(RelayRoute(host,agentId,"inst"),RelayRoute("second.example.com",agentId,secondId))))}
+        val agent=DirectRelayAgent({RelayEndpoint("127.0.0.1",hub.securePort!!,DirectRelayCrypto.issue(secret,relayId,agentId,1,60_000))},{server.localPort},events=events).track().also {it.start()}
+        try {
+            connectedAgent(hub,agent)
+            val slow=Socket().track();slow.receiveBufferSize=1024;slow.connect(InetSocketAddress("127.0.0.1",hub.gamePort!!));slow.getOutputStream().write(handshake(host))
+            await("first backend accepted"){ordinal.get()==1}
+            if(side=="agent")Thread.ofVirtual().start {runCatching {repeat(1024){slow.getOutputStream().write(ByteArray(16*1024){9})}}}
+            await("offending stream isolated",8000){observed.any {it.first=="stream_closed" && it.second["side"]==side && it.second["reason"]=="ENDPOINT_BACKPRESSURE"}}
+            player(hub,"second.example.com",payload="healthy-0").use {p->
+                assertTrue(readUntil(p,"healthy-0").contains("healthy-0"))
+                repeat(10){n->val marker="healthy-next-$n";p.getOutputStream().write(marker.toByteArray());assertTrue(readUntil(p,marker).contains(marker))}
+                assertEquals(RelayAgentState.CONNECTED,agent.state);assertEquals(1,hub.streamCount())
+            }
+        } finally {sockets.forEach {runCatching {it.close()}}}
+    }
+
 }

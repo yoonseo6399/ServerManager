@@ -114,6 +114,7 @@ internal class RelayFrameWriter(
     @Volatile private var writingSince=0L
     private var terminal:String?=null
     private var afterDrain:(()->Unit)?=null
+    private val droppedDatagrams=AtomicLong()
     private val worker=Thread.ofVirtual().name("relay-tunnel-writer").unstarted {run()}
     init {
         RelayIoWatchdog.register(this) {
@@ -143,6 +144,11 @@ internal class RelayFrameWriter(
             }
         }
         failure?.let {
+            if(frame.type in setOf(SecureChannel.UDP_UP,SecureChannel.UDP_DOWN,SecureChannel.VOICE_UP,SecureChannel.VOICE_DOWN)) {
+                val count=droppedDatagrams.incrementAndGet()
+                if(count==1L || count%100==0L)events.emit("tunnel_datagram_dropped",context+mapOf("count" to count,"reason" to it))
+                return
+            }
             events.emit("tunnel_backpressure",context+mapOf("stream" to frame.stream,"reason" to it))
             if(it=="TUNNEL_CONTROL_BACKPRESSURE")fail(it)
             throw IOException(it)

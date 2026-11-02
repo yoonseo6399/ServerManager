@@ -13,3 +13,4 @@
 - DirectRelayTest/DirectRelayProcessTest/DirectSableTest/DatagramOutboxTest/HostedRelayTest/VoiceChatRelay 관련 회귀. 실제 TCP 다중 플레이어 stall 회귀 추가.
 - Kotlin/bootJar 및 릴리즈 프런트 빌드. 사용자 지시로 전체 suite·다른OS 실기·운영 재시작·공개 자산 재다운로드/해시는 생략.
 - 상주 호스트를 새 버전으로 교체해야 개선이 적용되므로 게임을 정상 종료한 뒤 업데이트 적용. 본 작업에서 운영 서비스를 자동 재시작하지 않는다.
+- 추가 검증 계획: 실제 encrypted Hub+Agent에서 플레이어 미수신/게임 백엔드 미수신을 각각16MiB 전송으로 유도, 해당 stream만 ENDPOINT_BACKPRESSURE로 종료되고 같은 터널의 다른 stream이10회 왕복하는지 확인. UDP 큐 초과는 손실형 datagram으로 처리하고 TCP 종료와 구분해 샘플링 로그를 남긴다.
