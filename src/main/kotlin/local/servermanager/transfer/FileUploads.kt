@@ -15,10 +15,11 @@ import java.util.UUID
 import java.util.concurrent.Executors
 import kotlin.io.path.*
 
-data class FileUploadRequest(val filename:String,val size:Long,val path:String="",val clientId:String,val documentId:String="")
+data class FileUploadGroup(val id:String,val name:String,val files:Int,val bytes:Long)
+data class FileUploadRequest(val filename:String,val size:Long,val path:String="",val clientId:String,val documentId:String="",val folderGroup:FileUploadGroup?=null)
 @com.fasterxml.jackson.annotation.JsonIgnoreProperties(value=["cancellable"],allowGetters=true)
 data class FileUploadStatus(val token:String,val instanceId:String,val filename:String,val path:String,val size:Long,val clientId:String,val documentId:String="",
-    val phase:String="RECEIVING",val received:Long=0,val transferred:Long=0,val message:String="파일을 받는 중",val updatedAt:String=Instant.now().toString(),val chunkSize:Int=1024*1024,val revision:Long=0) {
+    val phase:String="RECEIVING",val received:Long=0,val transferred:Long=0,val message:String="파일을 받는 중",val updatedAt:String=Instant.now().toString(),val chunkSize:Int=1024*1024,val revision:Long=0,val folderGroup:FileUploadGroup?=null) {
     val cancellable:Boolean get()=phase in setOf("RECEIVING","QUEUED","TRANSFERRING")
 }
 internal data class SavedFileUpload(val owner:String,val runnerId:String?,val status:FileUploadStatus,val dismissed:Boolean=false)
@@ -64,12 +65,18 @@ class FileUploads(private val manager:ServerManager,private val remote:RemoteFil
         require(req.filename.length in 1..255 && req.filename !in setOf(".","..") && req.filename.none {it.isISOControl()||it=='/'||it=='\\'}) {"파일 이름을 확인하세요"}
         require(req.path.isEmpty() || PackFormat.relative(req.path)==req.path) {"업로드 폴더 경로를 확인하세요"}
         require(req.size in 0..MAX) {"파일 업로드는 최대 256 MiB입니다"};require(validToken(req.clientId) && (req.documentId.isEmpty() || validToken(req.documentId))) {"업로드 탭 식별자가 올바르지 않습니다"}
+        req.folderGroup?.let {group->
+            require(validToken(group.id) && group.name.length in 1..255 && group.name !in setOf(".","..") && group.name.none {it.isISOControl() || it=='/' || it=='\\'}) {"폴더 업로드 식별자를 확인하세요"}
+            require(group.files in 1..100000 && group.bytes in req.size..(MAX*group.files)) {"폴더 업로드 크기를 확인하세요"}
+            val siblings=jobs.values.filter {it.owner==owner && it.status.instanceId==id && it.status.folderGroup?.id==group.id}
+            require(siblings.all {it.status.folderGroup==group} && siblings.size<group.files && siblings.sumOf {it.status.size}+req.size<=group.bytes) {"폴더 업로드 정보가 일치하지 않습니다"}
+        }
         val active=jobs.values.filter {it.status.phase !in TERMINAL}
         check(active.size<32 && active.count {it.owner==owner}<16) {"진행 중인 업로드가 많습니다. 완료하거나 취소한 뒤 다시 시도하세요"}
         val reserved=active.sumOf {it.status.size}
         check(Files.getFileStore(directory).usableSpace>req.size+reserved+128L*1024*1024) {"업로드 임시 공간이 부족합니다"}
         val token=UUID.randomUUID().toString();val dir=directory.resolve(token).createDirectory();dir.resolve("content.part").createFile()
-        val status=FileUploadStatus(token,id,req.filename,req.path,req.size,req.clientId,documentId=req.documentId)
+        val status=FileUploadStatus(token,id,req.filename,req.path,req.size,req.clientId,documentId=req.documentId,folderGroup=req.folderGroup)
         jobs[token]=SavedFileUpload(owner,manager.instance(id).runnerId,status);persist(token);return status
     }
     /** One bounded HTTP body is read before taking the registry lock, so cancel never waits on the network. */

@@ -114,4 +114,18 @@ class FileUploadsTest {
   assertEquals("OLD",file.readText());assertTrue(manager.serverDir(id).listDirectoryEntries(".save-*").isEmpty())
   val s=create("NEW".toByteArray(),"original.txt","");uploads.complete(owner,id,s.token);await(s.token,"COMPLETE");assertEquals("NEW",file.readText())
  }
+ @Test fun `folder group survives restart and rejects inconsistent or oversized membership`() {
+  val group=FileUploadGroup(UUID.randomUUID().toString(),"kubejs",2,6)
+  val req=FileUploadRequest("a.js",3,"kubejs/server_scripts",UUID.randomUUID().toString(),folderGroup=group)
+  val first=uploads.create(owner,id,req);tokens.add(first.token)
+  assertEquals(group,uploads.status(owner,id,first.token).folderGroup)
+  assertFailsWith<IllegalArgumentException>{uploads.create(owner,id,req.copy(filename="b.js",folderGroup=group.copy(name="other")))}
+  assertFailsWith<IllegalArgumentException>{uploads.create(owner,id,req.copy(filename="b.js",size=4))}
+  uploads.cancel(owner,id,first.token);uploads.close();uploads=FileUploads(manager,RemoteFiles(manager),accounts)
+  assertEquals(group,uploads.list(owner,id).single {it.token==first.token}.folderGroup)
+  val second=uploads.create(owner,id,req.copy(filename="b.js"));tokens.add(second.token)
+  assertFailsWith<IllegalArgumentException>{uploads.create(owner,id,req.copy(filename="c.js",size=0))}
+  assertFailsWith<IllegalArgumentException>{uploads.create(owner,id,req.copy(folderGroup=group.copy(id=UUID.randomUUID().toString(),name="../bad")))}
+ }
+
 }
