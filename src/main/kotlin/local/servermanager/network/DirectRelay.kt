@@ -229,9 +229,11 @@ class DirectRelayHub(private val relayId:String,secret:ByteArray,private val clo
         val ids=AtomicInteger(1)
         fun end(stream:Int,notify:Boolean,reason:String="LOCAL_CLOSE",graceful:Boolean=false) {
             instances.remove(stream);sable.removeStream(agentId,stream)
+            // Keep the endpoint counted as busy until its accepted output has actually drained.
+            if(graceful){writers[stream]?.let {it.finish(reason);return}}
             val socket=players.remove(stream)
             val writer=writers.remove(stream)
-            if(graceful && writer!=null)writer.finish(reason)else {writer?.close(reason);runCatching {socket?.close()}}
+            writer?.close(reason);runCatching {socket?.close()}
             if(socket!=null && notify)runCatching {channel.send(SecureChannel.CLOSE,stream)}
         }
         fun close(reason:String="TUNNEL_CLOSED") {
@@ -575,8 +577,9 @@ class DirectRelayAgent(private val endpoint:()->RelayEndpoint?,private val gameP
     }
     private fun end(stream:Int,reason:String="LOCAL_CLOSE",graceful:Boolean=false){
         streamInstances.remove(stream);udpTokens.remove(stream);udp.remove(stream)?.close()
+        if(graceful){writers[stream]?.let {it.finish(reason);return}}
         val socket=streams.remove(stream);val writer=writers.remove(stream)
-        if(graceful && writer!=null)writer.finish(reason)else {writer?.close(reason);runCatching {socket?.close()}}
+        writer?.close(reason);runCatching {socket?.close()}
     }
     override fun close() {stopped=true;voicechat.close();voiceOutbox?.close();disableSable();datagrams?.close();channel?.close();loop?.interrupt();streams.keys.toTypedArray().forEach {end(it)};io.shutdownNow();state=RelayAgentState.IDLE}
 }

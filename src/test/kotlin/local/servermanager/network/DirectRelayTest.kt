@@ -251,4 +251,14 @@ class DirectRelayTest {
         } finally {sockets.forEach {runCatching {it.close()}}}
     }
 
+    @Test fun `backend EOF preserves every queued response byte before player EOF and releases busy streams`() {
+        val server=ServerSocket(0).track();val bytes=ByteArray(512*1024){(it*31).toByte()}
+        Thread.ofVirtual().start {runCatching {server.accept().use {s->s.getInputStream().readNBytes(handshake(host).size);s.getOutputStream().write(bytes);s.getOutputStream().flush()}}}
+        val hub=hub();hub.applyPolicy(policy())
+        val agent=DirectRelayAgent({RelayEndpoint("127.0.0.1",hub.securePort!!,DirectRelayCrypto.issue(secret,relayId,agentId,1,60_000))},{server.localPort}).track().also {it.start()}
+        connectedAgent(hub,agent)
+        player(hub,payload="").use {p->assertContentEquals(bytes,p.getInputStream().readBytes())}
+        await("all drained streams released"){hub.streamCount()==0 && agent.streamCount()==0}
+    }
+
 }
