@@ -35,7 +35,7 @@ class DirectRelayTest {
     }
     private class Setup(val hub:DirectRelayHub,val game:EchoGame,val agent:DirectRelayAgent,val ticketCount:AtomicInteger)
 
-    private fun hub()=DirectRelayHub(relayId,secret).track().also {check(it.listen(0,0,"127.0.0.1"))}
+    private fun hub(events:RelayEvents=RelayEvents.NONE)=DirectRelayHub(relayId,secret,events=events).track().also {check(it.listen(0,0,"127.0.0.1"))}
     private fun agentFor(hub:DirectRelayHub,game:EchoGame,epoch:Long=1,instance:String="inst",tickets:()->RelayTicket={DirectRelayCrypto.issue(secret,relayId,agentId,epoch,60_000)}):DirectRelayAgent =
         DirectRelayAgent({RelayEndpoint("127.0.0.1",hub.securePort!!,tickets())},{if(it==instance)game.server.localPort else null},backoffMillis=longArrayOf(50,100)).track().also {it.start()}
     private fun policy(generation:Long=1,epoch:Long=1,instance:String="inst",host:String=this.host)=RelayPolicy(generation,mapOf(agentId to epoch),listOf(RelayRoute(host,agentId,instance)))
@@ -152,12 +152,14 @@ class DirectRelayTest {
     @Test fun `manager outage keeps the established tunnel and reports an explicit reason for new attempts`() {
         // Closing the client and hub concurrently used to race the Kotlin single-item
         // Collection.toList optimization on ConcurrentHashMap.keys (NoSuchElementException).
-        repeat(20) {
-            val game=EchoGame().track();val hub=hub();hub.applyPolicy(policy());val managerUp=java.util.concurrent.atomic.AtomicBoolean(true)
-            val agent=DirectRelayAgent({if(managerUp.get())RelayEndpoint("127.0.0.1",hub.securePort!!,DirectRelayCrypto.issue(secret,relayId,agentId,1,60_000))else null},{game.server.localPort},backoffMillis=longArrayOf(50)).track()
+        repeat(100) {iteration->
+            val events=java.util.concurrent.CopyOnWriteArrayList<Pair<String,Map<String,Any?>>>()
+            val sink=RelayEvents {event,fields->events.add(event to fields)}
+            val game=EchoGame().track();val hub=hub(sink);hub.applyPolicy(policy());val managerUp=java.util.concurrent.atomic.AtomicBoolean(true)
+            val agent=DirectRelayAgent({if(managerUp.get())RelayEndpoint("127.0.0.1",hub.securePort!!,DirectRelayCrypto.issue(secret,relayId,agentId,1,60_000))else null},{game.server.localPort},backoffMillis=longArrayOf(50),events=sink).track()
             try {
                 agent.start();connectedAgent(hub,agent);managerUp.set(false)
-                player(hub).use {assertTrue(readAll(it,6).startsWith("echo:"),"approved traffic continues while the manager is away")}
+                player(hub).use {val got=readAll(it,6);assertTrue(got.startsWith("echo:"),"iteration=$iteration received=${got.toByteArray().joinToString {b->"%02x".format(b)}} events=$events")}
                 assertEquals(RelayAgentState.CONNECTED,agent.state)
                 hub.close()
                 await("manager unavailable"){agent.state==RelayAgentState.MANAGER_UNAVAILABLE}
