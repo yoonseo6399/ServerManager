@@ -782,4 +782,6 @@ Beta28 기반 fix/relay-stream-isolation(d13ffc6) 및 fix/folder-upload-progress
 
 폴더 업로드는 영속 그룹 ID/이름/파일 수/총바이트로 단일 진행 카드를 구성하고 하위 파일 카드를 숨긴다. 새로고침 복원·그룹 취소/알림 닫기·APPLYING 비가역 경계와 기존 ACL 유지. 기존 파일 요청·상태는 null 기본값으로 호환.
 
-기능 검증은 중계68/업로드10/UI12 통과. 초기 manager-outage1회 실패는 원인 미확정으로 원문 보존, 단독100 및 관련 suite100회 반 복은 통과했다. 통합과 게시 결과는 릴리즈 노트에 추가한다. 전체 suite/다른OS 실기/운영 재시작/공개 자산 재다운로드 해시는 생략. existing서명 secret과 workflow_dispatch skip_full_tests=true, stable latest/main 및 게시태그·자산 보존.
+기능 검증은 중계68/업로드10/UI12 통과. 초기 manager-outage1회 실패는 원인 미확정으로 원문 보존, 단독100 및 관련 suite100회 반복은 통과했다. 통합과 게시 결과는 릴리즈 노트에 추가한다. 전체 suite/다른OS 실기/운영 재시작/공개 자산 재다운로드 해시는 생략. 기존 서명 secret과 workflow_dispatch skip_full_tests=true, stable latest/main 및 게시태그·자산 보존.
+
+Beta29 통합도 backend78/UI21/보안11/runner-setup·각 병합 Kotlin/TS/Vite/bootJar 통과. 100회 manager-outage 반복도 통과했으며 최초 일회성 실패와 실제 운영 장애의 원인 미확정 상태를 별도 보존한다. 서명·패키징·게시 결과는 CI 완료 후 기록한다.

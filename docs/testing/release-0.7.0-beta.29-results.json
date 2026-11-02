@@ -1,0 +1,137 @@
+{
+  "version": "0.7.0-beta.29",
+  "testedProductCommit": "30e590a",
+  "backend": {
+    "tests": 78,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "classes": [
+    {
+      "class": "local.servermanager.DatagramOutboxTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "class": "local.servermanager.DirectRelayProcessTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "class": "local.servermanager.DirectRelayTest",
+      "tests": 16,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "class": "local.servermanager.DirectSableTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "class": "local.servermanager.FileUploadAccessTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "class": "local.servermanager.FileUploadsTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "class": "local.servermanager.GameHostTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "class": "local.servermanager.HostReplacementTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "class": "local.servermanager.HostedRelayTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "class": "local.servermanager.RelayDiagnosticsTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "class": "local.servermanager.RelayIoTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "class": "local.servermanager.RunnerGatewayTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "class": "local.servermanager.SableRelayTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "class": "local.servermanager.VoiceChatHostTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "class": "local.servermanager.VoiceChatRelayTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ],
+  "ui": {
+    "uploads": 12,
+    "console": 9,
+    "failures": 0
+  },
+  "build": [
+    "compileKotlin after each merge",
+    "TypeScript/Vite after each merge",
+    "bootJar"
+  ],
+  "securityTests": 11,
+  "runnerSetup": "passed",
+  "initialIntermittentFailure": "one manager-outage assertion failed before evidence instrumentation; standalone100, focused100, integration100 repetitions passed; cause unconfirmed; original log preserved",
+  "skipped": [
+    "full backend suite",
+    "other OS execution",
+    "real WAN/router testing",
+    "production restarts",
+    "published asset redownload/hash comparison"
+  ]
+}
