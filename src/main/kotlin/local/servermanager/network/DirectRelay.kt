@@ -104,7 +104,7 @@ class SecureChannel(private val socket:Socket,private val sendKey:ByteArray,priv
     internal fun diagnosticFields()=context
     private fun stats():Map<String,Any?> =mapOf("durationMs" to TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-opened),
         "txBytes" to tx.get(),"rxBytes" to rx.get(),"lastTxAgeMs" to TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-lastTx),
-        "lastRxAgeMs" to TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-lastRx))
+        "lastRxAgeMs" to TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-lastRx))+(writer?.snapshot() ?: emptyMap())
     private fun cipher(mode:Int,key:ByteArray,counter:Long)=Cipher.getInstance("AES/GCM/NoPadding").apply {
         val iv=ByteArray(12);java.nio.ByteBuffer.wrap(iv).putInt(0).putLong(counter)
         init(mode,SecretKeySpec(key,"AES"),GCMParameterSpec(128,iv))

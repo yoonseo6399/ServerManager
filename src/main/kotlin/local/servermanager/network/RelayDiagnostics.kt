@@ -28,6 +28,7 @@ class RelayFileLog(private val directory:Path,private val maxBytes:Long=5L*1024*
     private val mapper=jacksonObjectMapper()
     private val queue=ArrayBlockingQueue<Map<String,Any?>>(512)
     private val dropped=AtomicLong()
+    private var lastFailureNanos=0L
     @Volatile private var open=true
     private val worker=Thread({run()},"relay-diagnostic-log").apply {isDaemon=true;start()}
     override fun emit(event:String,fields:Map<String,Any?>) {
@@ -36,13 +37,14 @@ class RelayFileLog(private val directory:Path,private val maxBytes:Long=5L*1024*
     private fun run() {
         while(open || queue.isNotEmpty()) {
             val item=try {queue.poll(100,TimeUnit.MILLISECONDS)}catch(_:InterruptedException){null} ?: continue
+            val lost=dropped.getAndSet(0)
             try {
-                val lost=dropped.getAndSet(0)
                 append(item+(if(lost>0)mapOf("droppedLogEvents" to lost)else emptyMap()))
             }catch(e:Exception){
-                dropped.incrementAndGet()
-                // At most one line per failed batch, no credentials from filesystem/exception messages.
-                if(dropped.get()==1L)System.err.println("${Instant.now()} relay_log_unavailable ${relayError(e)}")
+                dropped.addAndGet(lost+1)
+                // Disk failure must not flood the runner log or affect forwarding.
+                val now=System.nanoTime()
+                if(lastFailureNanos==0L || now-lastFailureNanos>60_000_000_000L){lastFailureNanos=now;System.err.println("${Instant.now()} relay_log_unavailable ${relayError(e)}")}
             }
         }
     }

@@ -183,6 +183,8 @@ internal class RelayFrameWriter(
         }catch(_:InterruptedException){if(open.get())fail("TUNNEL_WRITER_INTERRUPTED")}
         catch(e:Exception){if(open.get())fail("TUNNEL_WRITE_${e.javaClass.simpleName}")}
     }
+    fun snapshot():Map<String,Any?> =synchronized(lock){mapOf("queuedBytes" to bytes,"queuedFrames" to frames,"queuedStreams" to streamBytes.size,
+        "droppedDatagrams" to droppedDatagrams.get(),"writeAgeMs" to writingSince.takeIf {it!=0L}?.let {TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-it)})}
     fun finish(after:()->Unit){synchronized(lock){afterDrain=after;lock.notifyAll()}}
     private fun fail(reason:String){if(stop(reason)){events.emit("tunnel_write_failed",context+mapOf("reason" to reason));abort(reason)}}
     private fun stop(reason:String):Boolean {
