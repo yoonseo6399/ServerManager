@@ -1,4 +1,4 @@
-상태: 구현·관련68개 회귀 통과, 실제 양방향 stall/EOF·manager 단절100회 검증, 릴리즈 통합 대기
+상태: 구현·기능 검증 완료, v0.7.0-beta.29 서명 릴리즈 게시
 # fix/relay-stream-isolation
 
 - 게시된 v0.7.0-beta.28 기반, solo. 실제 장애 원인은 미확정이며 확인한 공유 수신 루프의 endpoint 동기 쓰기 위험을 개선한다.

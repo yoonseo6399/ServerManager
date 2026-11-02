@@ -785,3 +785,5 @@ Beta28 기반 fix/relay-stream-isolation(d13ffc6) 및 fix/folder-upload-progress
 기능 검증은 중계68/업로드10/UI12 통과. 초기 manager-outage1회 실패는 원인 미확정으로 원문 보존, 단독100 및 관련 suite100회 반복은 통과했다. 통합과 게시 결과는 릴리즈 노트에 추가한다. 전체 suite/다른OS 실기/운영 재시작/공개 자산 재다운로드 해시는 생략. 기존 서명 secret과 workflow_dispatch skip_full_tests=true, stable latest/main 및 게시태그·자산 보존.
 
 Beta29 통합도 backend78/UI21/보안11/runner-setup·각 병합 Kotlin/TS/Vite/bootJar 통과. 100회 manager-outage 반복도 통과했으며 최초 일회성 실패와 실제 운영 장애의 원인 미확정 상태를 별도 보존한다. 서명·패키징·게시 결과는 CI 완료 후 기록한다.
+
+Beta29 CI41434362809 success, tag753b6de637339aafa6408e93f020c2ca65d431cf/공개 자산9개 게시 확인. Mac/Windows 패키징·격리 bootstrap·서명 성공, 전체 backend suite skipped. stable latest v0.6.3/main·기존 태그/자산 유지, 운영 수동 재시작·공개 자산 재다운로드 해시 비교 없음.
