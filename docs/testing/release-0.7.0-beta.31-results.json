@@ -18,5 +18,43 @@
   "runnerSetup": "passed",
   "fullSuite": "skipped",
   "deploymentApproved": true,
-  "productionChanged": false
+  "productionChanged": true,
+  "publication": {
+    "workflowRun": 41582055122,
+    "conclusion": "success",
+    "tagCommit": "a06cd7ca59299a596ad451f29d7cca1369eee60f",
+    "publishedAt": "2026-11-03T05:12:21Z",
+    "assets": 9,
+    "stableLatestUnchanged": "v0.6.3",
+    "extraAssetRedownloadHashTest": false
+  },
+  "deployment": {
+    "runnerVersion": "0.7.0-beta.31",
+    "gameHostVersion": "0.7.0-beta.31",
+    "bootstrapPid": 3015,
+    "runnerPid": 3017,
+    "gameHostPid": 2777,
+    "minecraftPid": 2963,
+    "installedSignedJar": true,
+    "bundledJava": true,
+    "normalSavedStopObserved": true,
+    "minecraftStatusResponse": {
+      "version": "1.21.1",
+      "protocol": 767,
+      "online": 0
+    },
+    "publicPortsListening": [
+      6700,
+      6400
+    ],
+    "localGamePort": 25567,
+    "encryptedTunnelEstablished": true,
+    "actualPlayerLogin": "not tested",
+    "actualDimensionTravel": "not tested",
+    "deploymentCorrections": [
+      "First temporary start used local build path; normally saved/stopped then replaced with installed signed JAR.",
+      "Retained EXIT_UNACKED entry acknowledged via authenticated host API after normal exit and completed file handoff.",
+      "Optional activation helper failed against old bootstrap API; existing updater had already activated31; active31 confirmed and standard bootstrap restored."
+    ]
+  }
 }

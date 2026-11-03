@@ -797,3 +797,6 @@ Beta29 운영 로그에서 로그인 중 hub ENDPOINT_BACKPRESSURE가 반복됐�
 ## 2026-11-03 — 0.7.0-beta.31 큰 버스트 허용
 
 사용자가 로그인 외 차원 이동·청크의 대량 전송도 여유 있게 처리하도록 요청했다. Beta30이 이미 게시되어 자산을 보존하고 fix/relay-large-bursts를 새 beta31에 통합(solo). endpoint16MiB/역할128MiB, 터널16MiB/stream4MiB/4096항목, 쓰기 정체60초. 조각 병합·바이트 예산·공정 처리·EOF drain·느린 접속 격리 유지.6MiB/24576fragment 전체 일치·실제64MiB slow peer만 격리하는70개 기능 통과. 통합/CI 뒤 승인받은 정상 서버 재시작으로31을 한 번 적용한다. 전체 suite/타OS실기/추가 자산 다운로드 해시시험은 생략하며 설치의 기존 서명 검증은 유지한다.
+
+
+Beta31 CI41582055122 success, tag a06cd7ca59299a596ad451f29d7cca1369eee60f 및 공개 자산9개 메타데이터 확인, stable latest v0.6.3/main/기존 자산 보존. 승인된 로컬 적용 완료: 설치된 서명본/내장 Java에서 runner·GAME_HOST31, Survival 정상 시작·Minecraft 상태 프로토콜1.21.1 응답, supervisor 인계 후 동일 game PID 유지·암호화 터널/포트 확인. 첫 임시 시작의 로컬 빌드 경로를 정상 저장·종료 후 설치본으로 정정했고 종료 인계 후 unacked 이전 PID는 인증 API로 확인했다. 실제 플레이어 로그인·차원 이동 및 원래 일일 동시 단절 전체 원인은 여전히 미검증/미확정. 상세 docs/testing/release-0.7.0-beta.31-results.json 및 릴리즈 인계 노트. 전체 suite·게시 자산 별도 재다운로드 해시 시험 생략.
