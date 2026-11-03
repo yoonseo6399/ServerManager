@@ -787,3 +787,9 @@ Beta28 기반 fix/relay-stream-isolation(d13ffc6) 및 fix/folder-upload-progress
 Beta29 통합도 backend78/UI21/보안11/runner-setup·각 병합 Kotlin/TS/Vite/bootJar 통과. 100회 manager-outage 반복도 통과했으며 최초 일회성 실패와 실제 운영 장애의 원인 미확정 상태를 별도 보존한다. 서명·패키징·게시 결과는 CI 완료 후 기록한다.
 
 Beta29 CI41434362809 success, tag753b6de637339aafa6408e93f020c2ca65d431cf/공개 자산9개 게시 확인. Mac/Windows 패키징·격리 bootstrap·서명 성공, 전체 backend suite skipped. stable latest v0.6.3/main·기존 태그/자산 유지, 운영 수동 재시작·공개 자산 재다운로드 해시 비교 없음.
+
+## 2026-11-03 — 0.7.0-beta.30 로그인 버스트 긴급 수정
+
+Beta29 운영 로그에서 로그인 중 hub ENDPOINT_BACKPRESSURE가 반복됐다. queued103~114KiB·최근쓰기2~4ms로 바이트/시간 한도 이내인데32개 항목 상한이 정상 조각을 거부했다. 기존코드1000×256B 시험이 fragment32에서 실패하는 것을 재현하고, 최대32KiB chunk coalescing으로 수정했다.512KiB/전역16MiB·10초 deadline 및 느린 접속 격리는 유지하고 실제 큐 초과의 원인을 추가 기록한다. fix/relay-login-burst9be4b25, solo.
+
+기능69개 통과, 전체256001바이트 일치·예산 회수 및 실제 encrypted slow endpoint/EOF 회귀 포함. 통합/서명/게시 후 승인받은 정상 서버 재시작으로 로컬 runner·GAME_HOST에 적용한다. 원래 동시 끊김 원인은 별개로 미확정. 전체 suite/타OS실기/공개 자산 재다운로드 해시 비교 생략, stable latest/main·기존 태그/자산 보존.
