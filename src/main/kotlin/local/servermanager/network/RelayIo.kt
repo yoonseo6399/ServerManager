@@ -33,7 +33,8 @@ internal class RelaySocketWriter(
     private val maxBytes:Int=512*1024,private val writeTimeoutMillis:Long=10_000
 ):AutoCloseable {
     private val lock=Object()
-    private val queue=ArrayDeque<ByteArray>()
+    private class Chunk(capacity:Int){val bytes=ByteArray(capacity);var size=0}
+    private val queue=ArrayDeque<Chunk>()
     private var pendingBytes=0
     private val open=AtomicBoolean(true)
     private var finishReason:String?=null
@@ -52,12 +53,29 @@ internal class RelaySocketWriter(
     }
     fun read(count:Int){bytesRead.addAndGet(count.toLong());lastRead=System.nanoTime()}
     fun offer(bytes:ByteArray):Boolean {
+        var rejection:Map<String,Any?>?=null
         val accepted=synchronized(lock) {
             if(!open.get() || finishReason!=null)return false
-            if(queue.size>=32 || pendingBytes+bytes.size>maxBytes || !budget.acquire(bytes.size))false
-            else {queue.addLast(bytes);pendingBytes+=bytes.size;lock.notifyAll();true}
+            if(bytes.isEmpty())return true
+            val cause=if(pendingBytes+bytes.size>maxBytes)"STREAM_BYTE_LIMIT" else if(!budget.acquire(bytes.size))"GLOBAL_BYTE_LIMIT" else null
+            if(cause!=null) {
+                rejection=mapOf("limitCause" to cause,"queuedBytes" to pendingBytes,"queuedChunks" to queue.size,
+                    "incomingBytes" to bytes.size,"limitBytes" to maxBytes,"lastWriteAgeMs" to elapsed(lastWrite))
+                false
+            } else {
+                // TCP segmentation and protocol frame count are not measures of congestion.
+                // Coalesce small fragments, reserving only their bytes, without blocking the shared receiver.
+                var offset=0
+                while(offset<bytes.size) {
+                    val tail=queue.peekLast()?.takeIf {it.size<it.bytes.size}
+                        ?: Chunk(minOf(32*1024,maxBytes)).also {queue.addLast(it)}
+                    val count=minOf(bytes.size-offset,tail.bytes.size-tail.size)
+                    bytes.copyInto(tail.bytes,tail.size,offset,offset+count);tail.size+=count;offset+=count
+                }
+                pendingBytes+=bytes.size;lock.notifyAll();true
+            }
         }
-        if(!accepted)fail("ENDPOINT_BACKPRESSURE")
+        if(!accepted){events.emit("endpoint_queue_rejected",context+(rejection ?: emptyMap()));fail("ENDPOINT_BACKPRESSURE")}
         return accepted
     }
     /** CLOSE follows accepted DATA, even when the receive loop reads them in one burst. */
@@ -73,7 +91,7 @@ internal class RelaySocketWriter(
                 }
                 try {
                     writingSince=System.nanoTime()
-                    socket.getOutputStream().write(item);socket.getOutputStream().flush()
+                    socket.getOutputStream().write(item.bytes,0,item.size);socket.getOutputStream().flush()
                     lastWrite=System.nanoTime();bytesWritten.addAndGet(item.size.toLong())
                     if(elapsed(writingSince)>=1000)events.emit("endpoint_slow_write",context+mapOf("elapsedMs" to elapsed(writingSince),"bytes" to item.size))
                 } finally {writingSince=0;synchronized(lock){pendingBytes-=item.size};budget.release(item.size)}
@@ -87,13 +105,14 @@ internal class RelaySocketWriter(
         RelayIoWatchdog.remove(this)
         val queued=synchronized(lock) {
             val size=pendingBytes
+            val chunks=queue.size
             while(queue.isNotEmpty()){val item=queue.removeFirst();pendingBytes-=item.size;budget.release(item.size)}
-            lock.notifyAll();size
+            lock.notifyAll();size to chunks
         }
         runCatching {socket.close()}
         worker.interrupt()
         events.emit("stream_closed",context+mapOf("reason" to reason,"durationMs" to elapsed(started),"bytesFromEndpoint" to bytesRead.get(),
-            "bytesToEndpoint" to bytesWritten.get(),"queuedBytes" to queued,"lastReadAgeMs" to elapsed(lastRead),"lastWriteAgeMs" to elapsed(lastWrite)))
+            "bytesToEndpoint" to bytesWritten.get(),"queuedBytes" to queued.first,"queuedChunks" to queued.second,"lastReadAgeMs" to elapsed(lastRead),"lastWriteAgeMs" to elapsed(lastWrite)))
         return true
     }
     override fun close(){close("SHUTDOWN")}

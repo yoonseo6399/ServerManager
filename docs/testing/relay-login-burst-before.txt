@@ -1,0 +1,123 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :checkKotlinGradlePluginConfigurationErrors SKIPPED
+
+> Task :sableBridgeBuild
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+> Task :createMinecraftArtifacts
+Loaded 137 artifacts from /Users/mini/.codex/.chatgpt-projects/g-p-6ad09a1ec0408191b8638c9cc45d7289/ServerManager-relay-login-burst/sable-bridge/build/tmp/createMinecraftArtifacts/nfrt_artifact_manifest.properties
+*** Started working on downloadJson
+ ✓ Completed downloadJson in 0.01s
+*** Started working on downloadServer
+*** Started working on downloadClient
+*** Started working on downloadClientMappings
+ ✓ Completed downloadClient in 0.01s
+ ✓ Completed downloadClientMappings in 0.01s
+ ✓ Completed downloadServer in 0.01s
+*** Started working on mergeMappings
+ ♻ Used cache of mergeMappings in 0.00s
+*** Started working on stripClient
+ ♻ Used cache of stripClient in 0.00s
+*** Started working on extractServer
+ ♻ Used cache of extractServer in 0.00s
+*** Started working on stripServer
+ ♻ Used cache of stripServer in 0.00s
+*** Started working on merge
+ ♻ Used cache of merge in 0.00s
+*** Started working on rename
+ ♻ Used cache of rename in 0.00s
+*** Started working on decompile
+ ♻ Used cache of decompile in 0.00s
+*** Started working on inject
+ ♻ Used cache of inject in 0.00s
+*** Started working on patch
+ ♻ Used cache of patch in 0.00s
+*** Started working on applyNeoforgePatches
+ ♻ Used cache of applyNeoforgePatches in 0.00s
+*** Started working on transformSources
+ ♻ Used cache of transformSources in 0.00s
+*** Started working on recompile
+ ♻ Used cache of recompile in 0.00s
+*** Started working on sourcesWithNeoForge
+ ♻ Used cache of sourcesWithNeoForge in 0.00s
+*** Started working on compiledWithNeoForge
+ ♻ Used cache of compiledWithNeoForge in 0.00s
+*** Started working on sourcesAndCompiledWithNeoForge
+ ♻ Used cache of sourcesAndCompiledWithNeoForge in 0.00s
+Total runtime: 0.75s
+
+
+> Task :compileJava
+> Task :processResources
+> Task :classes
+> Task :jarJar NO-SOURCE
+> Task :jar
+> Task :compileProbeJava
+> Task :processProbeResources
+> Task :probeClasses
+> Task :probeJarJar NO-SOURCE
+> Task :probeJar
+
+BUILD SUCCESSFUL in 4s
+7 actionable tasks: 7 executed
+
+> Task :processResources
+> Task :processTestResources NO-SOURCE
+
+> Task :compileKotlin
+w: file:///Users/mini/.codex/.chatgpt-projects/g-p-6ad09a1ec0408191b8638c9cc45d7289/ServerManager-relay-login-burst/src/main/kotlin/local/servermanager/app/AuthApi.kt:94:36 'val credentialId: ByteArray!' is deprecated. Deprecated in Java.
+w: file:///Users/mini/.codex/.chatgpt-projects/g-p-6ad09a1ec0408191b8638c9cc45d7289/ServerManager-relay-login-burst/src/main/kotlin/local/servermanager/mods/Modrinth.kt:133:15 'fun fields(): (Mutable)Iterator<(Mutable)Map.(Mutable)Entry<String!, JsonNode!>!>!' is deprecated. Deprecated in Java.
+w: file:///Users/mini/.codex/.chatgpt-projects/g-p-6ad09a1ec0408191b8638c9cc45d7289/ServerManager-relay-login-burst/src/main/kotlin/local/servermanager/network/GameHost.kt:321:92 'fun fields(): (Mutable)Iterator<(Mutable)Map.(Mutable)Entry<String!, JsonNode!>!>!' is deprecated. Deprecated in Java.
+w: file:///Users/mini/.codex/.chatgpt-projects/g-p-6ad09a1ec0408191b8638c9cc45d7289/ServerManager-relay-login-burst/src/main/kotlin/local/servermanager/network/GameHost.kt:512:214 'fun fields(): (Mutable)Iterator<(Mutable)Map.(Mutable)Entry<String!, JsonNode!>!>!' is deprecated. Deprecated in Java.
+
+> Task :compileJava NO-SOURCE
+> Task :classes
+> Task :resolveMainClassName
+> Task :bootJar
+> Task :jar
+
+> Task :compileTestKotlin
+w: file:///Users/mini/.codex/.chatgpt-projects/g-p-6ad09a1ec0408191b8638c9cc45d7289/ServerManager-relay-login-burst/src/test/kotlin/local/servermanager/ai/MainProviderGoogleTest.kt:92:83 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'HttpSession?'.
+w: file:///Users/mini/.codex/.chatgpt-projects/g-p-6ad09a1ec0408191b8638c9cc45d7289/ServerManager-relay-login-burst/src/test/kotlin/local/servermanager/transfer/FolderDownloadsTest.kt:39:88 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'MediaType?'.
+
+> Task :compileTestJava NO-SOURCE
+> Task :testClasses UP-TO-DATE
+
+> Task :test FAILED
+
+RelayIoTest > normal login microburst is bounded by bytes rather than number of tiny fragments() FAILED
+    org.opentest4j.AssertionFailedError: fragment 32 rejected below byte budget
+        at app//org.junit.jupiter.api.AssertionUtils.fail(AssertionUtils.java:38)
+        at app//org.junit.jupiter.api.Assertions.fail(Assertions.java:138)
+        at app//kotlin.test.junit5.JUnit5Asserter.fail(JUnitSupport.kt:56)
+        at app//kotlin.test.Asserter.assertTrue(Assertions.kt:694)
+        at app//kotlin.test.junit5.JUnit5Asserter.assertTrue(JUnitSupport.kt:30)
+        at app//kotlin.test.Asserter.assertTrue(Assertions.kt:704)
+        at app//kotlin.test.junit5.JUnit5Asserter.assertTrue(JUnitSupport.kt:30)
+        at app//kotlin.test.AssertionsKt__AssertionsKt.assertTrue(Assertions.kt:44)
+        at app//kotlin.test.AssertionsKt.assertTrue(Unknown Source)
+        at app//local.servermanager.RelayIoTest.normal login microburst is bounded by bytes rather than number of tiny fragments(RelayIoTest.kt:86)
+
+1 test completed, 1 failed
+
+[Incubating] Problems report is available at: file:///Users/mini/.codex/.chatgpt-projects/g-p-6ad09a1ec0408191b8638c9cc45d7289/ServerManager-relay-login-burst/build/reports/problems/problems-report.html
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':test'.
+> There were failing tests. See the report at: file:///Users/mini/.codex/.chatgpt-projects/g-p-6ad09a1ec0408191b8638c9cc45d7289/ServerManager-relay-login-burst/build/reports/tests/test/index.html
+
+* Try:
+> Run with --scan to get full insights.
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD FAILED in 31s
+8 actionable tasks: 8 executed

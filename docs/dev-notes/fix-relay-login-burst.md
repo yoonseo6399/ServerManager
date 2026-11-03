@@ -9,3 +9,7 @@
 - 먼저 기존 코드에서1초 미만 receiver pause +1000×256B fragment(256KiB)를 보내32항목 거부가 재현되는지 확인한다.
 - 수정 뒤 원문 전체 바이트 일치·예산 회수, 기존 정체/상한/쓰기 timeout·다른 접속 유지·실제 encrypted EOF 회귀를 실행한다.
 - 관련 범위 테스트·빌드만 실행, 전체 suite/다른OS 실기 생략. 운영 Minecraft/호스트 재시작은 아직 미승인으로 수행하지 않는다.
+
+## 수정 전 재현
+- 기존 beta29 코드에서 새 microburst 시험이 fragment32에서 실패했다(256KiB 전체보다 훨씬 작은 지점). 운영과 같은32항목 거부를 재현했다. 원문 docs/testing/relay-login-burst-before.txt 보존.
+- 수정은 small-fragment coalescing(32KiB chunk)이며 임의로 메모리 상한을 크게 올리지 않는다. byte/global 한도 초과는 limitCause/queuedChunks/실제 바이트를 별도 기록한다.
