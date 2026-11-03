@@ -1,0 +1,18 @@
+{
+  "version": "0.7.0-beta.30",
+  "testedProductCommit": "bb0728a",
+  "backend": {
+    "tests": 69,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "frontend": "TS/Vite passed",
+  "runtimeSecurity": 11,
+  "runnerSetup": "passed",
+  "before": "fragment32 rejected in beta29",
+  "after": "1000x256B fragments plus marker exact preservation; zero memory budget leak",
+  "deploymentAuthorized": true,
+  "productionChanged": false,
+  "fullSuite": "skipped"
+}
