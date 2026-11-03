@@ -793,3 +793,7 @@ Beta29 CI41434362809 success, tag753b6de637339aafa6408e93f020c2ca65d431cf/공개
 Beta29 운영 로그에서 로그인 중 hub ENDPOINT_BACKPRESSURE가 반복됐다. queued103~114KiB·최근쓰기2~4ms로 바이트/시간 한도 이내인데32개 항목 상한이 정상 조각을 거부했다. 기존코드1000×256B 시험이 fragment32에서 실패하는 것을 재현하고, 최대32KiB chunk coalescing으로 수정했다.512KiB/전역16MiB·10초 deadline 및 느린 접속 격리는 유지하고 실제 큐 초과의 원인을 추가 기록한다. fix/relay-login-burst9be4b25, solo.
 
 기능69개 통과, 전체256001바이트 일치·예산 회수 및 실제 encrypted slow endpoint/EOF 회귀 포함. 통합/서명/게시 후 승인받은 정상 서버 재시작으로 로컬 runner·GAME_HOST에 적용한다. 원래 동시 끊김 원인은 별개로 미확정. 전체 suite/타OS실기/공개 자산 재다운로드 해시 비교 생략, stable latest/main·기존 태그/자산 보존.
+
+## 2026-11-03 — 0.7.0-beta.31 큰 버스트 허용
+
+사용자가 로그인 외 차원 이동·청크의 대량 전송도 여유 있게 처리하도록 요청했다. Beta30이 이미 게시되어 자산을 보존하고 fix/relay-large-bursts를 새 beta31에 통합(solo). endpoint16MiB/역할128MiB, 터널16MiB/stream4MiB/4096항목, 쓰기 정체60초. 조각 병합·바이트 예산·공정 처리·EOF drain·느린 접속 격리 유지.6MiB/24576fragment 전체 일치·실제64MiB slow peer만 격리하는70개 기능 통과. 통합/CI 뒤 승인받은 정상 서버 재시작으로31을 한 번 적용한다. 전체 suite/타OS실기/추가 자산 다운로드 해시시험은 생략하며 설치의 기존 서명 검증은 유지한다.
