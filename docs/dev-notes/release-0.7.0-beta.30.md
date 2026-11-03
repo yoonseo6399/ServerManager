@@ -1,4 +1,4 @@
-상태: 통합69/보안11·빌드·설치 검증 통과, 서명 CI 게시 예정
+상태: beta30 게시 완료, 추가 요청된 차원 이동 버퍼 완화는 beta31로 준비·운영 적용 대기
 # release/0.7.0-beta.30
 
 - origin/release/0.7.0-beta.29 기반, fix/relay-login-burst9be4b25 통합(solo). 운영 로그인 실패32항목 false-positive를 재현하고 bounded chunk coalescing으로 수정했다.
@@ -9,3 +9,5 @@
 ## 통합 결과
 - bb0728a 제품 커밋에서69/69통과·실패/스킵0(63초), Kotlin/bootJar·TS/Vite·보안11·runner setup 통과.
 - 최초 실패 재현과 수정 후 원문 일치 모두 보존. 월드/모드 변경 없음. CI 서명·패키징 후 승인받은 운영 적용 진행.
+
+- CI41580899667 success, 2026-11-03T05:00:04Z immutable beta30 게시. 추가 사용자 요청(로그인뿐 아니라 차원 이동 등 대량 전송도 여유롭게)에 따라 새 beta31을 준비한 뒤 승인받은 재시작을 한 번만 적용한다. beta30 자산은 보존한다.
