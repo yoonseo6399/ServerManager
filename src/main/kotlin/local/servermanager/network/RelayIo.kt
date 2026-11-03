@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 /** Shared, finite budget; includes writes already in progress. No game bytes are logged. */
-internal class RelayByteBudget(private val maximum:Long=16L*1024*1024) {
+internal class RelayByteBudget(private val maximum:Long=128L*1024*1024) {
     private var used=0L
     @Synchronized fun acquire(size:Int):Boolean {if(used+size>maximum)return false;used+=size;return true}
     @Synchronized fun release(size:Int){used-=size;check(used>=0)}
@@ -30,7 +30,7 @@ internal class RelaySocketWriter(
     private val socket:Socket, private val budget:RelayByteBudget,
     private val events:RelayEvents,private val context:Map<String,Any?>,
     private val onFailure:(String)->Unit,
-    private val maxBytes:Int=512*1024,private val writeTimeoutMillis:Long=10_000
+    private val maxBytes:Int=16*1024*1024,private val writeTimeoutMillis:Long=60_000
 ):AutoCloseable {
     private val lock=Object()
     private class Chunk(capacity:Int){val bytes=ByteArray(capacity);var size=0}
@@ -123,7 +123,7 @@ internal class RelaySocketWriter(
 internal class RelayFrameWriter(
     private val write:(SecureChannel.Frame)->Unit,private val abort:(String)->Unit,
     private val events:RelayEvents,private val context:Map<String,Any?>,
-    private val byteLimit:Int=4*1024*1024,private val streamLimit:Int=512*1024,private val writeTimeoutMillis:Long=10_000
+    private val byteLimit:Int=16*1024*1024,private val streamLimit:Int=4*1024*1024,private val writeTimeoutMillis:Long=60_000
 ):AutoCloseable {
     private val lock=Object()
     private val queues=LinkedHashMap<Int,ArrayDeque<SecureChannel.Frame>>()
@@ -146,7 +146,7 @@ internal class RelayFrameWriter(
         var failure:String?=null
         val deadline=System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(writeTimeoutMillis)
         synchronized(lock) {
-            while(waitForCapacity && open.get() && (frames>=512 || bytes+frame.payload.size>byteLimit || (streamBytes[frame.stream] ?: 0)+frame.payload.size>streamLimit)) {
+            while(waitForCapacity && open.get() && (frames>=4096 || bytes+frame.payload.size>byteLimit || (streamBytes[frame.stream] ?: 0)+frame.payload.size>streamLimit)) {
                 val remaining=deadline-System.nanoTime()
                 if(remaining<=0)break
                 TimeUnit.NANOSECONDS.timedWait(lock,remaining)
@@ -154,7 +154,7 @@ internal class RelayFrameWriter(
             if(!open.get() || afterDrain!=null)throw IOException(terminal ?: "TUNNEL_CLOSED")
             val control=frame.type!=SecureChannel.DATA && frame.type !in setOf(SecureChannel.UDP_UP,SecureChannel.UDP_DOWN,SecureChannel.VOICE_UP,SecureChannel.VOICE_DOWN)
             if(control && controls>=256)failure="TUNNEL_CONTROL_BACKPRESSURE"
-            else if(!control && (frames>=512 || bytes+frame.payload.size>byteLimit || (streamBytes[frame.stream] ?: 0)+frame.payload.size>streamLimit))failure="TUNNEL_STREAM_BACKPRESSURE"
+            else if(!control && (frames>=4096 || bytes+frame.payload.size>byteLimit || (streamBytes[frame.stream] ?: 0)+frame.payload.size>streamLimit))failure="TUNNEL_STREAM_BACKPRESSURE"
             else {
                 queues.getOrPut(frame.stream){ArrayDeque()}.addLast(frame)
                 frames++;bytes+=frame.payload.size;streamBytes[frame.stream]=(streamBytes[frame.stream] ?: 0)+frame.payload.size

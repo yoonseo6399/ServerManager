@@ -232,7 +232,7 @@ class DirectRelayTest {
             val s=runCatching {server.accept()}.getOrNull() ?: break;sockets.add(s);val first=ordinal.incrementAndGet()==1
             Thread.ofVirtual().start {runCatching {
                 if(first) {
-                    if(side=="hub")repeat(1024){s.getOutputStream().write(ByteArray(16*1024){7})}
+                    if(side=="hub")repeat(4096){s.getOutputStream().write(ByteArray(16*1024){7})}
                     else while(!s.isClosed)Thread.sleep(50)
                 } else {val buffer=ByteArray(4096);while(true){val n=s.getInputStream().read(buffer);if(n<0)break;s.getOutputStream().write(buffer,0,n);s.getOutputStream().flush()}}
             }}
@@ -243,7 +243,7 @@ class DirectRelayTest {
             connectedAgent(hub,agent)
             val slow=Socket().track();slow.receiveBufferSize=1024;slow.connect(InetSocketAddress("127.0.0.1",hub.gamePort!!));slow.getOutputStream().write(handshake(host))
             await("first backend accepted"){ordinal.get()==1}
-            if(side=="agent")Thread.ofVirtual().start {runCatching {repeat(1024){slow.getOutputStream().write(ByteArray(16*1024){9})}}}
+            if(side=="agent")Thread.ofVirtual().start {runCatching {repeat(4096){slow.getOutputStream().write(ByteArray(16*1024){9})}}}
             await("offending stream isolated",8000){observed.any {it.first=="stream_closed" && it.second["side"]==side && it.second["reason"]=="ENDPOINT_BACKPRESSURE"}}
             player(hub,"second.example.com",payload="healthy-0").use {p->
                 assertTrue(readUntil(p,"healthy-0").contains("healthy-0"))

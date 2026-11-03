@@ -21,9 +21,9 @@ tail -f ~/.servermanager-runner/logs/relay-host.jsonl
 | 이벤트/사유 | 의미 |
 |---|---|
 | `stream_closed` / `ENDPOINT_BACKPRESSURE` | 특정 플레이어/게임 소켓의 쓰기 큐 한도 초과. 해당 접속만 종료 |
-| `stream_closed` / `ENDPOINT_WRITE_TIMEOUT` | 특정 소켓에10초 동안 쓰기 완료 불가. 해당 접속만 종료 |
+| `stream_closed` / `ENDPOINT_WRITE_TIMEOUT` | 특정 소켓에60초 동안 쓰기 완료 불가. 해당 접속만 종료 |
 | `tunnel_slow_write`, `endpoint_slow_write` | 완료된 쓰기가1초 이상 지연 |
-| `tunnel_write_failed` / `TUNNEL_WRITE_TIMEOUT` | 공통 물리 터널 쓰기가10초 이상 정체. 이 터널의 접속들은 종료·재연결 대상 |
+| `tunnel_write_failed` / `TUNNEL_WRITE_TIMEOUT` | 공통 물리 터널 쓰기가60초 이상 정체. 이 터널의 접속들은 종료·재연결 대상 |
 | `tunnel_backpressure` | 제한된 터널 송신 큐 대기 기한/제어 큐 초과 |
 | `tunnel_datagram_dropped` | UDP/음성 큐 혼잡. 손실형 패킷을 버리고 TCP 데이터와 구분, 첫1회와100회 단위로 기록 |
 | `tunnel_snapshot` |60초 주기 전송량/마지막 송수신 나이/큐 바이트·프레임/쓰기 진행 시간 |
@@ -35,7 +35,9 @@ tail -f ~/.servermanager-runner/logs/relay-host.jsonl
 
 ## 전송 격리와 한계
 
-- 플레이어/게임 소켓별 독립 쓰기 태스크와512KiB 한도, 역할당 전체16MiB 큐 예산. 공유 터널 수신 루프는 endpoint write를 하지 않는다.
-- 터널 송신은 stream별 FIFO, stream 간 round-robin이며 데이터4MiB/stream512KiB 한도다. endpoint reader만 제한된 시간 동안 큐를 기다릴 수 있다. 공유 수신 루프는 큐 대기하지 않는다.
+- 플레이어/게임 소켓별 독립 쓰기 태스크와16MiB 한도, 역할당 전체128MiB 큐 예산. 공유 터널 수신 루프는 endpoint write를 하지 않는다.
+- 터널 송신은 stream별 FIFO, stream 간 round-robin이며 데이터16MiB/stream4MiB 한도다. endpoint reader만 제한된 시간 동안 큐를 기다릴 수 있다. 공유 수신 루프는 큐 대기하지 않는다.
 - 정상 버스트에 TCP backpressure를 적용하며 DATA 뒤 CLOSE는 큐를 비운 뒤 소켓을 닫는다. 인증 철회는 플레이어 소켓을 즉시 정리한다.
 - 한 물리 TCP 터널 자체의 패킷 손실/회선 정체는 여전히 여러 접속에 영향을 준다. 이번 수정이10/31~11/2 실제 장애의 원인을 확정하거나 Wi-Fi/공유기 문제를 없애는 것은 아니다.
+
+Beta31: 로그인·차원 이동·청크 전송을 같은 경로로 취급한다. 조각 수 제한 대신 최대32KiB chunk 병합과 여유 있는 바이트 예산을 사용하며, 터널 송신 큐의 항목 상한도4096으로 늘렸다. 버퍼는 필요할 때만 사용하고 예산을 넘긴 무한 적재는 허용하지 않는다. 실제 물리 회선 단절과 게임 자체 keep-alive 제한은 별개다.
