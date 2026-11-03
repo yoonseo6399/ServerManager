@@ -92,4 +92,18 @@ class RelayIoTest {
         await {budget.usedBytes()==0L}
     }
 
+    @Test fun `dimension scale burst preserves six MiB through many fragments during a short receiver pause`() {
+        val socket=Target(true);val budget=RelayByteBudget();val failures=CopyOnWriteArrayList<String>()
+        val expected=ByteArray(6*1024*1024+1){((it*31)%251).toByte()}
+        RelaySocketWriter(socket,budget,RelayEvents.NONE,emptyMap(),{failures.add(it)}).use {out->
+            assertTrue(out.offer(expected.copyOfRange(0,1)));assertTrue(socket.entered.await(1,TimeUnit.SECONDS))
+            var offset=1
+            while(offset<expected.size){val end=minOf(expected.size,offset+256);assertTrue(out.offer(expected.copyOfRange(offset,end)));offset=end}
+            assertEquals(expected.size.toLong(),budget.usedBytes());assertTrue(failures.isEmpty())
+            socket.release.countDown();out.finish("REMOTE_CLOSE");await {socket.ended.get()}
+            assertTrue(expected.contentEquals(socket.bytes.toByteArray()),"large burst bytes changed or truncated")
+        }
+        await {budget.usedBytes()==0L}
+    }
+
 }
