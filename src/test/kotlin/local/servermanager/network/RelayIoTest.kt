@@ -78,4 +78,18 @@ class RelayIoTest {
             done.get(2,TimeUnit.SECONDS);assertEquals(listOf(4,4,8),writes.toList())
         }
     }
+    @Test fun `normal login microburst is bounded by bytes rather than number of tiny fragments`() {
+        val socket=Target(true);val budget=RelayByteBudget();val failures=CopyOnWriteArrayList<String>()
+        RelaySocketWriter(socket,budget,RelayEvents.NONE,emptyMap(),{failures.add(it)}).use {out->
+            assertTrue(out.offer(byteArrayOf(1)));assertTrue(socket.entered.await(1,TimeUnit.SECONDS))
+            // A short receiver pause is ordinary TCP flow control, not a slow-client timeout.
+            repeat(1000){n->assertTrue(out.offer(ByteArray(256){(n%251).toByte()}),"fragment $n rejected below byte budget")}
+            assertTrue(failures.isEmpty());socket.release.countDown();out.finish("REMOTE_CLOSE")
+            await {socket.ended.get()};val got=socket.bytes.toByteArray()
+            assertEquals(256001,got.size);assertEquals(1,got[0].toInt())
+            repeat(1000){n->assertContentEquals(ByteArray(256){(n%251).toByte()},got.copyOfRange(1+n*256,1+(n+1)*256))}
+        }
+        await {budget.usedBytes()==0L}
+    }
+
 }
