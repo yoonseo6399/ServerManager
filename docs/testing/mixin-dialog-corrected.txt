@@ -1,0 +1,14 @@
+[WebServer] (node:84302) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 3 tests using 1 worker
+
+(node:84305) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:84305) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 frontend/mods-ui-tests/mixin-dialog.spec.ts:35:64 › large block mobile report always has an on-screen close button (1.7s)
+  ✓  2 frontend/mods-ui-tests/mixin-dialog.spec.ts:35:64 › large frame desktop report always has an on-screen close button (1.6s)
+  ✓  3 frontend/mods-ui-tests/mixin-dialog.spec.ts:35:64 › large frame mobile report always has an on-screen close button (1.6s)
+
+  3 passed (6.0s)
