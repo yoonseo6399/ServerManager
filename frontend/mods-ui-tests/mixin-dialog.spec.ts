@@ -28,7 +28,7 @@ async function fixture(page:Page,{hold=false}={}){
 async function open(page:Page,raw=false){
  await page.goto('/');
  if(raw)await page.getByRole('button',{name:'원문 줄 보기',exact:true}).click();
- if(raw){await page.locator('[data-event-seq="2"]').scrollIntoViewIfNeeded();await page.locator('[data-event-seq="2"]').click();}
+ if(raw){await expect(page.getByTestId('log-count')).toContainText('121');await page.getByLabel('자동 스크롤',{exact:true}).uncheck();await page.getByTestId('log-viewport').evaluate(e=>{e.scrollTop=0;});await page.locator('[data-event-seq="2"]').click();}
  else {await page.locator('.log-record').first().scrollIntoViewIfNeeded();await page.locator('.log-record').first().click();}
  return page.getByRole('dialog',{name:raw?'로그 상세':'로그 블록 상세',exact:true});
 }
@@ -51,6 +51,7 @@ for(const raw of [false,true])for(const mobile of [false,true])test(`large ${raw
  }
  await dialog.locator('.log-detail-body').evaluate(e=>{e.scrollTop=e.scrollHeight;});
  await expect(close).toBeInViewport({ratio:1});
+ if(!raw&&mobile)await page.screenshot({path:'/tmp/sm-mixin-mobile.png'});
  await close.click({timeout:1500});await expect(dialog).toHaveCount(0);
  // Focus/history cleanup also permits reopening, then immediate Escape dismissal.
  await open(page,raw);await page.keyboard.press('Escape');await expect(page.getByRole('dialog')).toHaveCount(0);
