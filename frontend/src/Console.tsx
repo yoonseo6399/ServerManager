@@ -2,6 +2,7 @@ import React,{memo,startTransition,useCallback,useDeferredValue,useEffect,useLay
 import {Terminal} from 'lucide-react';
 import {api} from './http';
 import {GroupedConsole} from './GroupedConsole';
+import {LogDetailDialog,LogText,MixinGroups} from './LogDetail';
 import {useBackClose} from './nav';
 import {type ParsedLog,type RawLog} from './logParser';
 import {useLogParser} from './useLogParser';
@@ -22,8 +23,10 @@ const LogRow=memo(function LogRow({event:e,top,onOpen}:{event:ParsedLog;top:numb
 });
 function LogDetail({event,onClose}:{event:ParsedLog;onClose:()=>void}){
  const frame=event.frame;
- const groups=useMemo(()=>{const result=new Map<string,Map<string,NonNullable<typeof frame>['mixins']>>();for(const mixin of frame?.mixins||[]){if(!result.has(mixin.modId))result.set(mixin.modId,new Map());const configs=result.get(mixin.modId)!;if(!configs.has(mixin.config))configs.set(mixin.config,[]);configs.get(mixin.config)!.push(mixin);}return result;},[frame]);
- return <div className="modal-backdrop"><section role="dialog" aria-label="로그 상세" className="modal log-detail"><h2>{frame?`${frame.className.split('.').pop()}.${frame.method}()`:'로그 전문'}</h2>{frame&&<><p>{frame.source}</p><code>{frame.className}</code><p className="muted">{frame.module} {frame.origin}</p><h3>클래스에 연결된 Mixins · {frame.mixins.length}개</h3><p>이 목록만으로 해당 메서드를 직접 수정했는지 또는 오류 원인인지는 판단할 수 없습니다.</p>{!groups.size&&<p>이 프레임에 표시된 Mixin 정보가 없습니다.</p>}<div className="mixin-groups">{[...groups].map(([mod,configs])=><section key={mod}><h4>{mod}</h4>{[...configs].map(([config,mixins])=><div key={config}><code>{config}</code><ul>{mixins.map((m,i)=><li key={i}>{m.className} <small>{m.phase}</small></li>)}</ul></div>)}</section>)}</div>{!!frame.metadata.length&&<details><summary>기타 변환 정보</summary><pre>{frame.metadata.join('\n')}</pre></details>}</>}{frame?<details><summary>원문 보기</summary><pre>{event.text}</pre></details>:<pre>{event.text}</pre>}<button onClick={onClose}>닫기</button></section></div>;
+ return <LogDetailDialog label="로그 상세" title={frame?`${frame.className.split('.').pop()}.${frame.method}()`:'로그 전문'} onClose={onClose}>
+  {frame&&<><p>{frame.source}</p><code>{frame.className}</code><p className="muted">{frame.module} {frame.origin}</p><h3>클래스에 연결된 Mixins · {frame.mixins.length}개</h3><p>이 목록만으로 해당 메서드를 직접 수정했는지 또는 오류 원인인지는 판단할 수 없습니다.</p>{!frame.mixins.length&&<p>이 프레임에 표시된 Mixin 정보가 없습니다.</p>}<MixinGroups mixins={frame.mixins}/>{!!frame.metadata.length&&<details><summary>기타 변환 정보</summary><LogText text={frame.metadata.join('\n')} initiallyOpen/></details>}</>}
+  <LogText text={event.text} initiallyOpen={!frame}/>
+ </LogDetailDialog>;
 }
 export const ConsolePanel=memo(function ConsolePanel(props:{id:string;enabled:boolean;hint:string}){
  const filters=useLogFilters(props.id);
@@ -129,6 +132,6 @@ function ConsoleView({id,enabled,hint,source,filters}:{id:string;enabled:boolean
  <div className="logs virtual-logs" aria-busy={pending||loading} ref={viewport} data-testid="log-viewport" onWheel={e=>{if(e.deltaY<0)setFollow(false);}} onScroll={e=>{const v=e.currentTarget;setTop(v.scrollTop);if(v.scrollHeight-v.scrollTop-v.clientHeight>2)setFollow(false);else if(live&&v.scrollTop>lastTop.current+.5)setFollow(true);lastTop.current=v.scrollTop;}}>{!count?<div className="console-empty"><Terminal size={28}/><p>{pending?'로그를 준비하고 있습니다.':searching?(matchEnd===null?'서버에서 검색하고 있습니다.':'현재 검색·필터에 맞는 로그가 없습니다.'):'표시할 로그가 없습니다.'}</p></div>:<div style={{height:count*ROW,position:'relative'}}>{shown}</div>}</div>
  </div>
  {!source&&<Command key={id} id={id} enabled={enabled} hint={hint}/>}<div className="panel-foot">{source?'저장된 원문 로그를 조회하고 있습니다.':'일반 입력은 서버 채팅으로 전송 · /로 시작하면 명령 실행'}<span>파싱 결과는 디스크에 저장하지 않습니다.</span></div>
- {detail&&<LogDetail event={detail} onClose={()=>setDetail(null)}/>}
+ {detail&&<LogDetail key={detail.seq} event={detail} onClose={()=>setDetail(null)}/>}
  </section>;
 }
