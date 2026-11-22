@@ -1,0 +1,162 @@
+{
+  "assets": [
+    {
+      "apiUrl": "https://api.github.com/repos/yoonseo6399/ServerManager/releases/assets/778440907",
+      "contentType": "application/java-archive",
+      "createdAt": "2026-11-22T08:48:03Z",
+      "digest": "sha256:b1dae9069bffb76e18f130a956c8eb42bb87fe6c805ca4562e246e6be6f2ded1",
+      "downloadCount": 0,
+      "id": "RA_kwDOU5vjns4uZhDL",
+      "label": "",
+      "name": "server-manager-0.7.0-beta.34.jar",
+      "size": 95036037,
+      "state": "uploaded",
+      "updatedAt": "2026-11-22T08:48:09Z",
+      "url": "https://github.com/yoonseo6399/ServerManager/releases/download/v0.7.0-beta.34/server-manager-0.7.0-beta.34.jar"
+    },
+    {
+      "apiUrl": "https://api.github.com/repos/yoonseo6399/ServerManager/releases/assets/778440116",
+      "contentType": "application/octet-stream",
+      "createdAt": "2026-11-22T08:47:40Z",
+      "digest": "sha256:ceb39783bcefd3d837d012e4f044f5afae133c82348e38bdb87433031dcde147",
+      "downloadCount": 0,
+      "id": "RA_kwDOU5vjns4uZg20",
+      "label": "",
+      "name": "ServerManager-0.7.0-beta.34-universal.pkg",
+      "size": 179599060,
+      "state": "uploaded",
+      "updatedAt": "2026-11-22T08:48:07Z",
+      "url": "https://github.com/yoonseo6399/ServerManager/releases/download/v0.7.0-beta.34/ServerManager-0.7.0-beta.34-universal.pkg"
+    },
+    {
+      "apiUrl": "https://api.github.com/repos/yoonseo6399/ServerManager/releases/assets/778440121",
+      "contentType": "application/zip",
+      "createdAt": "2026-11-22T08:47:40Z",
+      "digest": "sha256:944cb705439da6f6d3fb1088dc42f49ce4bdc98ee381f8ebed72ddf6fdd2aa81",
+      "downloadCount": 0,
+      "id": "RA_kwDOU5vjns4uZg25",
+      "label": "",
+      "name": "ServerManager-Runner-0.7.0-beta.34-mac-universal.zip",
+      "size": 180467596,
+      "state": "uploaded",
+      "updatedAt": "2026-11-22T08:48:07Z",
+      "url": "https://github.com/yoonseo6399/ServerManager/releases/download/v0.7.0-beta.34/ServerManager-Runner-0.7.0-beta.34-mac-universal.zip"
+    },
+    {
+      "apiUrl": "https://api.github.com/repos/yoonseo6399/ServerManager/releases/assets/778440119",
+      "contentType": "application/zip",
+      "createdAt": "2026-11-22T08:47:40Z",
+      "digest": "sha256:a8c38b925a1f5a5864da629358159f90fa10c63341f437a55b3783c63720ead7",
+      "downloadCount": 0,
+      "id": "RA_kwDOU5vjns4uZg23",
+      "label": "",
+      "name": "ServerManager-Runner-0.7.0-beta.34-windows-x64.zip",
+      "size": 138374220,
+      "state": "uploaded",
+      "updatedAt": "2026-11-22T08:48:04Z",
+      "url": "https://github.com/yoonseo6399/ServerManager/releases/download/v0.7.0-beta.34/ServerManager-Runner-0.7.0-beta.34-windows-x64.zip"
+    },
+    {
+      "apiUrl": "https://api.github.com/repos/yoonseo6399/ServerManager/releases/assets/778440115",
+      "contentType": "application/zip",
+      "createdAt": "2026-11-22T08:47:40Z",
+      "digest": "sha256:8b714404b385709fe47ded33e037318f1484345b1076119390e5986a4438833e",
+      "downloadCount": 0,
+      "id": "RA_kwDOU5vjns4uZg2z",
+      "label": "",
+      "name": "ServerManager-Runner-UI-0.7.0-beta.34-mac-universal.zip",
+      "size": 180531702,
+      "state": "uploaded",
+      "updatedAt": "2026-11-22T08:48:08Z",
+      "url": "https://github.com/yoonseo6399/ServerManager/releases/download/v0.7.0-beta.34/ServerManager-Runner-UI-0.7.0-beta.34-mac-universal.zip"
+    },
+    {
+      "apiUrl": "https://api.github.com/repos/yoonseo6399/ServerManager/releases/assets/778440114",
+      "contentType": "application/zip",
+      "createdAt": "2026-11-22T08:47:40Z",
+      "digest": "sha256:aae7fcd1d0e609706a1fae99e919255a8c809f1057b33a3daad492eb5da4d570",
+      "downloadCount": 0,
+      "id": "RA_kwDOU5vjns4uZg2y",
+      "label": "",
+      "name": "ServerManager-Runner-UI-0.7.0-beta.34-windows-x64.zip",
+      "size": 138376415,
+      "state": "uploaded",
+      "updatedAt": "2026-11-22T08:48:03Z",
+      "url": "https://github.com/yoonseo6399/ServerManager/releases/download/v0.7.0-beta.34/ServerManager-Runner-UI-0.7.0-beta.34-windows-x64.zip"
+    },
+    {
+      "apiUrl": "https://api.github.com/repos/yoonseo6399/ServerManager/releases/assets/778441024",
+      "contentType": "application/octet-stream",
+      "createdAt": "2026-11-22T08:48:06Z",
+      "digest": "sha256:1fb0f9c494a93a9d8e279fdfd734732c40df34bbb0e653373ee2e46bc3aec21a",
+      "downloadCount": 0,
+      "id": "RA_kwDOU5vjns4uZhFA",
+      "label": "",
+      "name": "SHA256SUMS",
+      "size": 846,
+      "state": "uploaded",
+      "updatedAt": "2026-11-22T08:48:06Z",
+      "url": "https://github.com/yoonseo6399/ServerManager/releases/download/v0.7.0-beta.34/SHA256SUMS"
+    },
+    {
+      "apiUrl": "https://api.github.com/repos/yoonseo6399/ServerManager/releases/assets/778440968",
+      "contentType": "application/octet-stream",
+      "createdAt": "2026-11-22T08:48:05Z",
+      "digest": "sha256:07faa2a4033cf7560a52cca24af5b0cc51ffbbcd3de33946a4231d079ad9d08b",
+      "downloadCount": 0,
+      "id": "RA_kwDOU5vjns4uZhEI",
+      "label": "",
+      "name": "update.properties",
+      "size": 157,
+      "state": "uploaded",
+      "updatedAt": "2026-11-22T08:48:05Z",
+      "url": "https://github.com/yoonseo6399/ServerManager/releases/download/v0.7.0-beta.34/update.properties"
+    },
+    {
+      "apiUrl": "https://api.github.com/repos/yoonseo6399/ServerManager/releases/assets/778441005",
+      "contentType": "application/pgp-signature",
+      "createdAt": "2026-11-22T08:48:05Z",
+      "digest": "sha256:e80687de9df16db7a7353d6f8ad7e0cf9ad61596fc6ddf20e0db9abd5905cba0",
+      "downloadCount": 0,
+      "id": "RA_kwDOU5vjns4uZhEt",
+      "label": "",
+      "name": "update.sig",
+      "size": 64,
+      "state": "uploaded",
+      "updatedAt": "2026-11-22T08:48:06Z",
+      "url": "https://github.com/yoonseo6399/ServerManager/releases/download/v0.7.0-beta.34/update.sig"
+    }
+  ],
+  "isDraft": false,
+  "isPrerelease": true,
+  "publishedAt": "2026-11-22T08:48:09Z",
+  "tagName": "v0.7.0-beta.34",
+  "url": "https://github.com/yoonseo6399/ServerManager/releases/tag/v0.7.0-beta.34",
+  "source": "868a20c2fa1f9c116a1c104dd6ccb7edf7505908",
+  "ci": {
+    "release": {
+      "run": 45004028801,
+      "conclusion": "success"
+    },
+    "runner": {
+      "run": 45003579446,
+      "conclusion": "success",
+      "platforms": [
+        "macos-15",
+        "windows-latest"
+      ]
+    }
+  },
+  "verification": {
+    "scopedBackend": {
+      "tests": 29,
+      "failures": 0,
+      "skipped": 0
+    },
+    "browser": 19,
+    "fullBackend": "skipped per user request",
+    "publicAssets": "metadata only, no download/hash comparison",
+    "productionChanges": false,
+    "stableLatest": "v0.6.3"
+  }
+}
