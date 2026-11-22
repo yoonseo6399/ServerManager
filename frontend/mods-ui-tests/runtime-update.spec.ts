@@ -1,5 +1,6 @@
 import {test,expect,type Page} from '@playwright/test';
 async function fixture(page:Page,state='STOPPED'){
+ page.on('pageerror',error=>{console.error('runtime fixture page error:',error.stack||error.message);});
  const requests:any[]=[];let current={minecraft:'1.21.1',loaderVersion:'21.1.264'},job:any=null,polls=0;
  await page.route('**/api/**',async route=>{
   const r=route.request(),url=new URL(r.url()),path=url.pathname;let body:any={};
