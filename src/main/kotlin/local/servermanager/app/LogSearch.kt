@@ -72,8 +72,10 @@ class LogSearch(private val directory:Path,private val serverDirectory:Path=dire
     private fun readPositions(job:Job,offsets:List<Long>):Map<Long,String> {
         if(offsets.isEmpty())return emptyMap()
         val texts=mutableMapOf<Long,String>()
-        if(!job.request.path.endsWith(".gz"))java.io.RandomAccessFile(job.file.toFile(),"r").use {file->for(offset in offsets){file.seek(offset);val bytes=java.io.ByteArrayOutputStream();var remaining=minOf(job.size-offset,1024*1024L);while(remaining-->0){val b=file.read();if(b<0||b==10)break;bytes.write(b)};texts[offset]=bytes.toString(Charsets.UTF_8).removeSuffix("\r")}}
-        else GZIPInputStream(Files.newInputStream(job.file,LinkOption.NOFOLLOW_LINKS)).buffered(65536).use {input->var position=0L;for(offset in offsets){input.skipNBytes(offset-position);position=offset;val bytes=java.io.ByteArrayOutputStream();while(true){val b=input.read();if(b<0)break;position++;if(b==10)break;require(bytes.size()<1024*1024);bytes.write(b)};texts[offset]=bytes.toString(Charsets.UTF_8).removeSuffix("\r")}}
+        if(!job.request.path.endsWith(".gz"))java.nio.channels.FileChannel.open(job.file,StandardOpenOption.READ,LinkOption.NOFOLLOW_LINKS).use {file->
+            for(offset in offsets){val buffer=java.nio.ByteBuffer.allocate(minOf(16384L,job.size-offset).toInt());var position=offset;while(buffer.hasRemaining()){val n=file.read(buffer,position);if(n<=0)break;position+=n};val bytes=buffer.array();val length=(0 until buffer.position()).firstOrNull {bytes[it]==10.toByte()} ?: buffer.position();texts[offset]=String(bytes,0,length,Charsets.UTF_8).removeSuffix("\r")}
+        }
+        else GZIPInputStream(Files.newInputStream(job.file,LinkOption.NOFOLLOW_LINKS)).buffered(65536).use {input->var position=0L;for(offset in offsets){input.skipNBytes(offset-position);position=offset;val bytes=java.io.ByteArrayOutputStream();while(bytes.size()<16384){val b=input.read();if(b<0)break;position++;if(b==10)break;bytes.write(b)};texts[offset]=bytes.toString(Charsets.UTF_8).removeSuffix("\r")}}
         return texts
     }
     private companion object {

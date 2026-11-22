@@ -7,7 +7,7 @@ async function fixture(page:Page,state='STOPPED'){
   if(path==='/api/auth/session')body={appVersion:'fixture',user:{id:'owner',name:'Owner',owner:true,permissions:{}},csrf:'fixture',origin:url.origin,setupRequired:false};
   else if(path==='/api/instances')body=[{config:{id:'test',name:'Version fixture',loader:'NeoForge',...current,port:25565,memoryMb:1024,javaPath:'/java',runnerId:'runner'},state,pid:state==='RUNNING'?123:null}];
   else if(path==='/api/runners')body=[{id:'runner',name:'Runner',online:true,version:'0.7.0-beta.32',allowedInstanceIds:['test']}];
-  else if(path==='/api/memory')body={totalMb:16000,freeMb:8000,startableHeapMb:14400};
+  else if(path==='/api/memory')body={totalMb:16000,freeMb:8000,reservedMb:1600,maxHeapMb:14400,startableHeapMb:14400};
   else if(path==='/api/game-addresses')body={enabled:false};
   else if(path.endsWith('/file-uploads')||path.endsWith('/log-files'))body=[];
   else if(path==='/api/log-filters/test')body={revision:0,config:{enabled:false,rules:{keywords:[],mods:[],onlyDebug:false},presets:[],activeId:null}};
