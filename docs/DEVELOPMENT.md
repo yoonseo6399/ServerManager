@@ -817,3 +817,8 @@ Beta29 운영 로그에서 로그인 중 hub ENDPOINT_BACKPRESSURE가 반복됐�
 
 
 Beta31 CI41582055122 success, tag a06cd7ca59299a596ad451f29d7cca1369eee60f 및 공개 자산9개 메타데이터 확인, stable latest v0.6.3/main/기존 자산 보존. 승인된 로컬 적용 완료: 설치된 서명본/내장 Java에서 runner·GAME_HOST31, Survival 정상 시작·Minecraft 상태 프로토콜1.21.1 응답, supervisor 인계 후 동일 game PID 유지·암호화 터널/포트 확인. 첫 임시 시작의 로컬 빌드 경로를 정상 저장·종료 후 설치본으로 정정했고 종료 인계 후 unacked 이전 PID는 인증 API로 확인했다. 실제 플레이어 로그인·차원 이동 및 원래 일일 동시 단절 전체 원인은 여전히 미검증/미확정. 상세 docs/testing/release-0.7.0-beta.31-results.json 및 릴리즈 인계 노트. 전체 suite·게시 자산 별도 재다운로드 해시 시험 생략.
+
+
+## 2026-11-22 — 0.7.0-beta.34 파일 식별키 없는 로그 검색 보완
+
+Beta33 CI45003030697은 성공하고6fd910b/9개 자산으로 게시됐다. 별도 실행기 CI45003026642 Windows에서97개 중1실패/2스킵으로 null fileKey 오류가 확인돼, 게시 파일을 보존하고915add4를 beta34로 제공한다. 생성시각 대체 식별값과 크기/교체 검사를 유지하며 null-key 환경의 검색/append snapshot/교체 거부를 추가했다. 관련29개 실패0/스킵0, browser19 및 공식 Mojang 격리 런타임 교체는 동일 기능 코드의 기존 결과 유지. 전체 suite·실제 모드 월드 로드·운영 업데이트·공개 자산 재다운로드 해시검사 없음. 기존 실행기 CI 재검사 뒤 서명/패키징/게시한다.
