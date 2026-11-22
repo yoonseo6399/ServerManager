@@ -7,6 +7,11 @@ import kotlin.io.path.*
 
 /** Preserve cumulative history; only genuine Minecraft launches start a new live file. */
 object LiveConsole {
+    private val identities=java.util.WeakHashMap<Process,String>()
+    /** A fast-exiting process may stop exposing info between launch and the console consumer. */
+    @Synchronized fun identity(process:Process):String=identities.getOrPut(process){
+        "${process.pid()}:${runCatching {process.info().startInstant().orElse(null)?.toString()}.getOrNull() ?: java.util.UUID.randomUUID().toString()}"
+    }
     @Synchronized fun open(directory:java.nio.file.Path,identity:String,fresh:Boolean=false):java.nio.file.Path {
         directory.createDirectories()
         val live=directory.resolve("live.log");val marker=directory.resolve(".live-console-session")

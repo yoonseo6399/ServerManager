@@ -978,7 +978,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         workers.submit {
             val log=diagnosticRoot(id)?.resolve("server/logs/server-manager-console.log") ?: instanceRoot(id).resolve("console.log")
             log.parent.createDirectories()
-            val live=LiveConsole.open(log.parent,"${process.pid()}:${process.info().startInstant().orElse(Instant.now())}",fresh)
+            val live=LiveConsole.open(log.parent,LiveConsole.identity(process),fresh)
             log.toFile().appendText("\n--- ${Instant.now()}"+(if(fresh)"" else " · 상주 서비스에서 다시 연결")+" ---\n")
             val hostedProcess=process as? HostedProcess;val position=instanceRoot(id).resolve("console.seq");var lastSaved=0L
             FileOutputStream(live.toFile(),true).bufferedWriter().use { liveWriter ->

@@ -606,7 +606,7 @@ class ServerManager {
             // The resident host (when active) owns the process so it survives a manager restart or update.
             val builder=ProcessBuilder(args).directory(serverDir(id).toFile()).redirectErrorStream(true)
             val p=localLauncher?.launch(id,args,serverDir(id),builder.environment().toMap(),i.port) ?: builder.start()
-            LiveConsole.open(profileDir(id),"${p.pid()}:${p.info().startInstant().orElse(Instant.now())}",fresh=true)
+            LiveConsole.open(profileDir(id),LiveConsole.identity(p),fresh=true)
             r.process=p; r.state="STARTING"; r.players=null; r.event("system","서버 시작 · 127.0.0.1:${i.port} · PID ${p.pid()}"+if(p is HostedProcess)" · 상주 서비스가 프로세스를 소유" else "")
             watch(id,r,p)
         }
@@ -647,7 +647,7 @@ class ServerManager {
     private fun consume(id: String,p: Process) {
         val r=runtime(id)
         val log=profileDir(id).resolve("console.log")
-        val live=LiveConsole.open(profileDir(id),"${p.pid()}:${p.info().startInstant().orElse(Instant.now())}")
+        val live=LiveConsole.open(profileDir(id),LiveConsole.identity(p))
         log.toFile().appendText("\n--- ${Instant.now()} ---\n")
         // Lines replayed from the resident host were already written by the previous manager process.
         val hostedProcess=p as? HostedProcess;val position=profileDir(id).resolve("console.seq");var lastSaved=0L

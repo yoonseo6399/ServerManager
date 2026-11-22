@@ -48,6 +48,13 @@ class LogSearchTest {
         assertEquals("current\n",LiveConsole.open(directory,"100:one").readText())
         assertEquals("",LiveConsole.open(directory,"101:two",true).readText());assertEquals("old history\n",directory.resolve("console.log").readText())
     }
+    @Test fun `fast-exiting process keeps one session identity even when process info is unavailable`() {
+        val process=org.mockito.Mockito.mock(Process::class.java);org.mockito.Mockito.`when`(process.pid()).thenReturn(321L);org.mockito.Mockito.`when`(process.info()).thenThrow(IllegalStateException("already exited"))
+        directory.resolve("console.log").writeText("--- 2026-11-21T10:00:00Z ---\nprevious session\n")
+        val first=LiveConsole.identity(process);LiveConsole.open(directory,first,true).writeText("new startup failure\n")
+        assertEquals(first,LiveConsole.identity(process));assertEquals("new startup failure\n",LiveConsole.open(directory,LiveConsole.identity(process)).readText())
+        org.mockito.Mockito.verify(process,org.mockito.Mockito.times(1)).info()
+    }
     @Test fun `migration ignores reattachment separators and never imports unknown cumulative history`() {
         directory.resolve("console.log").writeText("old\n--- 2026-11-21T10:00:00Z ---\nlast session\n--- 2026-11-21T11:00:00Z · 상주 서비스에서 다시 연결 ---\ncontinued\n")
         assertContains(LiveConsole.open(directory,"legacy").readText(),"last session")
