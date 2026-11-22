@@ -1,0 +1,122 @@
+[WebServer] (node:84400) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 2 tests using 1 worker
+
+(node:84403) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:84403) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  1 frontend/mods-ui-tests/mixin-dialog.spec.ts:35:64 › large block mobile report always has an on-screen close button (6.7s)
+(node:84416) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:84416) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  2 frontend/mods-ui-tests/mixin-dialog.spec.ts:76:1 › closing while the worker parses ignores its late result and stops further pages (30.3s)
+
+
+  1) frontend/mods-ui-tests/mixin-dialog.spec.ts:35:64 › large block mobile report always has an on-screen close button 
+
+    Error: expect(locator).toBeInViewport() failed
+
+    Locator:  getByRole('dialog', { name: '로그 블록 상세', exact: true }).getByRole('button', { name: '닫기', exact: true })
+    Expected: in viewport
+    Received: viewport ratio 0
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toBeInViewport" with timeout 5000ms
+      - waiting for getByRole('dialog', { name: '로그 블록 상세', exact: true }).getByRole('button', { name: '닫기', exact: true })
+        8 × locator resolved to <button>닫기</button>
+          - unexpected value "viewport ratio 0"
+
+
+      36 |  if(mobile)await page.setViewportSize({width:390,height:500});else await page.setViewportSize({width:1100,height:600});
+      37 |  await fixture(page);const dialog=await open(page,raw),close=dialog.getByRole('button',{name:'닫기',exact:true});
+    > 38 |  await expect(close).toBeInViewport({ratio:1});
+         |                      ^
+      39 |  expect(await dialog.locator('.mixin-groups li').count()).toBeLessThanOrEqual(raw?100:1000);
+      40 |  await dialog.getByText('원문 보기',{exact:true}).click();
+      41 |  await expect(dialog.locator('pre')).toBeVisible();
+        at <baseline>/frontend/mods-ui-tests/mixin-dialog.spec.ts:38:22
+
+    Error Context: frontend/test-results/mods-ui/mixin-dialog-large-block-m-3386b-s-an-on-screen-close-button/error-context.md
+
+  2) frontend/mods-ui-tests/mixin-dialog.spec.ts:76:1 › closing while the worker parses ignores its late result and stops further pages 
+
+    Test timeout of 30000ms exceeded.
+
+    Error: locator.click: Test timeout of 30000ms exceeded.
+    Call log:
+      - waiting for getByRole('dialog', { name: '로그 블록 상세', exact: true }).getByRole('button', { name: /주변 원문과 스택 더 읽기/ })
+        - locator resolved to <button>주변 원문과 스택 더 읽기 (최대 2,000줄)</button>
+      - attempting click action
+        2 × waiting for element to be visible, enabled and stable
+          - element is not stable
+        - retrying click action
+        - waiting 20ms
+        - waiting for element to be visible, enabled and stable
+        - element is visible, enabled and stable
+        - scrolling into view if needed
+        - done scrolling
+        - <details class="log-filter-settings">…</details> intercepts pointer events
+      2 × retrying click action
+          - waiting 100ms
+          - waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <div class="tabs">…</div> intercepts pointer events
+      12 × retrying click action
+           - waiting 500ms
+           - waiting for element to be visible, enabled and stable
+           - element is visible, enabled and stable
+           - scrolling into view if needed
+           - done scrolling
+           - <details class="log-filter-settings">…</details> intercepts pointer events
+         - retrying click action
+           - waiting 500ms
+           - waiting for element to be visible, enabled and stable
+           - element is visible, enabled and stable
+           - scrolling into view if needed
+           - done scrolling
+           - <details class="log-filter-settings">…</details> intercepts pointer events
+         - retrying click action
+           - waiting 500ms
+           - waiting for element to be visible, enabled and stable
+           - element is visible, enabled and stable
+           - scrolling into view if needed
+           - done scrolling
+           - <div class="tabs">…</div> intercepts pointer events
+         - retrying click action
+           - waiting 500ms
+           - waiting for element to be visible, enabled and stable
+           - element is visible, enabled and stable
+           - scrolling into view if needed
+           - done scrolling
+           - <div class="tabs">…</div> intercepts pointer events
+      - retrying click action
+        - waiting 500ms
+        - waiting for element to be visible, enabled and stable
+        - element is visible, enabled and stable
+        - scrolling into view if needed
+        - done scrolling
+        - <details class="log-filter-settings">…</details> intercepts pointer events
+      - retrying click action
+        - waiting 500ms
+
+
+      87 |  });
+      88 |  const f=await fixture(page),dialog=await open(page);
+    > 89 |  await dialog.getByRole('button',{name:/주변 원문과 스택 더 읽기/}).click();
+         |                                                           ^
+      90 |  await page.waitForFunction(()=>(window as any).detailParseStarted);
+      91 |  await dialog.getByRole('button',{name:'닫기',exact:true}).click({timeout:1500});
+      92 |  await page.evaluate(()=>(window as any).releaseDetailParse());
+        at <baseline>/frontend/mods-ui-tests/mixin-dialog.spec.ts:89:59
+
+    Error Context: frontend/test-results/mods-ui/mixin-dialog-closing-while-630dc-ult-and-stops-further-pages/error-context.md
+
+  2 failed
+    frontend/mods-ui-tests/mixin-dialog.spec.ts:35:64 › large block mobile report always has an on-screen close button 
+    frontend/mods-ui-tests/mixin-dialog.spec.ts:76:1 › closing while the worker parses ignores its late result and stops further pages 

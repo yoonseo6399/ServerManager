@@ -1,0 +1,55 @@
+{
+  "base": "v0.7.0-beta.31",
+  "productCommit": "79c87b6",
+  "fixtureCorrectionCommit": "5ff4a0f",
+  "build": {
+    "typescript": "passed",
+    "vite": "passed",
+    "warning": "minified JS chunk501.76kB; build succeeded"
+  },
+  "browser": {
+    "uniquePassed": 14,
+    "newDialogCases": 9,
+    "existingConsoleFollowCases": 5,
+    "initial": {
+      "passed": 12,
+      "failed": 2,
+      "failure": "Test preparation tried to scroll an unmounted virtual row into view; no product failure. Original result preserved."
+    },
+    "corrected": {
+      "passed": 3,
+      "failed": 0,
+      "cases": [
+        "large frame desktop",
+        "large frame mobile",
+        "large block mobile visual capture"
+      ]
+    },
+    "fixture": {
+      "frames": 120,
+      "mixinsPerFrame": 150,
+      "mobileViewport": [
+        390,
+        500
+      ]
+    },
+    "baseline": {
+      "expectedFailures": 2,
+      "observations": [
+        "Close button viewport ratio0 on large mobile report.",
+        "Old large report intercepted clicks before worker-race step; this run alone does not prove late-result race."
+      ]
+    },
+    "cancellation": [
+      "button",
+      "Escape",
+      "browser Back",
+      "backdrop",
+      "late worker result"
+    ],
+    "visualCheck": "Mobile screenshot inspected; close visible above body scrolled to bottom."
+  },
+  "fullBackendSuite": "not run: frontend-only scoped fix",
+  "productionChanged": false,
+  "releasePublished": false
+}
