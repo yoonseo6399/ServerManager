@@ -105,7 +105,7 @@ class RunnerWorkspace(private val base:Path,private val history:Path,private val
                 check(revision(file)==rev) {"로그 파일이 변경되었습니다. 다시 다운로드하세요"}
                 mapOf("data" to java.util.Base64.getEncoder().encodeToString(bytes),"revision" to rev)
             }
-            "RUNTIME_START" -> {stopped();runtimeUpdate.start(req.config,mapper.readValue<RuntimeUpdate.Target>(req.data ?: error("대상 버전이 없습니다")))}
+            "RUNTIME_START" -> {check(uploads.isEmpty()){"파일 업로드가 끝난 뒤 버전을 변경하세요"};stopped();runtimeUpdate.start(req.config,mapper.readValue<RuntimeUpdate.Target>(req.data ?: error("대상 버전이 없습니다")))}
             "RUNTIME_STATUS" -> runtimeUpdate.status()
             "LOG_SEARCH_START" -> logSearch.start(mapper.readValue<LogSearch.Request>(req.data ?: error("검색 조건이 없습니다")))
             "LOG_SEARCH_VIEW" -> logSearch.view(req.uploadId ?: error("검색 ID가 없습니다"),req.offset.toInt(),100)

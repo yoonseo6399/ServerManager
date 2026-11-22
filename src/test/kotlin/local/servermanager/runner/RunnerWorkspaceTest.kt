@@ -11,6 +11,15 @@ import kotlin.test.*
 class RunnerWorkspaceTest {
     @TempDir lateinit var temp:Path
     private val config=Instance("instance","test",loaderVersion="21.1.249",port=25565,memoryMb=512,javaPath="java",runnerId="runner",fileSyncEnabled=false)
+    @Test fun `log searches are read-only while running and runtime start refuses a running game`() {
+        val base=temp.resolve("server").createDirectory();temp.resolve("console.log").writeText("needle\n")
+        var writes=0;val service=RunnerWorkspace(base,temp.resolve("history"),temp,beforeMutation={writes++}){error("game is running")}
+        val mapper=jacksonObjectMapper();val start=service.execute(WorkspaceRequest("LOG_SEARCH_START",config,data=mapper.writeValueAsString(LogSearch.Request("console.log","needle")))) as LogSearch.View
+        val deadline=System.nanoTime()+5_000_000_000L
+        while(true){val view=service.execute(WorkspaceRequest("LOG_SEARCH_VIEW",config,uploadId=start.id)) as LogSearch.View;if(view.state=="COMPLETE"){assertEquals(1L,view.matches);break};check(System.nanoTime()<deadline);Thread.sleep(5)}
+        service.execute(WorkspaceRequest("LOG_SEARCH_CANCEL",config,uploadId=start.id));assertEquals(0,writes)
+        assertFailsWith<IllegalStateException>{service.execute(WorkspaceRequest("RUNTIME_START",config,data="{}"))};assertEquals(0,writes)
+    }
     @Test fun `file access is rooted blocks links and traversal and refuses mutation while running`() {
         val base=temp.resolve("server").createDirectory();val outside=temp.resolve("private.txt").also {it.writeText("secret")};Files.createSymbolicLink(base.resolve("link"),outside)
         var running=false;val service=RunnerWorkspace(base,temp.resolve("history")){check(!running)}
