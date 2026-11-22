@@ -27,7 +27,7 @@ class LogFiles(private val directory: Path,private val serverDirectory:Path=dire
     data class Row(val no:Long,val kind:String,val text:String)
     data class Window(val lines:List<Row>,val total:Long,val first:Long,val last:Long,val next:Long?)
     data class Page(val events:List<Line>,val nextOffset:Long?,val revision:String,val bytesRead:Long)
-    private fun allowed(name:String)=name=="console.log" || Regex("server/logs/[^/]+\\.log(?:\\.gz)?").matches(name) || Regex("server/crash-reports/[^/]+\\.txt").matches(name)
+    private fun allowed(name:String)=name in setOf("console.log","live.log") || Regex("server/logs/[^/]+\\.log(?:\\.gz)?").matches(name) || Regex("server/crash-reports/[^/]+\\.txt").matches(name)
     private fun resolve(name:String):Path {
         require(allowed(name) && !name.contains('\\')) { "지원하지 않는 로그 파일입니다" }
         val base=(if(name.startsWith("server/"))serverDirectory else directory).toAbsolutePath().normalize();val p=base.resolve(name.removePrefix(if(name.startsWith("server/"))"server/" else "")).normalize()
@@ -39,7 +39,7 @@ class LogFiles(private val directory: Path,private val serverDirectory:Path=dire
     }
     fun file(name:String):Path=resolve(name)
     fun list():List<Entry> {
-        val names=mutableListOf("console.log")
+        val names=mutableListOf("console.log","live.log")
         for(sub in listOf("server/logs","server/crash-reports")) {
             val folder=serverDirectory.resolve(sub.removePrefix("server/"))
             if(Files.isSymbolicLink(serverDirectory) || Files.isSymbolicLink(folder) || !Files.isDirectory(folder,LinkOption.NOFOLLOW_LINKS))continue
@@ -128,6 +128,7 @@ class LogFiles(private val directory: Path,private val serverDirectory:Path=dire
      */
     fun window(name:String,from:Long,limit:Int,query:String?=null):Window {
         require(from>=1 && limit in 1..500 && (query?.length ?: 0)<=200) { "로그 조회 범위를 확인하세요" }
+        if(name=="live.log" && !directory.resolve(name).exists(LinkOption.NOFOLLOW_LINKS))return Window(emptyList(),0,0,0,null)
         val p=resolve(name);val gzip=name.endsWith(".gz")
         val attrs=Files.readAttributes(p,BasicFileAttributes::class.java,LinkOption.NOFOLLOW_LINKS)
         val index=index(p,gzip,attrs);val total:Long;val offsets:List<Long>
