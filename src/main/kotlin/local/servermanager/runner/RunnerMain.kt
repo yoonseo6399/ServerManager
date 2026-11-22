@@ -574,7 +574,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                         "sable-registered" -> message.token?.let {sableRegistrations[it]?.complete(message.state=="OK")}
 
                         "session" -> { sessionToken=message.token;tcpRelay?.close();tcpRelay=if(tcpRelayAllowed)TcpRelayPeer(::send,::sendBinary) else null
-                            send(RunnerMessage("workspace-capability",state="LIVE_FILES_V1"));send(RunnerMessage("restart-capability",state=if(supervisedRestart)"RESTART_V2" else "OFF",detail=serviceBootId));send(RunnerMessage("update-capability",state=if(updater!=null)"RELEASE_SELECTION_V1" else "OFF",detail=if(updater?.rollbackSupported==true)"ROLLBACK_V1" else null));confirmActivation();hosted?.relaySession() ?: directRelay.onSession();reportUpdateDetail();send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));send(RunnerMessage("llm-capability",state=if(llmAllowed)"OLLAMA_AGENT_V3" else "OFF",detail="CONTEXT_TOOLS_V1",command="STRATA_V1",version="PI_PROVIDER_V1",token="AGENT_SAFETY_PROFILE_V1"));send(RunnerMessage("llm-context-capability",version="KV_CONTEXT_V1"));reportUpdate();recoverStates() }
+                            send(RunnerMessage("workspace-capability",state="LIVE_FILES_V1",detail="LOG_VIEW_V2,RUNTIME_UPDATE_V1"));send(RunnerMessage("restart-capability",state=if(supervisedRestart)"RESTART_V2" else "OFF",detail=serviceBootId));send(RunnerMessage("update-capability",state=if(updater!=null)"RELEASE_SELECTION_V1" else "OFF",detail=if(updater?.rollbackSupported==true)"ROLLBACK_V1" else null));confirmActivation();hosted?.relaySession() ?: directRelay.onSession();reportUpdateDetail();send(RunnerMessage("relay-capability",state=if(tcpRelayAllowed)"TCP_V1" else "OFF"));send(RunnerMessage("llm-capability",state=if(llmAllowed)"OLLAMA_AGENT_V3" else "OFF",detail="CONTEXT_TOOLS_V1",command="STRATA_V1",version="PI_PROVIDER_V1",token="AGENT_SAFETY_PROFILE_V1"));send(RunnerMessage("llm-context-capability",version="KV_CONTEXT_V1"));reportUpdate();recoverStates() }
                         "relay-config" -> {
                             val port=message.detail?.toIntOrNull()
                             val ok=tcpRelayAllowed && (message.state=="OFF" || port in 1024..65535) && runCatching {tcpRelay?.listen(if(message.state=="ON")port else null);true}.getOrDefault(false)
@@ -746,7 +746,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         val response=try {
             val request=mapper.readValue<WorkspaceRequest>(raw);val instance=request.config
             require(instance.id==id && instance.runnerId==identity.id && instance.diagnosticSession==null)
-            val readOnly=request.op in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW","LOG_SEARCH_START","LOG_SEARCH_VIEW","LOG_SEARCH_CANCEL","LOG_STAT","LOG_READ","MOD_SCAN")
+            val readOnly=request.op in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW","LOG_SEARCH_START","LOG_SEARCH_VIEW","LOG_SEARCH_CANCEL","RUNTIME_STATUS","LOG_STAT","LOG_READ","MOD_SCAN")
             fun execute():RunnerMessage {
                 updateCheckpoint()
                 check(!instanceRoot(id).resolve("folder-import.pending").exists()) {"최초 폴더 가져오기를 완료하세요"}
@@ -799,6 +799,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         var spawned=false
         try {
             synchronized(lifecycle){updateCheckpoint();preparing.add(id)}
+            check(workspaces[id]?.busy()!=true){"서버 파일·버전 변경이 진행 중입니다"}
             check(processes[id]?.isAlive!=true) { "이미 실행 중입니다" }
             check(!dirty(id).exists()) { "종료 복사본을 준비 중입니다. 잠시 후 다시 시작하세요" }
             check(!instanceRoot(id).resolve("folder-import.pending").exists() && (id !in uploading || snapshots(id).list().isNotEmpty())) { "최초 폴더 가져오기를 완료하세요" }

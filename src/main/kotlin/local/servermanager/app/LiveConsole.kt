@@ -17,11 +17,19 @@ object LiveConsole {
             if(!fresh) {
                 val history=directory.resolve("console.log")
                 if(history.isRegularFile(LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(history)) {
-                    java.io.RandomAccessFile(history.toFile(),"r").use { file->
-                        var start=0L
-                        while(true){val line=file.readLine() ?: break;if(line.matches(Regex("--- \\d{4}-\\d{2}-\\d{2}T[0-9:.]+Z ---")))start=file.filePointer}
-                        if(start>0){file.seek(start);Files.newOutputStream(temporary).use {out->val buffer=ByteArray(65536);while(true){val n=file.read(buffer);if(n<0)break;out.write(buffer,0,n)}}}
+                    var start=0L;var position=0L;var length=0
+                    val head=ByteArray(512);val buffer=ByteArray(65536)
+                    Files.newInputStream(history,LinkOption.NOFOLLOW_LINKS).buffered(65536).use {input->
+                        while(true){val count=input.read(buffer);if(count<0)break
+                            for(n in 0 until count){val byte=buffer[n];position++
+                                if(byte==10.toByte()){
+                                    if(length in 4..512 && head[0]==45.toByte() && head[1]==45.toByte() && head[2]==45.toByte() && String(head,0,length,Charsets.UTF_8).trimEnd('\r').matches(Regex("--- \\d{4}-\\d{2}-\\d{2}T[0-9:.]+Z ---")))start=position
+                                    length=0
+                                }else{if(length<512)head[length]=byte;length=minOf(513,length+1)}
+                            }
+                        }
                     }
+                    if(start>0)Files.newInputStream(history,LinkOption.NOFOLLOW_LINKS).buffered(65536).use {input->input.skipNBytes(start);Files.newOutputStream(temporary).use {out->input.copyTo(out,65536)}}
                 }
             }
             Files.move(temporary,live,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING)

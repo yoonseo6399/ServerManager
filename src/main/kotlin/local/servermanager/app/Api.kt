@@ -63,6 +63,7 @@ class Api(private val manager: ServerManager,private val accounts:AuthStore,priv
     }
     @GetMapping("/instances/{id}/log-window") fun logWindow(@PathVariable id:String,@RequestParam path:String,@RequestParam(defaultValue="1") from:Long,@RequestParam(defaultValue="300") limit:Int,@RequestParam(required=false) q:String?):ResponseEntity<LogFiles.Window> {
         manager.instance(id)
+        if(path=="live.log")manager.requireExtendedLogs(id)
         val value=when {
             remoteFiles.remote(id) -> remoteFiles.logWindow(id,path,from,limit,q)
             path=="console.log" && !Files.isRegularFile(manager.profileDir(id).resolve(path)) -> manager.eventWindow(id,from,limit,q)
