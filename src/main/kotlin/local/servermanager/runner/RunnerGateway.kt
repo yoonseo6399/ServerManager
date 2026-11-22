@@ -61,6 +61,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
     }
     private data class PendingWorkspace(val runner:String,val instance:String,val future:java.util.concurrent.CompletableFuture<com.fasterxml.jackson.databind.JsonNode>)
     private val workspaceRequests=ConcurrentHashMap<String,PendingWorkspace>()
+    private val runtimeUpdateRunners=java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val liveFileRunners=ConcurrentHashMap.newKeySet<String>()
     private val workspaceSlots=java.util.concurrent.Semaphore(32)
     private data class PendingLlm(val runner:String,val future:java.util.concurrent.CompletableFuture<com.fasterxml.jackson.databind.JsonNode>,val progress:(QwenProgress)->Unit={})
@@ -203,7 +204,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
             return
         }
         tcpRelays.remove(id)?.close()
-        liveFileRunners.remove(id);extendedLlmRunners.remove(id);restartRunners.remove(id);llmRunners.remove(id);agentLlmRunners.remove(id);streamingLlmRunners.remove(id);budgetLlmRunners.remove(id);strataLlmRunners.remove(id);piLlmRunners.remove(id);memoryLlmRunners.remove(id);llmAnswered.remove(id)
+        liveFileRunners.remove(id);runtimeUpdateRunners.remove(id);extendedLlmRunners.remove(id);restartRunners.remove(id);llmRunners.remove(id);agentLlmRunners.remove(id);streamingLlmRunners.remove(id);budgetLlmRunners.remove(id);strataLlmRunners.remove(id);piLlmRunners.remove(id);memoryLlmRunners.remove(id);llmAnswered.remove(id)
         registry.tcpRelayCapability(id,false)
         registry.connected(id)
         directRelay?.core?.onDisconnect(id) // Consent/capability must come from this authenticated connection.
@@ -226,7 +227,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
         val event=runCatching { mapper.readValue<RunnerMessage>(message.payload) }.getOrNull() ?: return
         if(directRelay?.core?.onRunnerMessage(id,event)==true)return
         when(event.type) {
-            "workspace-capability" -> {if(event.state=="LIVE_FILES_V1" && registry.active(id)!=null)liveFileRunners.add(id)else liveFileRunners.remove(id)}
+            "workspace-capability" -> {if(event.detail=="RUNTIME_UPDATE_V1")runtimeUpdateRunners.add(id)else runtimeUpdateRunners.remove(id);if(event.state=="LIVE_FILES_V1" && registry.active(id)!=null)liveFileRunners.add(id)else liveFileRunners.remove(id)}
             "restart-capability" -> restartCapability(id,event)
             "restart-result" -> if(event.token==null && restartBoots[id]==null || event.token==restarts[id]?.requestId)restartRequests[id]?.complete(if(event.state=="ACCEPTED")null else (event.detail ?: "REFUSED").take(60))
             "relay-capability" -> {
@@ -347,7 +348,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
             tcpRelays.remove(id)?.close()
             udpOutboxes.remove(id)?.close();udpSessions.remove(id)?.let {runCatching {it.close()}};sable.removeRunner(id)
             tokens.remove(id);registry.disconnected(id);manager.remoteDisconnected(id);directRelay?.core?.onDisconnect(id)
-            liveFileRunners.remove(id);extendedLlmRunners.remove(id);restartRunners.remove(id);llmRunners.remove(id);agentLlmRunners.remove(id);streamingLlmRunners.remove(id);budgetLlmRunners.remove(id);strataLlmRunners.remove(id);piLlmRunners.remove(id);memoryLlmRunners.remove(id);llmAnswered.remove(id);llmRequests.values.filter {it.runner==id}.forEach {it.future.completeExceptionally(IllegalStateException("실행기가 연결 해제됐습니다"))}
+            liveFileRunners.remove(id);runtimeUpdateRunners.remove(id);extendedLlmRunners.remove(id);restartRunners.remove(id);llmRunners.remove(id);agentLlmRunners.remove(id);streamingLlmRunners.remove(id);budgetLlmRunners.remove(id);strataLlmRunners.remove(id);piLlmRunners.remove(id);memoryLlmRunners.remove(id);llmAnswered.remove(id);llmRequests.values.filter {it.runner==id}.forEach {it.future.completeExceptionally(IllegalStateException("실행기가 연결 해제됐습니다"))}
             workspaceRequests.values.filter {it.runner==id}.forEach {it.future.completeExceptionally(IllegalStateException("실행기가 연결 해제됐습니다. 파일을 다시 확인하세요"))}
             sockets.values.filter { it.runnerId==id }.forEach { closeStream(it,false) }
         }
@@ -480,6 +481,7 @@ class RunnerGateway(private val registry:RunnerRegistry,private val manager:Serv
         return id
     }
     override fun supportsLiveFiles(instance:Instance)=instance.runnerId in liveFileRunners && connected(instance.runnerId!!)
+    override fun supportsRuntimeUpdate(instance:Instance)=instance.runnerId in runtimeUpdateRunners && connected(instance.runnerId!!)
     override fun supportsWorkspace(instance:Instance):Boolean {
         val id=instance.runnerId ?: return false
         return connected(id) && runCatching {SignedUpdates.compare(registry.active(id)?.version ?: "unknown","0.4.5")>=0}.getOrDefault(false)

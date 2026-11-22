@@ -13,6 +13,21 @@ class RunnerWorkspace(private val base:Path,private val history:Path,private val
     companion object {const val CHUNK=64*1024;const val MAX=256L*1024*1024}
     private val mapper=jacksonObjectMapper()
     private val logSearch=LogSearch(logDirectory,base)
+    private val runtimeUpdate=RuntimeUpdate(base,history.resolve("runtime-updates")){instance,stage,log->
+        val next=instance.copy(javaPath=System.getProperty("java.home")+"/bin/java")
+        val settings=logDirectory.resolve("server-folder.properties");require(!Files.isSymbolicLink(settings));val pinned=if(settings.isRegularFile())java.util.Properties().apply {settings.inputStream().use {load(it)}}.getProperty("jar","") else ""
+        LauncherInstaller(LauncherCatalog(logDirectory.resolve("runtime-catalogs"))).install(next,stage,stage.resolve("installer.jar"),{args->
+            val process=ProcessBuilder(args).directory(stage.toFile()).redirectErrorStream(true).start()
+            process.inputStream.bufferedReader().useLines {lines->lines.forEach(log)};process.waitFor()
+        },log)
+        if(pinned.isNotBlank()) {
+            require(next.loader in setOf("Vanilla","Paper","Fabric") && pinned.endsWith(".jar") && '/' !in pinned && '\\' !in pinned && ':' !in pinned)
+            val meta=stage.resolve("server-manager-runtime.json");val node=mapper.readTree(meta.readText()) as com.fasterxml.jackson.databind.node.ObjectNode
+            val entry=node.path("entryJar").asText(if(next.loader=="Fabric")"fabric-server-launch.jar" else "server.jar")
+            if(entry!=pinned)Files.copy(stage.resolve(entry),stage.resolve(pinned))
+            node.put("entryJar",pinned);meta.writeText(mapper.writeValueAsString(node))
+        }
+    }
     private data class Upload(val path:String,val temporary:Path,val revision:String?,var bytes:Long=0,val at:Long=System.currentTimeMillis())
     private val uploads=mutableMapOf<String,Upload>()
     private var modListing:ModInventorySnapshot?=null
@@ -56,9 +71,10 @@ class RunnerWorkspace(private val base:Path,private val history:Path,private val
     }
     private fun revision(p:Path)="${p.fileSize()}:${Files.getLastModifiedTime(p).toMillis()}"
     fun matches(directory:Path)=base==directory
-    @Synchronized fun busy()=uploads.values.any {System.currentTimeMillis()-it.at<=15*60*1000}
+    @Synchronized fun busy()=runtimeUpdate.busy() || uploads.values.any {System.currentTimeMillis()-it.at<=15*60*1000}
     @Synchronized fun execute(req:WorkspaceRequest):Any {
-        val readOnly=req.op in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW","LOG_SEARCH_START","LOG_SEARCH_VIEW","LOG_SEARCH_CANCEL","LOG_STAT","LOG_READ","MOD_SCAN")
+        val readOnly=req.op in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW","LOG_SEARCH_START","LOG_SEARCH_VIEW","LOG_SEARCH_CANCEL","RUNTIME_STATUS","LOG_STAT","LOG_READ","MOD_SCAN")
+        check(!runtimeUpdate.busy() || readOnly || req.op=="RUNTIME_START"){"서버 버전 변경이 진행 중입니다"}
         if(!readOnly){stopped();beforeMutation(req.mutationToken)}
         uploads.entries.removeIf { (_,u)->if(System.currentTimeMillis()-u.at>15*60*1000){u.temporary.deleteIfExists();true}else false }
         if(!readOnly)recover()
@@ -89,6 +105,8 @@ class RunnerWorkspace(private val base:Path,private val history:Path,private val
                 check(revision(file)==rev) {"로그 파일이 변경되었습니다. 다시 다운로드하세요"}
                 mapOf("data" to java.util.Base64.getEncoder().encodeToString(bytes),"revision" to rev)
             }
+            "RUNTIME_START" -> {stopped();runtimeUpdate.start(req.config,mapper.readValue<RuntimeUpdate.Target>(req.data ?: error("대상 버전이 없습니다")))}
+            "RUNTIME_STATUS" -> runtimeUpdate.status()
             "LOG_SEARCH_START" -> logSearch.start(mapper.readValue<LogSearch.Request>(req.data ?: error("검색 조건이 없습니다")))
             "LOG_SEARCH_VIEW" -> logSearch.view(req.uploadId ?: error("검색 ID가 없습니다"),req.offset.toInt(),100)
             "LOG_SEARCH_CANCEL" -> {logSearch.cancel(req.uploadId ?: error("검색 ID가 없습니다"));emptyMap<String,String>()}

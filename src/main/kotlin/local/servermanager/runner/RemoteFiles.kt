@@ -25,6 +25,8 @@ class RemoteFiles(private val manager:ServerManager) {
         return ModInventorySnapshot(revision ?: error("모드 목록이 없습니다"),mods,emptyList())
     }
     fun toggleMods(id:String,request:ModSelection)=manager.withRemoteFiles(id) {call(id,"MOD_TOGGLE",data=mapper.writeValueAsString(request));Unit}
+    fun runtimeStart(id:String,target:RuntimeUpdate.Target):RuntimeUpdate.Status=mapper.treeToValue(call(id,"RUNTIME_START",data=mapper.writeValueAsString(target)),RuntimeUpdate.Status::class.java)
+    fun runtimeStatus(id:String):RuntimeUpdate.Status=mapper.treeToValue(call(id,"RUNTIME_STATUS"),RuntimeUpdate.Status::class.java)
     fun searchStart(id:String,request:LogSearch.Request):LogSearch.View=mapper.treeToValue(call(id,"LOG_SEARCH_START",data=mapper.writeValueAsString(request)),LogSearch.View::class.java)
     fun searchView(id:String,job:String,offset:Int):LogSearch.View=mapper.treeToValue(call(id,"LOG_SEARCH_VIEW",offset=offset.toLong(),uploadId=job),LogSearch.View::class.java)
     fun searchCancel(id:String,job:String){call(id,"LOG_SEARCH_CANCEL",uploadId=job)}

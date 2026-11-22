@@ -28,6 +28,7 @@ data class ServerSignal(val instanceId:String, val kind:String, val detail:Strin
 interface RemoteController {
     fun workspace(instance:Instance,request:WorkspaceRequest):com.fasterxml.jackson.databind.JsonNode {error("실행기를 업데이트하세요")}
     fun supportsWorkspace(instance:Instance):Boolean=false
+    fun supportsRuntimeUpdate(instance:Instance):Boolean=false
     fun supportsLiveFiles(instance:Instance):Boolean=false
     fun install(instance:Instance,requestId:String) {error("실행기를 업데이트하세요")}
     fun start(instance:Instance)
@@ -188,6 +189,18 @@ class ServerManager {
         if(instance(id).runnerId!=null && r.lastExit!=null)check(r.remoteWorkerReady) {"실행기가 파일 인계를 확인하고 있습니다. 잠시 후 다시 시도하세요"}
         r.modBusy=true
     }}
+    fun reserveRuntimeUpdate(id:String,target:RuntimeUpdate.Target):Instance {
+        val r=runtime(id);synchronized(r){checkIdle(r);val i=instance(id);RuntimeUpdate.validate(i,target)
+            if(i.runnerId!=null)check(remoteController?.supportsRuntimeUpdate(i)==true){"실행기를 이번 릴리즈로 업데이트한 뒤 버전을 변경하세요"}
+            if(i.runnerId!=null && i.syncEnabled())atomicText(root.resolve(id).resolve("runner-edits.pending"),UUID.randomUUID().toString())
+            r.modBusy=true;return i.copy()
+        }
+    }
+    fun finishRuntimeUpdate(id:String,before:Instance,target:RuntimeUpdate.Target) {
+        val r=runtime(id);synchronized(r){check(r.modBusy && r.process?.isAlive!=true && r.remotePid==null);val current=instance(id);check(current.loader==before.loader && current.minecraft==before.minecraft && current.loaderVersion==before.loaderVersion)
+            val next=current.copy(minecraft=target.minecraft,loaderVersion=target.loaderVersion);save(next);instances[id]=next;r.event("system","${next.loader} ${next.loaderVersion} · Minecraft ${next.minecraft} 버전 변경 완료")
+        }
+    }
     fun releaseMods(id:String){runtime(id).modBusy=false}
     /** True while edits are impossible (running, transferring, another mod job). The mod list can still be read without reserving files. */
     fun modsViewOnly(id:String):Boolean=runCatching {reserveMods(id);releaseMods(id)}.isFailure
@@ -223,7 +236,7 @@ class ServerManager {
     fun remoteWorkspace(id:String,request:WorkspaceRequest):com.fasterxml.jackson.databind.JsonNode {
         val i=instance(id);check(i.runnerId!=null) {"실행기를 선택하세요"}
         check(!i.syncEnabled() || remoteController?.supportsLiveFiles(i)==true) {"원격 파일·모드 관리에는 실행기를 새 버전으로 업데이트하세요"}
-        return (remoteController ?: error("실행기 연결이 없습니다")).workspace(i.copy(),request.copy(config=i.copy(),mutationToken=if(liveFilesAvailable(id) && request.op !in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW","LOG_SEARCH_START","LOG_SEARCH_VIEW","LOG_SEARCH_CANCEL","LOG_STAT","LOG_READ","MOD_SCAN"))root.resolve(id).resolve("runner-edits.pending").takeIf {it.exists()}?.readText() else null))
+        return (remoteController ?: error("실행기 연결이 없습니다")).workspace(i.copy(),request.copy(config=i.copy(),mutationToken=if(liveFilesAvailable(id) && request.op !in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW","LOG_SEARCH_START","LOG_SEARCH_VIEW","LOG_SEARCH_CANCEL","RUNTIME_STATUS","LOG_STAT","LOG_READ","MOD_SCAN"))root.resolve(id).resolve("runner-edits.pending").takeIf {it.exists()}?.readText() else null))
     }
     @Synchronized fun setFileSync(id:String,enabled:Boolean):Map<String,Any?> {
         val r=runtime(id);synchronized(r){

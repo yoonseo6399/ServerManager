@@ -43,3 +43,5 @@ select{font:inherit;color:#e4e9f1;background:#11161d;border:1px solid #323b49;bo
 .log-detail-pages{display:flex;align-items:center;gap:12px;margin:10px 0;flex-wrap:wrap}
 .log-detail .mixin-groups{max-height:none;overflow:visible}
 @media(max-width:700px){.log-detail-backdrop{padding:8px}.modal.log-detail{max-height:calc(100vh - 16px);max-height:calc(100dvh - 16px)}.log-detail-header,.log-detail-body{padding:12px}}
+
+.runtime-update-panel{margin:1.5rem 0;padding:1rem;border:1px solid var(--border);border-radius:12px}.runtime-update-panel pre{max-height:16rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}.full-log-search pre{margin:0;white-space:pre;min-width:0}.full-log-search progress{width:100%}.full-log-search .log-block-line{cursor:pointer}
