@@ -11,7 +11,7 @@ class RuntimeUpdates(private val manager:ServerManager,private val remote:Remote
     private val states=ConcurrentHashMap<String,View>()
     private val local=ConcurrentHashMap<String,RuntimeUpdate>()
     private val workers=Executors.newFixedThreadPool(2){r->Thread(r,"runtime-update-coordinator").apply {isDaemon=true}}
-    fun status(id:String):View {manager.instance(id);return states[id] ?: error("진행한 버전 변경 작업이 없습니다")}
+    fun status(id:String):View? {manager.instance(id);return states[id]}
     fun start(id:String,target:RuntimeUpdate.Target):View {
         val before=manager.reserveRuntimeUpdate(id,target)
         val initial=View("PREPARING",target,listOf("서버가 종료됐음을 확인했습니다"));states[id]=initial
