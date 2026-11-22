@@ -29,6 +29,7 @@ interface RemoteController {
     fun workspace(instance:Instance,request:WorkspaceRequest):com.fasterxml.jackson.databind.JsonNode {error("실행기를 업데이트하세요")}
     fun supportsWorkspace(instance:Instance):Boolean=false
     fun supportsRuntimeUpdate(instance:Instance):Boolean=false
+    fun supportsExtendedLogs(instance:Instance):Boolean=false
     fun supportsLiveFiles(instance:Instance):Boolean=false
     fun install(instance:Instance,requestId:String) {error("실행기를 업데이트하세요")}
     fun start(instance:Instance)
@@ -233,6 +234,7 @@ class ServerManager {
         try{return action()}finally{r.remoteFileBusy=false}
     }
     fun liveFilesAvailable(id:String)=instance(id).runnerId!=null && remoteController?.supportsLiveFiles(instance(id))==true
+    fun requireExtendedLogs(id:String){val i=instance(id);if(i.runnerId!=null)check(remoteController?.supportsExtendedLogs(i)==true){"현재 세션 로그·전체 검색을 사용하려면 실행기도 이번 릴리즈로 업데이트하세요"}}
     fun remoteWorkspace(id:String,request:WorkspaceRequest):com.fasterxml.jackson.databind.JsonNode {
         val i=instance(id);check(i.runnerId!=null) {"실행기를 선택하세요"}
         check(!i.syncEnabled() || remoteController?.supportsLiveFiles(i)==true) {"원격 파일·모드 관리에는 실행기를 새 버전으로 업데이트하세요"}
