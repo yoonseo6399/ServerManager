@@ -22,15 +22,15 @@ async function fixture(page:Page,state='STOPPED'){
  });return {requests};
 }
 test('loader version change requires reviewing a centered plan and then reports progress and backup',async({page})=>{
- const f=await fixture(page);await page.goto('/');await page.getByRole('button',{name:'설정',exact:true}).click();
+ const f=await fixture(page);await page.goto('/');await page.getByRole('button',{name:'서버 설정',exact:true}).click();
  await page.getByLabel('변경할 로더 버전').selectOption('21.1.265');await page.getByRole('button',{name:'버전 변경 계획 확인'}).click();
  const dialog=page.getByRole('dialog',{name:'서버 버전 변경 확인'});await expect(dialog).toBeVisible();await expect(dialog).toContainText('월드·모드·config·KubeJS는 보존');expect(f.requests).toHaveLength(0);
  await dialog.getByRole('button',{name:'확인하고 버전 변경'}).click();await expect(page.getByText('버전 변경 완료',{exact:true})).toBeVisible();expect(f.requests).toEqual([{minecraft:'1.21.1',loaderVersion:'21.1.265'}]);await expect(page.getByText('기존 실행 파일 백업:')).toBeVisible();
 });
 test('Minecraft upgrade uses the matching loader catalog and can be cancelled before sending',async({page})=>{
- const f=await fixture(page);await page.goto('/');await page.getByRole('button',{name:'설정',exact:true}).click();await page.getByLabel('변경할 Minecraft 버전').selectOption('1.21.2');await expect(page.getByLabel('변경할 로더 버전')).toHaveValue('21.2.1');
+ const f=await fixture(page);await page.goto('/');await page.getByRole('button',{name:'서버 설정',exact:true}).click();await page.getByLabel('변경할 Minecraft 버전').selectOption('1.21.2');await expect(page.getByLabel('변경할 로더 버전')).toHaveValue('21.2.1');
  await page.getByRole('button',{name:'버전 변경 계획 확인'}).click();await expect(page.getByRole('dialog')).toContainText('Minecraft 1.21.1 → 1.21.2');await page.getByRole('dialog').getByRole('button',{name:'취소',exact:true}).click();expect(f.requests).toHaveLength(0);
 });
 test('runtime changes are disabled while Minecraft is running',async({page})=>{
- await fixture(page,'RUNNING');await page.goto('/');await page.getByRole('button',{name:'설정',exact:true}).click();await expect(page.getByLabel('변경할 Minecraft 버전')).toBeDisabled();await expect(page.getByRole('button',{name:'버전 변경 계획 확인'})).toBeDisabled();
+ await fixture(page,'RUNNING');await page.goto('/');await page.getByRole('button',{name:'서버 설정',exact:true}).click();await expect(page.getByLabel('변경할 Minecraft 버전')).toBeDisabled();await expect(page.getByRole('button',{name:'버전 변경 계획 확인'})).toBeDisabled();
 });
