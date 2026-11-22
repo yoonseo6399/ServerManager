@@ -14,7 +14,7 @@ async function fixture(page:Page){
   else if(path.includes('/log-search/')){
    const job=path.split('/').at(-1)!;
    if(request.method()==='DELETE'){cancelled.push(job);body={status:'CANCELLED'};}
-   else{const offset=Number(url.searchParams.get('offset')||0);body={id:job,state:'COMPLETE',scanned:1200000,bytes:100,totalBytes:100,matches:101,retained:101,offset,next:offset===0?100:null,rows:[{no:offset===0?1199999:1200000,kind:'output',text:offset===0?'needle from unopened far-away page':'second search page',level:'INFO',logger:'Visible'}]};}
+   else{const offset=Number(url.searchParams.get('offset')||0);body={id:job,state:'COMPLETE',scanned:1200000,bytes:100,totalBytes:100,matches:101,retained:101,offset,next:offset===0?37:offset===37?74:null,rows:[{no:offset===0?1199999:1200000,kind:'output',text:offset===0?'needle from unopened far-away page':offset===37?'second search page':'third search page',level:'INFO',logger:'Visible'}]};}
   }
   await route.fulfill({json:body});
  });return {starts,cancelled,reads};
@@ -26,6 +26,7 @@ for(const raw of [false,true])test(`${raw?'raw':'grouped'} searches the complete
  await expect(page.getByTestId('log-search-progress')).toContainText('1,200,000줄');
  expect(f.starts[0].path).toBe('live.log');expect(f.starts[0].filters.rules.mods).toEqual(['Hidden']);expect(f.starts[0].filters.rules.keywords).toEqual(['discard']);
  await page.getByRole('button',{name:'다음 검색 결과',exact:true}).click();await expect(page.getByTestId('log-search-results')).toContainText('second search page');
+ await page.getByRole('button',{name:'다음 검색 결과',exact:true}).click();await expect(page.getByTestId('log-search-results')).toContainText('third search page');await page.getByRole('button',{name:'이전 검색 결과',exact:true}).click();await expect(page.getByTestId('log-search-results')).toContainText('second search page');
  await page.getByLabel(raw?'로그 검색':'블록 검색',{exact:true}).fill('next');await expect.poll(()=>f.starts.length).toBe(2);await expect.poll(()=>f.cancelled.length).toBeGreaterThan(0);
  expect(f.reads.every(p=>p==='live.log')).toBeTruthy();
 });
