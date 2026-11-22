@@ -13,3 +13,8 @@
 ## 알려진 범위
 - 검색은 시작 시점 파일의 전체 일치 수를 세되, 최초100,000개 위치만 보관한다. 긴 행은 앞16KiB 미리보기이며 원문은 유지한다. 새 로그는 다시 검색한다.
 - 설치 실패 시 실행 파일 백업을 이용해 복구한다. 새 Minecraft로 실제 월드를 연 이후의 월드 형식 다운그레이드는 지원하지 않는다. 모드는 자동 교체하지 않으므로 별도 호환성 확인/월드 백업이 필요하다. 대상 버전이 요구하는 Java가 실행 컴퓨터에 없으면 설치 전 검증에서 거부한다.
+
+## CI 실행 환경 수정
+- 최초 서명 실행45002237295는 단계 실행 전에 취소됐다. GitHub check annotation은 `The configuration 'macos-14-arm64-us-default' is not supported`였다.
+- 공식 runner-images 안내의 macOS14 지원 종료와 현재 GitHub-hosted runner 표를 확인해 release/runner-installers 워크플로의 Mac 실행 라벨을 macos-15로 변경했다. 서명·검증 단계는 유지한다.
+- 근거: https://github.com/actions/runner-images/issues/13518 및 https://docs.github.com/en/actions/reference/runners/github-hosted-runners . 이 실패는 제품 테스트 실패가 아니며 아직 태그/릴리즈는 만들어지지 않았다.
