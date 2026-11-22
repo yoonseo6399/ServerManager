@@ -36,7 +36,8 @@ class LogSearch(private val directory:Path,private val serverDirectory:Path=dire
         require(offset>=0 && limit in 1..100);val job=get(id);valid(job)
         val hits=job.slice(offset,limit);val texts=readPositions(job,hits.flatMap {listOf(it[1],it[2])}.distinct().sorted())
         var budget=0;val rows=mutableListOf<Row>()
-        for(hit in hits){val raw=texts[hit[1]].orEmpty();val text=raw.take(16384);if(rows.isNotEmpty() && budget+text.toByteArray().size>90000)break;budget+=text.toByteArray().size;val meta=metadata(texts[hit[2]].orEmpty());rows+=Row(hit[0],kind(raw),text,meta.level,meta.logger)}
+        val mapper=com.fasterxml.jackson.module.kotlin.jacksonObjectMapper()
+        for(hit in hits){val raw=texts[hit[1]].orEmpty();val text=raw.take(16384);val meta=metadata(texts[hit[2]].orEmpty());val row=Row(hit[0],kind(raw),text,meta.level,meta.logger);val size=mapper.writeValueAsBytes(row).size;if(rows.isNotEmpty() && budget+size>90000)break;budget+=size;rows+=row}
         val retained=synchronized(job){job.retained}
         return View(id,job.state,job.scanned,job.bytes,job.size,job.matches,retained,offset,if(offset+rows.size<retained)offset+rows.size else null,rows,job.error)
     }

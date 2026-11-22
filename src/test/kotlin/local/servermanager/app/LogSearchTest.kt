@@ -29,6 +29,12 @@ class LogSearchTest {
         val search=LogSearch(directory);val result=completed(search,search.start(LogSearch.Request("server/logs/old.log.gz","needle",filters=LogFilterConfig(rules=LogFilterRules(mods=listOf("Hidden"))))).id)
         assertEquals(1L,result.matches);assertEquals(2L,result.rows.single().no)
     }
+    @Test fun `escaped search pages fit the nested runner websocket response budget`() {
+        directory.resolve("console.log").bufferedWriter().use {out->repeat(200){out.appendLine("[12:00:00] [Server thread/INFO] [Visible]: needle "+"\\".repeat(1000))}}
+        val search=LogSearch(directory);val done=completed(search,search.start(LogSearch.Request("console.log","needle")).id)
+        val mapper=com.fasterxml.jackson.module.kotlin.jacksonObjectMapper();val nested=mapper.writeValueAsString(mapOf("detail" to mapper.writeValueAsString(done)))
+        assertTrue(nested.toByteArray().size<200000);assertEquals(200L,done.matches);assertNotNull(done.next);search.cancel(done.id)
+    }
     @Test fun `replacement invalidates search and cancellation removes it`() {
         directory.resolve("console.log").writeText("needle\n");val search=LogSearch(directory);val first=search.start(LogSearch.Request("console.log","needle"));completed(search,first.id)
         directory.resolve("next").writeText("replacement\n");java.nio.file.Files.move(directory.resolve("next"),directory.resolve("console.log"),java.nio.file.StandardCopyOption.REPLACE_EXISTING)
