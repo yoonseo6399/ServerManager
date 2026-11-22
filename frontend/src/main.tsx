@@ -66,9 +66,9 @@ function App(){
  useEffect(()=>{current.current=selected;setFolder(restoreFolder.current??'');restoreFolder.current=null;setEditor(restoreEditor.current);restoreEditor.current=null;},[selected]);
  const previousConfig=useRef<Config|null>(null);
  useEffect(()=>{if(!active)return;const previous=previousConfig.current;const fresh=active.config;
-  setSettings(old=>!old||old.id!==fresh.id||!previous||['name','port','memoryMb','javaPath'].every(k=>old[k as keyof Config]===previous[k as keyof Config])?{...fresh}:old);
+  setSettings(old=>!old||old.id!==fresh.id||!previous||['name','port','memoryMb','javaPath'].every(k=>old[k as keyof Config]===previous[k as keyof Config])?{...fresh}:{...old,loader:fresh.loader,minecraft:fresh.minecraft,loaderVersion:fresh.loaderVersion});
   previousConfig.current=fresh;
- },[selected,active?.config.port,active?.config.memoryMb,active?.config.name,active?.config.javaPath]);
+ },[selected,active?.config.port,active?.config.memoryMb,active?.config.name,active?.config.javaPath,active?.config.minecraft,active?.config.loaderVersion]);
  const instancesRef=useRef<Instance[]>([]);instancesRef.current=instances;
  useViewHistory({selected,tab,folder,editor},(v:View)=>{
   const known=instancesRef.current.some(i=>i.config.id===v.selected);

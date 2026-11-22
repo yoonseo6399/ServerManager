@@ -6,7 +6,7 @@ fix/mixin-dialog-close, fix/live-log-session-search, feat/server-runtime-updates
 
 같은 로더 종류의 버전 변경과 Minecraft 업그레이드는 서버 종료 후 선택된 실행기에서 원본과 분리 설치하고 검증한 실행 파일만 반영한다. 기존 실행 파일 백업·로그·설치 실패 복구를 제공한다. 월드·모드·config·KubeJS를 보존하며 모드 호환성 자동 보장·월드 변환 롤백·Minecraft 다운그레이드는 제공하지 않는다.
 
-대상 백엔드26개, 관련 브라우저19개, TS/Vite 검증을 통과했다. 공식 Mojang 파일의 격리 Workspace 업그레이드(1.21.1→1.21.2)와 원본 world sentinel 보존도 확인했으며 Minecraft는 시작하지 않았다. 실제 모드 로더 교체·월드 로드·다른 OS·전체 회귀는 미실행이다. 통합 검증·서명 게시 결과는 릴리즈 인계 기록에 추가한다. 상세 범위는 작업 노트와 docs/releases/0.7.0-beta.32.md를 참조한다.
+대상 백엔드27개, 관련 브라우저19개, TS/Vite 검증을 통과했다. 공식 Mojang 파일의 격리 Workspace 업그레이드(1.21.1→1.21.2)와 원본 world sentinel 보존도 확인했으며 Minecraft는 시작하지 않았다. 실제 모드 로더 교체·월드 로드·다른 OS·전체 회귀는 미실행이다. 통합 검증·서명 게시 결과는 릴리즈 인계 기록에 추가한다. 상세 범위는 작업 노트와 docs/releases/0.7.0-beta.32.md를 참조한다.
 
 원자로 보조 모드와 Survival 월드 복구는 이 일반 앱 릴리즈에 자동 포함하지 않는다. 게시 파일을 재다운로드해 해시 검사하지 않으며 공개 버전·안정판을 덮어쓰지 않는다.
 
