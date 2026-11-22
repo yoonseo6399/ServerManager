@@ -8,7 +8,7 @@ import java.util.zip.GZIPInputStream
 import kotlin.io.path.*
 
 /** Snapshots are scanned on bounded background workers. Only match offsets, never parsed files, are retained. */
-class LogSearch(private val directory:Path,private val serverDirectory:Path=directory.resolve("server")) {
+class LogSearch(private val directory:Path,private val serverDirectory:Path=directory.resolve("server"),private val attributes:(Path)->BasicFileAttributes={Files.readAttributes(it,BasicFileAttributes::class.java,LinkOption.NOFOLLOW_LINKS)}) {
     data class Request(val path:String,val query:String="",val errorsOnly:Boolean=false,val filters:LogFilterConfig=LogFilterConfig(enabled=false))
     data class Row(val no:Long,val kind:String,val text:String,val level:String?,val logger:String?)
     data class View(val id:String,val state:String,val scanned:Long,val bytes:Long,val totalBytes:Long,val matches:Long,val retained:Int,val offset:Int,val next:Int?,val rows:List<Row>,val error:String?=null)
@@ -24,8 +24,8 @@ class LogSearch(private val directory:Path,private val serverDirectory:Path=dire
         require(request.query.length<=200 && request.filters.rules.keywords.size<=40 && request.filters.rules.mods.size<=40)
         require((request.filters.rules.keywords+request.filters.rules.mods).all {it.length in 1..120 && it.none(Char::isISOControl)})
         val file=LogFiles(directory,serverDirectory).file(request.path)
-        val attrs=Files.readAttributes(file,BasicFileAttributes::class.java,LinkOption.NOFOLLOW_LINKS)
-        val job=Job(directory.toAbsolutePath().normalize(),file,request,attrs.fileKey().toString(),attrs.size(),attrs.lastModifiedTime().toMillis())
+        val attrs=attributes(file)
+        val job=Job(directory.toAbsolutePath().normalize(),file,request,identity(attrs),attrs.size(),attrs.lastModifiedTime().toMillis())
         synchronized(jobs){clean();check(jobs.size<16){"다른 로그 검색이 끝난 뒤 다시 시도하세요"};jobs[job.id]=job}
         try {job.future=pool.submit {run(job)}}catch(e:RejectedExecutionException){jobs.remove(job.id);error("로그 검색 작업이 많습니다. 잠시 뒤 다시 시도하세요")}
         return View(job.id,"QUEUED",0,0,job.size,0,0,0,null,emptyList())
@@ -41,7 +41,7 @@ class LogSearch(private val directory:Path,private val serverDirectory:Path=dire
         val retained=synchronized(job){job.retained}
         return View(id,job.state,job.scanned,job.bytes,job.size,job.matches,retained,offset,if(offset+rows.size<retained)offset+rows.size else null,rows,job.error)
     }
-    private fun valid(job:Job){val a=Files.readAttributes(job.file,BasicFileAttributes::class.java,LinkOption.NOFOLLOW_LINKS);check(!a.isSymbolicLink && a.fileKey().toString()==job.key && a.size()>=job.size && (!job.request.path.endsWith(".gz") || a.size()==job.size && a.lastModifiedTime().toMillis()==job.modified)){"로그 파일이 교체되었습니다. 다시 검색하세요"}}
+    private fun valid(job:Job){val a=attributes(job.file);check(!a.isSymbolicLink && identity(a)==job.key && a.size()>=job.size && (!job.request.path.endsWith(".gz") || a.size()==job.size && a.lastModifiedTime().toMillis()==job.modified)){"로그 파일이 교체되었습니다. 다시 검색하세요"}}
     private fun run(job:Job) {
         try {
             job.state="SCANNING";valid(job)
@@ -80,6 +80,7 @@ class LogSearch(private val directory:Path,private val serverDirectory:Path=dire
         return texts
     }
     private companion object {
+        fun identity(attributes:BasicFileAttributes)=attributes.fileKey()?.toString() ?: "created:${attributes.creationTime()}"
         const val MAX_MATCHES=100000
         val jobs=ConcurrentHashMap<String,Job>()
         val pool=ThreadPoolExecutor(2,2,30,TimeUnit.SECONDS,ArrayBlockingQueue(8),{r->Thread(r,"log-search").apply {isDaemon=true}})

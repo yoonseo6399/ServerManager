@@ -42,6 +42,24 @@ class LogSearchTest {
         search.cancel(first.id);assertFailsWith<IllegalStateException>{search.view(first.id)}
         assertFailsWith<IllegalArgumentException>{search.start(LogSearch.Request("../console.log","x"))}
     }
+    @Test fun `files without native keys remain searchable but creation identity changes invalidate snapshots`() {
+        directory.resolve("console.log").writeText("needle\n")
+        var generation=java.nio.file.attribute.FileTime.fromMillis(123L)
+        val search=LogSearch(directory,attributes={path->
+            val original=java.nio.file.Files.readAttributes(path,java.nio.file.attribute.BasicFileAttributes::class.java)
+            object:java.nio.file.attribute.BasicFileAttributes by original {
+                override fun fileKey():Any?=null
+                override fun creationTime()=generation
+            }
+        })
+        val done=completed(search,search.start(LogSearch.Request("console.log","needle")).id)
+        assertEquals("needle",done.rows.single().text);assertEquals(1L,done.matches)
+        directory.resolve("console.log").appendText("append outside snapshot\n")
+        assertEquals(1L,search.view(done.id).matches)
+        generation=java.nio.file.attribute.FileTime.fromMillis(456L)
+        assertFailsWith<IllegalStateException>{search.view(done.id)}
+        search.cancel(done.id)
+    }
     @Test fun `live file resets on launch and survives a controller reattach without losing old history`() {
         directory.resolve("console.log").writeText("old history\n")
         val first=LiveConsole.open(directory,"100:one",true);first.appendText("current\n")
