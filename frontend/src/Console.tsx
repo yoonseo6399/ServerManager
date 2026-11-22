@@ -1,6 +1,7 @@
 import React,{memo,startTransition,useCallback,useDeferredValue,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {Terminal} from 'lucide-react';
 import {api} from './http';
+import {LogSearchResults} from './LogSearchResults';
 import {GroupedConsole} from './GroupedConsole';
 import {LogDetailDialog,LogText,MixinGroups} from './LogDetail';
 import {useBackClose} from './nav';
@@ -37,7 +38,7 @@ export const ConsolePanel=memo(function ConsolePanel(props:{id:string;enabled:bo
  return <><div className="log-source"><label>로그 파일<select aria-label="로그 파일" value={source} onChange={e=>setSource(e.target.value)}><option value="">실시간 콘솔</option>{files.map(file=><option key={file.path} value={file.path}>{file.name} · {(file.size/1024).toFixed(0)} KiB{file.compressed?' · 압축':''}</option>)}</select></label><button onClick={()=>setRevision(v=>v+1)}>로그 다시 불러오기</button><button onClick={()=>setGrouped(v=>!v)}>{grouped?'원문 줄 보기':'블록·출처별 보기'}</button><small>원문 파일만 저장 · 파싱 결과는 메모리에서만 처리</small></div>{latestCrash&&<div className="notice crash-report-notice" role="status">최신 크래시 리포트: {latestCrash.name.split('/').pop()} <button onClick={()=>{setSource(latestCrash.path);setRevision(v=>v+1);}}>리포트 열기</button> <a href={`/api/instances/${props.id}/download?path=${encodeURIComponent(latestCrash.path.replace(/^server\//,''))}`}>파일 다운로드</a><small>크래시 보고서는 콘솔 출력과 별도로 저장됩니다.</small></div>}{error&&<div role="alert" className="alert error-banner">{error}</div>}<LogFilterEditor key={props.id} {...filters} onChange={filters.change} onSave={filters.save}/>{grouped?<><GroupedConsole key={`${props.id}:${source}:${revision}`} id={props.id} source={source} filters={filters.config}/>{!source&&<Command {...props}/>}</>:<ConsoleView key={`${props.id}:${source}:${revision}`} {...props} source={source} filters={filters.config}/>}</>;
 });
 function ConsoleView({id,enabled,hint,source,filters}:{id:string;enabled:boolean;hint:string;source:string;filters:FilterConfig}){
- const path=source||'console.log',live=!source;
+ const path=source||'live.log',live=!source;
  const [filter,setFilter]=useState(''),[errorsOnly,setErrorsOnly]=useState(false),[follow,updateFollow]=useState(live),[loading,setLoading]=useState(false),[pending,setPending]=useState(true),[error,setError]=useState(''),[top,setTop]=useState(0),[height,setHeight]=useState(420),[detail,setDetail]=useState<ParsedLog|null>(null);
  const [total,setTotal]=useState(0),[tick,setTick]=useState(0),[matchEnd,setMatchEnd]=useState<number|null>(null);
  useBackClose(!!detail,()=>setDetail(null),'log-detail');
@@ -61,6 +62,7 @@ function ConsoleView({id,enabled,hint,source,filters}:{id:string;enabled:boolean
  }
  // Reset when the file, the search text or the filter mode changes.
  useEffect(()=>{
+  if(query){setPending(false);return;}
   alive.current=true;cache.current=new Map();requested.current=new Set();matches.current=[];scan.current={from:1,generation:scan.current.generation+1};setMatchEnd(null);setPending(true);setError('');
   const generation=scan.current.generation;
   (async()=>{
@@ -77,7 +79,7 @@ function ConsoleView({id,enabled,hint,source,filters}:{id:string;enabled:boolean
  },[id,path,query,searching]);
  // Dynamic loading: whole-file mode fills the chunks in view; search mode keeps scanning while the end is in view.
  useEffect(()=>{
-  if(pending||busy.current||error)return;
+  if(query||pending||busy.current||error)return;
   const generation=scan.current.generation;
   (async()=>{
    busy.current=true;
@@ -101,7 +103,7 @@ function ConsoleView({id,enabled,hint,source,filters}:{id:string;enabled:boolean
  },[tick,top,height,pending,searching,total,query,error]);
  // Live tail: re-read the last known line so a partially written line is completed.
  useEffect(()=>{
-  if(!live)return;
+  if(!live||query)return;
   const timer=setInterval(()=>{
    if(document.hidden||busy.current||pending)return;
    const from=searching?(matchEnd!==null?Math.max(1,matchEnd):null):Math.max(1,total);
@@ -126,11 +128,11 @@ function ConsoleView({id,enabled,hint,source,filters}:{id:string;enabled:boolean
  const start=Math.max(0,Math.floor(top/ROW)-8),end=Math.min(count,Math.ceil((top+height)/ROW)+8);
  const shown=[];for(let n=start;n<end;n++){const event=rows?rows[n]:cache.current.get(n+1);shown.push(event?<LogRow key={event.seq} event={event} top={n*ROW} onOpen={openDetail}/>:<div key={'gap'+n} className="log virtual-log output" style={{position:'absolute',top:n*ROW,height:ROW,width:'100%'}}><span className="lineno">{n+1}</span><span className="log-text muted">…</span></div>);}
  const lastMatch=rows?.at(-1)?.seq??0;
- return <section className="console-panel"><div className="toolbar"><div className="panel-title"><span className="green-dot"/>{source?'로그 파일':'실시간 콘솔'} <span className="muted" data-testid="log-count">{searching?`일치 ${count.toLocaleString()}줄${matchEnd===null?' · 검색 중':' · 전체 검색 완료'} · 마지막 일치 #${lastMatch.toLocaleString()} · 전체 ${total.toLocaleString()}줄`:`현재 ${total.toLocaleString()}줄 · 끝 줄 #${total.toLocaleString()}`}</span></div><div className="actions"><button onClick={bottom}>아래로 이동</button><input aria-label="로그 검색" placeholder="전체 로그에서 검색…" value={filter} onChange={e=>{setFilter(e.target.value);setFollow(false);setTop(0);if(viewport.current)viewport.current.scrollTop=0;}}/><label><input type="checkbox" checked={errorsOnly} onChange={e=>setErrorsOnly(e.target.checked)}/>오류·경고</label><label><input type="checkbox" checked={follow} onChange={e=>{if(e.target.checked)bottom();else setFollow(false);}}/>자동 스크롤</label></div></div>
- {error&&<div role="alert" className="alert error-banner">{error}</div>}<div className="log-history"><span>검색은 서버에서 파일 전체를 대상으로 하며 스크롤하면 이어서 불러옵니다 · 표시되는 번호는 원문 줄 번호입니다 · 프레임을 누르면 Mixin 상세 보기</span></div>
- <div className="log-viewport-shell">{loading&&<div className="log-loading" role="status" aria-live="polite"><span className="log-spinner"/>{progress||'로그 파싱 중…'}<small>긴 로그도 필요한 부분만 불러옵니다.</small></div>}
+ return <section className="console-panel"><div className="toolbar"><div className="panel-title"><span className="green-dot"/>{source?'로그 파일':'실시간 콘솔'} <span className="muted" data-testid="log-count">{query?'파일 전체 검색':searching?`일치 ${count.toLocaleString()}줄${matchEnd===null?' · 검색 중':' · 전체 검색 완료'} · 마지막 일치 #${lastMatch.toLocaleString()} · 전체 ${total.toLocaleString()}줄`:`현재 ${total.toLocaleString()}줄 · 끝 줄 #${total.toLocaleString()}`}</span></div><div className="actions"><button onClick={bottom}>아래로 이동</button><input aria-label="로그 검색" placeholder="전체 로그에서 검색…" value={filter} onChange={e=>{setFilter(e.target.value);setFollow(false);setTop(0);if(viewport.current)viewport.current.scrollTop=0;}}/><label><input type="checkbox" checked={errorsOnly} onChange={e=>setErrorsOnly(e.target.checked)}/>오류·경고</label><label><input type="checkbox" checked={follow} onChange={e=>{if(e.target.checked)bottom();else setFollow(false);}}/>자동 스크롤</label></div></div>
+ {error&&<div role="alert" className="alert error-banner">{error}</div>}<div className="log-history"><span>검색은 열린 파일 전체를 백그라운드에서 확인합니다 · 표시되는 번호는 원문 줄 번호입니다 · 프레임을 누르면 Mixin 상세 보기</span></div>
+ {query?<LogSearchResults id={id} path={path} query={query} filters={filters} errors={errorsOnly} onOpen={openDetail}/>:<div className="log-viewport-shell">{loading&&<div className="log-loading" role="status" aria-live="polite"><span className="log-spinner"/>{progress||'로그 파싱 중…'}<small>긴 로그도 필요한 부분만 불러옵니다.</small></div>}
  <div className="logs virtual-logs" aria-busy={pending||loading} ref={viewport} data-testid="log-viewport" onWheel={e=>{if(e.deltaY<0)setFollow(false);}} onScroll={e=>{const v=e.currentTarget;setTop(v.scrollTop);if(v.scrollHeight-v.scrollTop-v.clientHeight>2)setFollow(false);else if(live&&v.scrollTop>lastTop.current+.5)setFollow(true);lastTop.current=v.scrollTop;}}>{!count?<div className="console-empty"><Terminal size={28}/><p>{pending?'로그를 준비하고 있습니다.':searching?(matchEnd===null?'서버에서 검색하고 있습니다.':'현재 검색·필터에 맞는 로그가 없습니다.'):'표시할 로그가 없습니다.'}</p></div>:<div style={{height:count*ROW,position:'relative'}}>{shown}</div>}</div>
- </div>
+ </div>}
  {!source&&<Command key={id} id={id} enabled={enabled} hint={hint}/>}<div className="panel-foot">{source?'저장된 원문 로그를 조회하고 있습니다.':'일반 입력은 서버 채팅으로 전송 · /로 시작하면 명령 실행'}<span>파싱 결과는 디스크에 저장하지 않습니다.</span></div>
  {detail&&<LogDetail key={detail.seq} event={detail} onClose={()=>setDetail(null)}/>}
  </section>;

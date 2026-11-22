@@ -746,7 +746,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         val response=try {
             val request=mapper.readValue<WorkspaceRequest>(raw);val instance=request.config
             require(instance.id==id && instance.runnerId==identity.id && instance.diagnosticSession==null)
-            val readOnly=request.op in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW","LOG_STAT","LOG_READ","MOD_SCAN")
+            val readOnly=request.op in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW","LOG_SEARCH_START","LOG_SEARCH_VIEW","LOG_SEARCH_CANCEL","LOG_STAT","LOG_READ","MOD_SCAN")
             fun execute():RunnerMessage {
                 updateCheckpoint()
                 check(!instanceRoot(id).resolve("folder-import.pending").exists()) {"최초 폴더 가져오기를 완료하세요"}
@@ -977,21 +977,23 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         workers.submit {
             val log=diagnosticRoot(id)?.resolve("server/logs/server-manager-console.log") ?: instanceRoot(id).resolve("console.log")
             log.parent.createDirectories()
+            val live=LiveConsole.open(log.parent,"${process.pid()}:${process.info().startInstant().orElse(Instant.now())}",fresh)
             log.toFile().appendText("\n--- ${Instant.now()}"+(if(fresh)"" else " · 상주 서비스에서 다시 연결")+" ---\n")
             val hostedProcess=process as? HostedProcess;val position=instanceRoot(id).resolve("console.seq");var lastSaved=0L
+            FileOutputStream(live.toFile(),true).bufferedWriter().use { liveWriter ->
             FileOutputStream(log.toFile(),true).bufferedWriter().use { writer ->
             process.inputStream.bufferedReader().useLines { lines -> lines.forEach { line ->
                 if(LogNoise.dropped(line))return@forEach
                 val kind=if(line.contains("ERROR") || line.contains("Exception")) "error" else if(line.contains("WARN")) "warn" else "output"
                 if(line.contains("logged in with entity id")||line.contains("joined the game"))activity[id]?.incrementAndGet()
                 if(processes[id]===process)stopMonitors[id]?.log(line)
-                writer.appendLine(line);writer.flush()
+                writer.appendLine(line);writer.flush();liveWriter.appendLine(line);liveWriter.flush()
                 hostedProcess?.let {it.markWritten();val now=System.currentTimeMillis();if(now-lastSaved>1000){lastSaved=now;it.savePosition(position)}}
                 send(RunnerMessage("log",id,kind,version(),line.take(4096)))
                 if(line.contains("Done (") && line.contains("For help") && processes[id]===process) {
                     ready.add(id);if(id !in stopping)send(RunnerMessage("state",id,"RUNNING",version(),pid=process.pid()))
                 }
-            } } }
+            } } } }
             val code=process.waitFor();sable.stopped(id);directRelay.stopped(id);queryPorts.remove(id)
             // Release the host record only after the exit report is durable below; until then the host refuses a second start.
             atomicText(instanceRoot(id).resolve("exit.json"),mapper.writeValueAsString(RunnerExitReport(code,CrashReports.changed(serverDir(id),crashesBefore),if(id in stopTimeouts)"STOP_TIMEOUT" else if(id in idleStops)"IDLE" else null)))

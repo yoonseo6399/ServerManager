@@ -223,7 +223,7 @@ class ServerManager {
     fun remoteWorkspace(id:String,request:WorkspaceRequest):com.fasterxml.jackson.databind.JsonNode {
         val i=instance(id);check(i.runnerId!=null) {"실행기를 선택하세요"}
         check(!i.syncEnabled() || remoteController?.supportsLiveFiles(i)==true) {"원격 파일·모드 관리에는 실행기를 새 버전으로 업데이트하세요"}
-        return (remoteController ?: error("실행기 연결이 없습니다")).workspace(i.copy(),request.copy(config=i.copy(),mutationToken=if(liveFilesAvailable(id) && request.op !in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW","LOG_STAT","LOG_READ","MOD_SCAN"))root.resolve(id).resolve("runner-edits.pending").takeIf {it.exists()}?.readText() else null))
+        return (remoteController ?: error("실행기 연결이 없습니다")).workspace(i.copy(),request.copy(config=i.copy(),mutationToken=if(liveFilesAvailable(id) && request.op !in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW","LOG_SEARCH_START","LOG_SEARCH_VIEW","LOG_SEARCH_CANCEL","LOG_STAT","LOG_READ","MOD_SCAN"))root.resolve(id).resolve("runner-edits.pending").takeIf {it.exists()}?.readText() else null))
     }
     @Synchronized fun setFileSync(id:String,enabled:Boolean):Map<String,Any?> {
         val r=runtime(id);synchronized(r){
@@ -591,6 +591,7 @@ class ServerManager {
             // The resident host (when active) owns the process so it survives a manager restart or update.
             val builder=ProcessBuilder(args).directory(serverDir(id).toFile()).redirectErrorStream(true)
             val p=localLauncher?.launch(id,args,serverDir(id),builder.environment().toMap(),i.port) ?: builder.start()
+            LiveConsole.open(profileDir(id),"${p.pid()}:${p.info().startInstant().orElse(Instant.now())}",fresh=true)
             r.process=p; r.state="STARTING"; r.players=null; r.event("system","서버 시작 · 127.0.0.1:${i.port} · PID ${p.pid()}"+if(p is HostedProcess)" · 상주 서비스가 프로세스를 소유" else "")
             watch(id,r,p)
         }
@@ -631,9 +632,11 @@ class ServerManager {
     private fun consume(id: String,p: Process) {
         val r=runtime(id)
         val log=profileDir(id).resolve("console.log")
+        val live=LiveConsole.open(profileDir(id),"${p.pid()}:${p.info().startInstant().orElse(Instant.now())}")
         log.toFile().appendText("\n--- ${Instant.now()} ---\n")
         // Lines replayed from the resident host were already written by the previous manager process.
         val hostedProcess=p as? HostedProcess;val position=profileDir(id).resolve("console.seq");var lastSaved=0L
+        java.io.FileOutputStream(live.toFile(),true).bufferedWriter().use { liveWriter ->
         java.io.FileOutputStream(log.toFile(),true).bufferedWriter().use { writer ->
             p.inputStream.bufferedReader().useLines { lines -> lines.forEach { raw ->
                 if(LogNoise.dropped(raw))return@forEach
@@ -643,9 +646,10 @@ class ServerManager {
                 val kind=when { line.contains("ERROR") || line.contains("Exception") -> "error"; line.contains("WARN") -> "warn"; else -> "output" }
                 synchronized(r) { if(r.state=="STARTING" && line.contains("Done (") && line.contains("For help")) {r.state="RUNNING";started(id,r)}; r.event(kind,line) }
                 if(r.discordError.offer(line,kind=="error")) signal(id,"error","서버 로그에서 오류가 감지되었습니다.",error=r.discordError.snapshot())
-                writer.appendLine(raw); writer.flush()
+                writer.appendLine(raw); writer.flush();liveWriter.appendLine(raw);liveWriter.flush()
                 hostedProcess?.let {it.markWritten();val now=System.currentTimeMillis();if(now-lastSaved>1000){lastSaved=now;it.savePosition(position)}}
             } }
+        }
         }
     }
     fun command(id: String, command: String) {

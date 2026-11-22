@@ -12,6 +12,7 @@ data class WorkspaceRequest(val op:String,val config:Instance,val path:String=""
 class RunnerWorkspace(private val base:Path,private val history:Path,private val logDirectory:Path=base.parent,private val beforeMutation:(String?)->Unit={},private val stopped:()->Unit) {
     companion object {const val CHUNK=64*1024;const val MAX=256L*1024*1024}
     private val mapper=jacksonObjectMapper()
+    private val logSearch=LogSearch(logDirectory,base)
     private data class Upload(val path:String,val temporary:Path,val revision:String?,var bytes:Long=0,val at:Long=System.currentTimeMillis())
     private val uploads=mutableMapOf<String,Upload>()
     private var modListing:ModInventorySnapshot?=null
@@ -57,7 +58,7 @@ class RunnerWorkspace(private val base:Path,private val history:Path,private val
     fun matches(directory:Path)=base==directory
     @Synchronized fun busy()=uploads.values.any {System.currentTimeMillis()-it.at<=15*60*1000}
     @Synchronized fun execute(req:WorkspaceRequest):Any {
-        val readOnly=req.op in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW","LOG_STAT","LOG_READ","MOD_SCAN")
+        val readOnly=req.op in setOf("LIST","STAT","READ","LOG_LIST","LOG_PAGE","LOG_WINDOW","LOG_SEARCH_START","LOG_SEARCH_VIEW","LOG_SEARCH_CANCEL","LOG_STAT","LOG_READ","MOD_SCAN")
         if(!readOnly){stopped();beforeMutation(req.mutationToken)}
         uploads.entries.removeIf { (_,u)->if(System.currentTimeMillis()-u.at>15*60*1000){u.temporary.deleteIfExists();true}else false }
         if(!readOnly)recover()
@@ -88,6 +89,9 @@ class RunnerWorkspace(private val base:Path,private val history:Path,private val
                 check(revision(file)==rev) {"로그 파일이 변경되었습니다. 다시 다운로드하세요"}
                 mapOf("data" to java.util.Base64.getEncoder().encodeToString(bytes),"revision" to rev)
             }
+            "LOG_SEARCH_START" -> logSearch.start(mapper.readValue<LogSearch.Request>(req.data ?: error("검색 조건이 없습니다")))
+            "LOG_SEARCH_VIEW" -> logSearch.view(req.uploadId ?: error("검색 ID가 없습니다"),req.offset.toInt(),100)
+            "LOG_SEARCH_CANCEL" -> {logSearch.cancel(req.uploadId ?: error("검색 ID가 없습니다"));emptyMap<String,String>()}
             "LOG_LIST" -> LogFiles(logDirectory,base).list()
             "LOG_PAGE" -> LogFiles(logDirectory,base).page(req.path,req.offset,100,req.revision)
             "LOG_WINDOW" -> {
