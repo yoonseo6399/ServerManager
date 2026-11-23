@@ -1,0 +1,16 @@
+{
+  "exitCode": 1,
+  "expectedFailures": 2,
+  "results": [
+    {
+      "class": "local.servermanager.HostedRelayTest",
+      "test": "replacing a colocated resident host restores hub and agent through the same manager session()",
+      "failure": "org.opentest4j.AssertionFailedError: new host tunnel without manager reconnect"
+    },
+    {
+      "class": "local.servermanager.DirectRelayManagerTest",
+      "test": "game host role replacement restores identical agent settings without a control reconnect()",
+      "failure": "org.opentest4j.AssertionFailedError: replacement receives cached settings"
+    }
+  ]
+}

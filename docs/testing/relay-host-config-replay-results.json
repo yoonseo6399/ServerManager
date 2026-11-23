@@ -1,0 +1,36 @@
+{
+  "date": "2026-11-23",
+  "baseline": "v0.7.0-beta.34",
+  "counts": {
+    "tests": 45,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "classes": [
+    {
+      "name": "local.servermanager.DirectRelayTest",
+      "tests": 16
+    },
+    {
+      "name": "local.servermanager.HostedRelayTest",
+      "tests": 4
+    },
+    {
+      "name": "local.servermanager.VoiceChatRelayTest",
+      "tests": 6
+    },
+    {
+      "name": "local.servermanager.DirectRelayManagerTest",
+      "tests": 18
+    },
+    {
+      "name": "local.servermanager.DirectRelayProcessTest",
+      "tests": 1
+    }
+  ],
+  "baselineReproduction": "Both host replacement regressions fail on beta34 and pass with the fix",
+  "fullSuite": "not run per user instruction",
+  "otherOs": "not run",
+  "productionChanges": false
+}
