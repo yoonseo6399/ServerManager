@@ -189,7 +189,7 @@ class DirectRelayManagerTest {
         val sent=w.h.agentConfigSends.get()
         w.game.role.close();w.game.start(w.h) // Same device and manager; no onDisconnect or settings change.
         assertTrue(w.h.connected(w.game.id))
-        assertTrue(w.h.manager.view().agents.single {it.runnerId==w.game.id}.relays.isEmpty())
+        assertTrue(w.h.manager.view().agents.none {it.runnerId==w.game.id})
         await("replacement receives cached settings",tick=w.h::pump){w.h.manager.isReady(w.relay.id)}
         assertTrue(w.h.agentConfigSends.get()>sent)
         player(w.h.gamePort).use {assertTrue(roundTrip(it,"replacement host"))}

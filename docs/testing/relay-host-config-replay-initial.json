@@ -1,0 +1,17 @@
+{
+  "tests": 45,
+  "failures": [
+    {
+      "class": "local.servermanager.HostedRelayTest",
+      "test": "replacing a colocated resident host restores hub and agent through the same manager session()",
+      "type": "java.util.NoSuchElementException",
+      "message": "java.util.NoSuchElementException: Collection contains no element matching the predicate."
+    },
+    {
+      "class": "local.servermanager.DirectRelayManagerTest",
+      "test": "game host role replacement restores identical agent settings without a control reconnect()",
+      "type": "java.util.NoSuchElementException",
+      "message": "java.util.NoSuchElementException: Collection contains no element matching the predicate."
+    }
+  ]
+}

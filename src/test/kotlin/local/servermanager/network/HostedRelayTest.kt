@@ -134,7 +134,7 @@ class HostedRelayTest {
         original.close();await("old host detached"){previous.disconnected}
         assertTrue(GameHostService(home,"new",pingMillis=100,leaseMillis=3000).track().start())
         assertTrue(launcher.relaySession())
-        await("new host empty report"){manager.view().agents.single {it.runnerId==id}.relays.isEmpty()}
+        await("new host empty report"){manager.view().agents.none {it.runnerId==id}}
         await("new host tunnel without manager reconnect",tick={manager.reconcile()}){manager.isReady(id)}
         assertTrue(sent.get()>sentBefore)
         val echo=ServerSocket(0).track()
