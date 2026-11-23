@@ -103,6 +103,52 @@ class HostedRelayTest {
         clients.values.forEach {it.close()};clients.clear()
         GameHostClient.connect(agentHome,"cleanup",retryMillis=10000).track().stop(inst,Files.readAllLines(gameDir/"launches.txt").first().trim().toLong())
     }
+
+    @Test fun `replacing a colocated resident host restores hub and agent through the same manager session`() {
+        val home=Files.createTempDirectory("host-replace-relay");val gameDir=Files.createTempDirectory("host-replace-game")
+        val host="play.example.com";val instance="host-replace";val id=UUID.randomUUID().toString()
+        RelayConsentStore(home){null}.set(true,"test")
+        val original=GameHostService(home,"old",pingMillis=100,leaseMillis=3000).track();assertTrue(original.start())
+        val launcher=HostedGames(home,"unchanged-controller",{false},retryMillis=3000).track()
+        val gamePort=freePort();var securePort=freePort();while(securePort==gamePort)securePort=freePort()
+        val store=DirectRelayStore(Files.createTempDirectory("host-replace-store"))
+        val sent=java.util.concurrent.atomic.AtomicLong()
+        val world=object:RelayWorld {
+            override fun runner(runnerId:String)=RunnerDevice(runnerId,"same device","MAC","o","k","n",allowedInstanceIds=setOf(instance))
+            override fun connected(runnerId:String)=true // Manager WebSocket remains attached across host replacement.
+            override fun runnerName(runnerId:String)=runnerId
+            override fun routes()=listOf(Triple(instance,id,listOf(host)))
+            override fun send(runnerId:String,message:RunnerMessage):Boolean {
+                if(message.type=="drp-agent-config")sent.incrementAndGet()
+                return launcher.relayForward(mapper.writeValueAsString(message))
+            }
+            override fun resolveHost(host:String)=emptyList<String>()
+            override fun gamePort()=gamePort
+        }
+        val manager=DirectRelayManager(store,world)
+        launcher.onRelay {manager.onRunnerMessage(id,mapper.readValue<RunnerMessage>(it))}
+        assertTrue(launcher.relaySession());await("consent"){manager.consent(id)?.allowed==true}
+        manager.save(DirectRelaySave(DirectRelayConfig(true,id,securePort=securePort,agentHost="127.0.0.1"),store.revision()))
+        await("initial tunnel",tick={manager.reconcile()}){manager.isReady(id)}
+        val sentBefore=sent.get();val previous=launcher.connection()!!
+        original.close();await("old host detached"){previous.disconnected}
+        assertTrue(GameHostService(home,"new",pingMillis=100,leaseMillis=3000).track().start())
+        assertTrue(launcher.relaySession())
+        await("new host empty report"){manager.view().agents.single {it.runnerId==id}.relays.isEmpty()}
+        await("new host tunnel without manager reconnect",tick={manager.reconcile()}){manager.isReady(id)}
+        assertTrue(sent.get()>sentBefore)
+        val echo=ServerSocket(0).track()
+        Thread.ofVirtual().start {val socket=echo.accept();socket.use {runCatching {val input=it.getInputStream();val output=it.getOutputStream();val buffer=ByteArray(4096);while(true){val n=input.read(buffer);if(n<0)break;output.write(buffer,0,n);output.flush()}}}}
+        val game=launcher.connection()!!.start(instance,listOf(javaBin(),"-cp",System.getProperty("java.class.path"),"local.servermanager.FakeGameMain",gameDir.toString(),"chatter"),gameDir,System.getenv(),port=echo.localPort)
+        try {
+            await("game ready"){launcher.hostStatus().any {it.id==instance && it.ready}}
+            Socket("127.0.0.1",gamePort).use {player->
+                player.soTimeout=5000;val hello=handshake(host);player.getOutputStream().write(hello)
+                assertContentEquals(hello,player.getInputStream().readNBytes(hello.size))
+                assertTrue(roundTrip(player,"traffic after host replacement"))
+            }
+        } finally {launcher.connection()!!.stop(instance,game.process.pid())}
+    }
     @Test fun `resident Sable bridge authenticates locally and UDP survives every controller disconnect`() {
         val host="play.example.com";val inst="sable-inst"
         val relayId=UUID.randomUUID().toString();val agentId=UUID.randomUUID().toString()

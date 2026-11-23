@@ -141,7 +141,7 @@ class DirectRelayManager(val store:DirectRelayStore,private val world:RelayWorld
         if(cuts.containsKey(relay))emptyList() else world.routes().filter {(instance,runner,_)->world.runner(runner)?.allowedInstanceIds?.contains(instance)==true}
     private fun secret(relay:String)=secrets.computeIfAbsent(relay){DirectRelayCrypto.newSecret()}
 
-    /** Pushes desired relay/agent state to the runners. Safe to call repeatedly; unchanged payloads are not resent. */
+    /** Unchanged state is skipped only while the resident host still reports its configured roles. */
     @Synchronized fun reconcile() {
         val c=config();val active=relays()
         val routes=world.routes().filter {(instance,runner,_)->world.runner(runner)?.allowedInstanceIds?.contains(instance)==true}
@@ -177,7 +177,11 @@ class DirectRelayManager(val store:DirectRelayStore,private val world:RelayWorld
             val voice=if(agent in voiceCapable && c.enabled)c.voicechat.filter {it.instanceId in instances}.map {v->VoiceChatTarget(v.instanceId,v.localPort,publicHostFor(c.relayRunnerId ?: "")+":"+v.publicPort)} else emptyList()
             val cfg=AgentRelayConfig(targets,instances,c.graceSeconds,c.enabled && c.sableUdpEnabled && agent in udpCapable,voicechat=voice)
             val body=mapper.writeValueAsString(cfg)
-            if(sentAgent[agent]==body)return@forEach
+            // A resident host can be replaced without reconnecting the runner's manager WebSocket.
+            // Its fresh status has no agents, although this control session already sent the same body.
+            // A configured agent in backoff/rejected state still owns its retry loop: do not recreate it.
+            val reportedTargets=reports[agent]?.agents.orEmpty().map {it.relayId}.toSet()
+            if(sentAgent[agent]==body && targets.all {it.relayId in reportedTargets})return@forEach
             if(targets.isNotEmpty() || sentAgent.containsKey(agent))if(world.send(agent,RunnerMessage("drp-agent-config",detail=body)))sentAgent[agent]=body
         }
     }

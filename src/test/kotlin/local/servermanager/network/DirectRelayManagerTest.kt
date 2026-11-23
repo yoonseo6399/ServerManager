@@ -37,6 +37,7 @@ class DirectRelayManagerTest {
         val nodes=ConcurrentHashMap<String,RunnerNode>()
         val devices=ConcurrentHashMap<String,RunnerDevice>()
         val offline=ConcurrentHashMap.newKeySet<String>()
+        val agentConfigSends=AtomicLong()
         val instances=mutableListOf<Triple<String,String,List<String>>>()
         lateinit var manager:DirectRelayManager
         fun build(){manager=DirectRelayManager(store,this)}
@@ -48,6 +49,7 @@ class DirectRelayManagerTest {
         override fun routes()=instances.toList()
         override fun send(runnerId:String,message:RunnerMessage):Boolean {
             val node=nodes[runnerId] ?: return false;if(offline.contains(runnerId))return false
+            if(message.type=="drp-agent-config")agentConfigSends.incrementAndGet()
             controlBytes.addAndGet(message.detail.orEmpty().length.toLong()+64);return node.role.onMessage(message)
         }
         override fun resolveHost(host:String)=listOf("203.0.113.9")
@@ -180,6 +182,34 @@ class DirectRelayManagerTest {
         val carried=controlBytes.get()-before
         assertTrue(carried<20_000,"manager control channel carried $carried bytes while 4.8MB of game data moved")
         assertEquals("ACTIVE",w.h.manager.view().phase)
+    }
+
+    @Test fun `game host role replacement restores identical agent settings without a control reconnect`() {
+        val w=world();enable(w);await("ready",tick=w.h::pump){w.h.manager.isReady(w.relay.id)}
+        val sent=w.h.agentConfigSends.get()
+        w.game.role.close();w.game.start(w.h) // Same device and manager; no onDisconnect or settings change.
+        assertTrue(w.h.connected(w.game.id))
+        assertTrue(w.h.manager.view().agents.single {it.runnerId==w.game.id}.relays.isEmpty())
+        await("replacement receives cached settings",tick=w.h::pump){w.h.manager.isReady(w.relay.id)}
+        assertTrue(w.h.agentConfigSends.get()>sent)
+        player(w.h.gamePort).use {assertTrue(roundTrip(it,"replacement host"))}
+        val applied=w.h.agentConfigSends.get();repeat(5){w.h.pump()}
+        assertEquals(applied,w.h.agentConfigSends.get(),"applied roles must suppress duplicate config traffic")
+    }
+
+    @Test fun `configured reconnecting or rejected agents are not repeatedly sent the same settings`() {
+        val w=world();enable(w);await("ready",tick=w.h::pump){w.h.manager.isReady(w.relay.id)}
+        val sent=w.h.agentConfigSends.get()
+        for(state in listOf("CONNECTING","BACKOFF","REJECTED","CONNECTED")) {
+            w.h.manager.onReport(w.game.id,RunnerRelayReport(w.game.consent.read(),null,
+                listOf(AgentRelayStatus(w.relay.id,state,null,0,null)),false,true))
+            repeat(5){w.h.manager.reconcile()}
+        }
+        assertEquals(sent,w.h.agentConfigSends.get())
+        // A fresh host reports no role at all. That must invalidate only the delivery assumption.
+        w.h.manager.onReport(w.game.id,RunnerRelayReport(w.game.consent.read(),null,emptyList(),false,true))
+        w.h.manager.reconcile();assertEquals(sent+1,w.h.agentConfigSends.get())
+        w.h.manager.reconcile();assertEquals(sent+1,w.h.agentConfigSends.get())
     }
 
     @Test fun `allowed and active and ready are reported separately`() {
