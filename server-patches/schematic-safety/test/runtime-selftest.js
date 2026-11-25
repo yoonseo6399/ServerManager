@@ -5,8 +5,7 @@ ServerEvents.loaded(event => {
   const Components = Java.loadClass('com.simibubi.create.AllDataComponents');
   const SchematicItem = Java.loadClass('com.simibubi.create.content.schematics.SchematicItem');
   const SchematicPrinter = Java.loadClass('com.simibubi.create.content.schematics.SchematicPrinter');
-  const Files = Java.loadClass('java.nio.file.Files');
-  const Paths = Java.loadClass('java.nio.file.Paths');
+  const FixtureSwap = Java.loadClass('local.survival.schematicsafetytest.FixtureSwap');
   const mode = JsonIO.read('kubejs/test-mode.json');
   const patched = !!mode.patched;
   const report = {patched: patched, checks: [], success: false};
@@ -38,7 +37,7 @@ ServerEvents.loaded(event => {
     record('missing file uses existing empty fallback', empty(load('missing.nbt')));
     const before=attempt('repair.nbt');
     record('initial broken repair candidate', patched ? (!before.threw && empty(before.template)) : before.threw, before.error || 'empty template');
-    Files.write(Paths.get('schematics/uploaded/selftest/repair.nbt'),Files.readAllBytes(Paths.get('schematics/uploaded/selftest/valid.nbt')));
+    FixtureSwap.restore();
     record('re-uploaded file is loaded without permanent error cache', load('repair.nbt').getSize().getX() === 1);
     let printerThrew=false;let printerError='';
     try { new SchematicPrinter().loadSchematic(stack('truncated-real.nbt'),event.server.overworld(),false); }

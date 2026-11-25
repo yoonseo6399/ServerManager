@@ -26,4 +26,7 @@ if a.test:
     subprocess.run([str(a.java_home/'bin/javac'),'--release','21','-proc:none','-cp',str(classes),'-d',str(tests)]+[str(p) for p in (root/'test').rglob('*.java')],check=True)
     subprocess.run([str(a.java_home/'bin/java'),'-cp',os.pathsep.join([str(classes),str(tests)]),'local.survival.schematicsafety.SchematicFailureGuardTest'],check=True)
     result['unitTests']='pass'
+    with zipfile.ZipFile(out/'schematic-safety-selftest-only.jar','w',zipfile.ZIP_DEFLATED) as z:
+        helper=tests/'local/survival/schematicsafetytest/FixtureSwap.class';z.write(helper,helper.relative_to(tests))
+        z.writestr('META-INF/neoforge.mods.toml','modLoader="lowcodefml"\nloaderVersion="[4,)"\nlicense="MIT"\n[[mods]]\nmodId="schematic_safety_selftest_only"\nversion="1.0.0"\ndisplayName="Schematic Safety TEST ONLY"\n')
 (out/'build-result.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result))
