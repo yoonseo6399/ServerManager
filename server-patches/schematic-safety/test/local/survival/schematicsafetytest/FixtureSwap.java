@@ -54,6 +54,18 @@ public final class FixtureSwap {
             check(checks, "printer survives bad NBT only when patched", patched ? !printerThrew : printerThrew, detail);
             SchematicPrinter printer = new SchematicPrinter();printer.loadSchematic(stack("valid.nbt"), level, false);
             check(checks, "valid printer stays loaded without errors", printer.isLoaded() && !printer.isErrored(), "");
+            // Exercise the exact cannon boundary from the production crash in this test world only.
+            BlockPos position = new BlockPos(0, 80, 0);
+            level.setBlockAndUpdate(position, BuiltInRegistries.BLOCK.get(ResourceLocation.fromNamespaceAndPath("create", "schematicannon")).defaultBlockState());
+            try {
+                Object cannon = level.getBlockEntity(position);
+                Class<?> type = Class.forName("com.simibubi.create.content.schematics.cannon.SchematicannonBlockEntity");
+                var method = type.getDeclaredMethod("initializePrinter", ItemStack.class);method.setAccessible(true);
+                boolean cannonThrew = false;String cannonDetail = "no exception";
+                try {method.invoke(cannon, stack("truncated-real.nbt"));}
+                catch (java.lang.reflect.InvocationTargetException failure) {cannonThrew = true;cannonDetail = failure.getCause().toString();}
+                check(checks, "schematicannon initialization rejects bad NBT without crashing when patched", patched ? !cannonThrew : cannonThrew, cannonDetail);
+            } finally {level.removeBlock(position, false);}
             report.put("success", true);
         } catch (Throwable failure) {report.put("error", failure.toString());}
         return new Gson().toJson(report);
