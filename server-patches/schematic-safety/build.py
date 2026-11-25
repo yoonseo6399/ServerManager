@@ -23,7 +23,7 @@ with zipfile.ZipFile(jar,'w',zipfile.ZIP_DEFLATED) as z:
 result={'artifact':str(jar),'sha256':hashlib.sha256(jar.read_bytes()).hexdigest(),'createSha256':hashlib.sha256(create.read_bytes()).hexdigest(),'unitTests':'not run'}
 if a.test:
     tests=out/'test-classes';tests.mkdir(exist_ok=True)
-    subprocess.run([str(a.java_home/'bin/javac'),'--release','21','-proc:none','-cp',str(classes),'-d',str(tests)]+[str(p) for p in (root/'test').rglob('*.java')],check=True)
+    subprocess.run([str(a.java_home/'bin/javac'),'--release','21','-proc:none','-cp',str(classes)+os.pathsep+cp,'-d',str(tests)]+[str(p) for p in (root/'test').rglob('*.java')],check=True)
     subprocess.run([str(a.java_home/'bin/java'),'-cp',os.pathsep.join([str(classes),str(tests)]),'local.survival.schematicsafety.SchematicFailureGuardTest'],check=True)
     result['unitTests']='pass'
     with zipfile.ZipFile(out/'schematic-safety-selftest-only.jar','w',zipfile.ZIP_DEFLATED) as z:
