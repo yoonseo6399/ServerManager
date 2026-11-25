@@ -65,6 +65,11 @@ public final class FixtureSwap {
                 try {method.invoke(cannon, stack("truncated-real.nbt"));}
                 catch (java.lang.reflect.InvocationTargetException failure) {cannonThrew = true;cannonDetail = failure.getCause().toString();}
                 check(checks, "schematicannon initialization rejects bad NBT without crashing when patched", patched ? !cannonThrew : cannonThrew, cannonDetail);
+                if (patched) {
+                    String state = type.getField("state").get(cannon).toString();
+                    String status = type.getField("statusMsg").get(cannon).toString();
+                    check(checks, "bad schematic leaves cannon stopped with expired status", state.equals("STOPPED") && status.equals("schematicExpired"), state + "/" + status);
+                }
             } finally {level.removeBlock(position, false);}
             report.put("success", true);
         } catch (Throwable failure) {report.put("error", failure.toString());}
