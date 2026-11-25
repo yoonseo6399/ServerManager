@@ -2,7 +2,8 @@ package local.survival.schematicsafetytest;
 
 import com.google.gson.Gson;
 import com.simibubi.create.AllDataComponents;
-import com.simibubi.create.AllItems;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import com.simibubi.create.content.schematics.SchematicItem;
 import com.simibubi.create.content.schematics.SchematicPrinter;
 import net.minecraft.core.BlockPos;
@@ -17,7 +18,7 @@ import java.util.*;
 /** Fixed-path test harness only; never packaged in the production add-on. */
 public final class FixtureSwap {
     private static ItemStack stack(String filename) {
-        ItemStack stack = new ItemStack(AllItems.SCHEMATIC.get());
+        ItemStack stack = new ItemStack(BuiltInRegistries.ITEM.get(ResourceLocation.fromNamespaceAndPath("create", "schematic")));
         stack.set(AllDataComponents.SCHEMATIC_OWNER, "selftest");
         stack.set(AllDataComponents.SCHEMATIC_FILE, filename);
         stack.set(AllDataComponents.SCHEMATIC_DEPLOYED, true);
