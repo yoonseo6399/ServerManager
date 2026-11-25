@@ -1,0 +1,28 @@
+modLoader="lowcodefml"
+loaderVersion="[4,)"
+license="MIT"
+[[mods]]
+modId="survival_schematic_safety"
+version="1.0.0"
+displayName="Survival Schematic Safety"
+description='''Keeps corrupt schematic NBT failures inside Create schematic loading. Server only; original files and world blocks are preserved.'''
+[[mixins]]
+config="survival_schematic_safety.mixins.json"
+[[dependencies.survival_schematic_safety]]
+modId="neoforge"
+type="required"
+versionRange="[21.1,)"
+ordering="NONE"
+side="SERVER"
+[[dependencies.survival_schematic_safety]]
+modId="minecraft"
+type="required"
+versionRange="[1.21.1]"
+ordering="NONE"
+side="SERVER"
+[[dependencies.survival_schematic_safety]]
+modId="create"
+type="required"
+versionRange="[6.0.10]"
+ordering="AFTER"
+side="SERVER"
