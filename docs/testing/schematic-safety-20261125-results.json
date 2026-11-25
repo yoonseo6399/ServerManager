@@ -1,0 +1,131 @@
+{
+  "date": "2026-11-25",
+  "artifact": "survival-schematic-safety-1.0.0.jar",
+  "sha256": "e8a826042554ee8e8f0044a599511a39adb30e11ecb43bf13d7a5e346ac6b2ba",
+  "bytes": 4367,
+  "unitTests": "pass",
+  "realModpackComparison": [
+    {
+      "patched": false,
+      "checks": [
+        {
+          "pass": true,
+          "name": "valid schematic remains one stone block",
+          "detail": "Vec3i{x=1, y=1, z=1}"
+        },
+        {
+          "pass": true,
+          "name": "truncated-real.nbt is contained only when patched",
+          "detail": "net.minecraft.nbt.ReportedNbtException: Loading NBT data"
+        },
+        {
+          "pass": true,
+          "name": "truncated-nbt.nbt is contained only when patched",
+          "detail": "net.minecraft.nbt.ReportedNbtException: Loading NBT data"
+        },
+        {
+          "pass": true,
+          "name": "repair.nbt is contained only when patched",
+          "detail": "net.minecraft.nbt.ReportedNbtException: Loading NBT data"
+        },
+        {
+          "pass": true,
+          "name": "missing file keeps existing empty fallback",
+          "detail": ""
+        },
+        {
+          "pass": true,
+          "name": "re-uploaded file retries without permanent error cache",
+          "detail": ""
+        },
+        {
+          "pass": true,
+          "name": "printer survives bad NBT only when patched",
+          "detail": "net.minecraft.nbt.ReportedNbtException: Loading NBT data"
+        },
+        {
+          "pass": true,
+          "name": "valid printer stays loaded without errors",
+          "detail": ""
+        },
+        {
+          "pass": true,
+          "name": "schematicannon initialization rejects bad NBT without crashing when patched",
+          "detail": "net.minecraft.nbt.ReportedNbtException: Loading NBT data"
+        }
+      ],
+      "success": true,
+      "exitCode": 143,
+      "fixtureUnchanged": true
+    },
+    {
+      "patched": true,
+      "checks": [
+        {
+          "pass": true,
+          "detail": "Vec3i{x=1, y=1, z=1}",
+          "name": "valid schematic remains one stone block"
+        },
+        {
+          "pass": true,
+          "detail": "empty template",
+          "name": "truncated-real.nbt is contained only when patched"
+        },
+        {
+          "pass": true,
+          "detail": "empty template",
+          "name": "truncated-nbt.nbt is contained only when patched"
+        },
+        {
+          "pass": true,
+          "detail": "empty template",
+          "name": "repair.nbt is contained only when patched"
+        },
+        {
+          "pass": true,
+          "detail": "",
+          "name": "missing file keeps existing empty fallback"
+        },
+        {
+          "pass": true,
+          "detail": "",
+          "name": "re-uploaded file retries without permanent error cache"
+        },
+        {
+          "pass": true,
+          "detail": "no exception",
+          "name": "printer survives bad NBT only when patched"
+        },
+        {
+          "pass": true,
+          "detail": "",
+          "name": "valid printer stays loaded without errors"
+        },
+        {
+          "pass": true,
+          "detail": "no exception",
+          "name": "schematicannon initialization rejects bad NBT without crashing when patched"
+        },
+        {
+          "pass": true,
+          "detail": "STOPPED/schematicExpired",
+          "name": "bad schematic leaves cannon stopped with expired status"
+        }
+      ],
+      "success": true,
+      "exitCode": 143,
+      "fixtureUnchanged": true
+    }
+  ],
+  "productionInstalled": false,
+  "productionRestarted": false,
+  "sourcePreserved": true,
+  "fullServerManagerSuite": "not run",
+  "otherOperatingSystems": "not run",
+  "limitations": [
+    "Does not reconstruct a truncated schematic",
+    "Exact cause of the interrupted upload is not established",
+    "Production world and real client login were not tested"
+  ],
+  "testShutdown": "Both comparisons wrote successful results and saved test worlds, then remaining test JVMs were terminated (143); no production process was signalled."
+}
