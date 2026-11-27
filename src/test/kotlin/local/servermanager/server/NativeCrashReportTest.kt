@@ -24,6 +24,7 @@ class NativeCrashReportTest {
 """
         val file=base.resolve("hs_err_pid123.log").also {it.writeText(text)}
         base.resolve("secret.log").writeText("private")
+        base.resolve("crash-reports").createDirectory().resolve("hs_err_pid999.log").writeText("wrong location")
         assertEquals(file.name,CrashReports.changed(base,before));assertContentEquals(text.toByteArray(),CrashReports.attachment(base,file.name))
         assertFalse(CrashReports.validName("../hs_err_pid123.log"));assertFalse(CrashReports.validName("secret.log"))
         val logs=LogFiles(temp,base);assertEquals(listOf("server/hs_err_pid123.log"),logs.list().map {it.path})

@@ -33,7 +33,7 @@ object CrashReports {
     fun snapshot(base:Path):Map<String,String> = runCatching {
         if(Files.isSymbolicLink(base))return emptyMap()
         val entries=listOfNotNull(folder(base),base.takeIf {Files.isDirectory(it,NOFOLLOW_LINKS)})
-        entries.flatMap {dir->Files.list(dir).use {paths->paths.filter {validName(it.name) && (dir!=base || nativeName(it.name))&&Files.isRegularFile(it,NOFOLLOW_LINKS)}.limit(10000).iterator().asSequence().map {p->
+        entries.flatMap {dir->Files.list(dir).use {paths->paths.filter {validName(it.name) && (if(dir==base)nativeName(it.name) else !nativeName(it.name))&&Files.isRegularFile(it,NOFOLLOW_LINKS)}.limit(10000).iterator().asSequence().map {p->
             p.name to "${p.fileSize()}:${p.getLastModifiedTime()}:${Files.readAttributes(p,java.nio.file.attribute.BasicFileAttributes::class.java,NOFOLLOW_LINKS).fileKey()}"
         }.toList()}}.toMap()
     }.getOrDefault(emptyMap())
