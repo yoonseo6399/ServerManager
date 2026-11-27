@@ -106,6 +106,33 @@ class LiveRunnerOperationsTest {
         assertFails {manager.snapshotReady(cfg.id,"runner",SnapshotReady(generation(2),token,null,null))}
         assertFails {manager.snapshotCommitted(cfg.id,"other",ready.generation)}
     }
+    @Test fun `stale stopped runtime cannot replace an uncompleted durable run`()=managerFixture {manager,cfg->
+        manager.start(cfg.id)
+        val root=manager.root.resolve(cfg.id);val token=root.resolve("remote-run").readText()
+        manager.runtime(cfg.id).state="STOPPED"
+        assertFailsWith<IllegalStateException>{manager.start(cfg.id)}
+        assertEquals(token,root.resolve("remote-run").readText());assertTrue(root.resolve("remote-lease").exists())
+        manager.snapshotReady(cfg.id,"runner",SnapshotReady(generation(1),token,RunnerExitReport(134),null))
+        manager.start(cfg.id);assertNotEquals(token,root.resolve("remote-run").readText())
+    }
+    @Test fun `exit is reported before copy and duplicate copy does not repeat stop alert`()=managerFixture {manager,cfg->
+        manager.start(cfg.id);val root=manager.root.resolve(cfg.id);val token=root.resolve("remote-run").readText()
+        manager.remoteState(cfg.id,"runner","RUNNING")
+        assertFails {manager.remoteExited(cfg.id,"runner",RunnerExitReport(134,runToken="wrong"))}
+        assertNull(manager.runtime(cfg.id).lastExit)
+        val signals=mutableListOf<ServerSignal>();manager.onSignal {signals.add(it)}
+        val report=RunnerExitReport(134,"hs_err_pid123.log",runToken=token)
+        manager.remoteExited(cfg.id,"runner",report)
+        val exit=manager.runtime(cfg.id).lastExit!!
+        assertEquals(134,exit.code);assertContains(exit.summary(),"네이티브");assertEquals("SYNCING",manager.runtime(cfg.id).state)
+        assertTrue(root.resolve("remote-lease").exists());assertTrue(root.resolve("remote-exit-notified").exists())
+        val time=root.resolve("remote-exit-notified").getLastModifiedTime()
+        manager.remoteExited(cfg.id,"runner",report)
+        manager.snapshotReady(cfg.id,"runner",SnapshotReady(generation(1),token,report,null))
+        assertEquals(time,root.resolve("remote-exit-notified").getLastModifiedTime());assertEquals("STOPPED",manager.runtime(cfg.id).state)
+        assertEquals(1,signals.count {it.kind=="stop"})
+        manager.start(cfg.id);assertFalse(root.resolve("remote-exit-notified").exists())
+    }
     @Test fun `active legacy run gains a stable generation token without restarting its process`()=managerFixture {manager,cfg->
         manager.start(cfg.id);manager.root.resolve(cfg.id).resolve("remote-run").deleteExisting()
         manager.remoteState(cfg.id,"runner","RUNNING");manager.runtime(cfg.id).remotePid=1234
@@ -155,15 +182,16 @@ class LiveRunnerOperationsTest {
     @Test fun `real runner HTTP resumes failed snapshot while newer original and game stay untouched`()=managerFixture {manager,cfg->
         manager.start(cfg.id);val token=manager.root.resolve(cfg.id).resolve("remote-run").readText()
         val registry=mock(RunnerRegistry::class.java);`when`(registry.active("runner")).thenReturn(RunnerDevice("runner","test","MAC","owner","key","now",allowedInstanceIds=setOf(cfg.id)))
-        val transfer=RunnerTransfer(manager,registry);var fail=true
+        val transfer=RunnerTransfer(manager,registry);var fail=true;var failReady=true
         val server=com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress("127.0.0.1",0),0)
         server.createContext("/") {exchange->
             var status=200
             val query=exchange.requestURI.rawQuery.orEmpty().split('&').filter {it.isNotEmpty()}.associate {val pair=it.split('=',limit=2);pair[0] to java.net.URLDecoder.decode(pair.getOrElse(1){""},Charsets.UTF_8)}
             val op=exchange.requestURI.path.substringAfterLast('/')
             val result:Any=try {when(op) {
-                "capabilities" -> mapOf("stoppedSnapshotProtocol" to 1,"batchProtocol" to 0)
-                "snapshot-ready" -> {manager.snapshotReady(cfg.id,"runner",mapper.readValue(exchange.requestBody,SnapshotReady::class.java));mapOf("ok" to true)}
+                "capabilities" -> mapOf("stoppedSnapshotProtocol" to 1,"batchProtocol" to 0,"exitReportProtocol" to 2)
+                "exit" -> {manager.remoteExited(cfg.id,"runner",mapper.readValue(exchange.requestBody,RunnerExitReport::class.java));mapOf("ok" to true)}
+                "snapshot-ready" -> {manager.snapshotReady(cfg.id,"runner",mapper.readValue(exchange.requestBody,SnapshotReady::class.java));if(failReady){failReady=false;status=500};mapOf("ok" to true)}
                 "snapshot-progress" -> mapOf("ok" to true)
                 "transfer-state" -> mapOf("state" to transfer.transferState("runner",cfg.id,query.getValue("transferId")))
                 "begin" -> {val request=mapper.readValue(exchange.requestBody,RunnerTransferBegin::class.java);transfer.begin("runner",cfg.id,request.manifest,resumeProtocol=request.resumeProtocol,generation=request.generation)}
@@ -181,7 +209,9 @@ class LiveRunnerOperationsTest {
         RunnerAgent::class.java.getDeclaredField("sessionToken").also {it.isAccessible=true}.set(agent,"session")
         val upload=RunnerAgent::class.java.getDeclaredMethod("uploadStopped",String::class.java).also {it.isAccessible=true}
         try {
-            upload.invoke(agent,cfg.id);assertEquals(1,StoppedSnapshots(root.resolve("stopped-snapshots")).list().size);assertFalse(root.resolve("dirty").exists());assertEquals("STOPPED",manager.runtime(cfg.id).state)
+            upload.invoke(agent,cfg.id);assertEquals(1,StoppedSnapshots(root.resolve("stopped-snapshots")).list().size);assertTrue(root.resolve("dirty").exists());assertEquals("STOPPED",manager.runtime(cfg.id).state)
+            // Ready was accepted but its response was lost; the exit now gets409, yet ready retry must clear dirty.
+            upload.invoke(agent,cfg.id);assertFalse(root.resolve("dirty").exists());assertEquals(1,StoppedSnapshots(root.resolve("stopped-snapshots")).list().size)
             manager.start(cfg.id);manager.remoteState(cfg.id,"runner","RUNNING");manager.runtime(cfg.id).remotePid=4567
             val process=mock(Process::class.java);`when`(process.isAlive).thenReturn(true);field<MutableMap<String,Process>>(agent,"processes")[cfg.id]=process
             base.resolve("world.txt").writeText("new live original")

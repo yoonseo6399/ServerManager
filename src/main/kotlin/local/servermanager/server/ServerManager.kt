@@ -523,7 +523,7 @@ class ServerManager {
             r.remoteWorkerReady=true;r.remoteCloudReady=true
             r.fileTransfer=FolderImportProgress("UPLOADING",message="종료 복사본을 백그라운드 전송 중 · 현재 실행기에서 다시 시작 가능")
             r.event("system","종료 복사본 준비 완료 · 현재 실행기에서 다시 시작할 수 있습니다")
-            signal(id,"stop",exit.summary()+" 종료 복사본을 백그라운드 전송합니다.",exit,if(!requested)r.discordError.recent() else null)
+            notifyRemoteExit(id,exit," 종료 복사본을 백그라운드 전송합니다.",if(!requested)(if(r.exitErrorCaptured)r.exitError else r.discordError.recent()) else null)
             remoteController?.completed(instance(id))
         }
         resumeRemoteRestart(id)
@@ -572,7 +572,10 @@ class ServerManager {
     @Synchronized private fun startInternal(id: String,session:String?,actor:StartActor) {
         val i=instance(id); val r=runtime(id)
         synchronized(r) {
-            checkIdle(r,true,true);check(if(r.diagnosticActive)session!=null && session==r.diagnosticSession else session==null) {"모드 검사 패널에서 다음 시도를 준비하고 시작하세요"}; require(r.state != "IMPORT_FAILED") { "실패한 팩은 시작할 수 없습니다. 원본 mrpack에서 다시 가져오세요" }; require(eulaAccepted(id)) { "Minecraft EULA에 먼저 동의하세요" }
+            checkIdle(r,true,true)
+            // Runtime frames can lag behind durable lifecycle state. Never replace an uncompleted run.
+            if(i.runnerId!=null)check(!root.resolve(id).resolve("remote-lease").exists()) {"이전 실행의 종료 확인·복사본 접수가 끝나지 않았습니다. 실행 식별자를 보존합니다"}
+            check(if(r.diagnosticActive)session!=null && session==r.diagnosticSession else session==null) {"모드 검사 패널에서 다음 시도를 준비하고 시작하세요"}; require(r.state != "IMPORT_FAILED") { "실패한 팩은 시작할 수 없습니다. 원본 mrpack에서 다시 가져오세요" }; require(eulaAccepted(id)) { "Minecraft EULA에 먼저 동의하세요" }
             r.activityVersion++;r.stopReason=null;r.idleCheckPending=false;r.idleRequestId=null;r.startActor=actor;r.restartActor=null
             r.discordError.clear();r.exitError=null;r.exitErrorCaptured=false;r.startNotified=false;r.exitReport=null;r.lastExit=null;r.remoteCloudReady=false;r.remoteWorkerReady=false
             if(!backgroundPending(id)){r.fileTransfer=null;r.transferAuthoritative=false;r.transferMeter.reset()}
@@ -585,12 +588,13 @@ class ServerManager {
                     i.port=port;save(i)
                 }
                 root.resolve(id).resolve("remote-exit.json").deleteIfExists()
+                root.resolve(id).resolve("remote-exit-notified").deleteIfExists()
                 atomicText(root.resolve(id).resolve("start-actor.json"),mapper.writeValueAsString(actor))
                 root.resolve(id).resolve("remote-lease").writeText(i.runnerId!!)
                 r.remoteStopRequested=false;r.remoteRestartRequested=false;r.state="TRANSFERRING";r.players=null;r.resources=null
                 val runToken=if(controller.supportsLiveFiles(i))UUID.randomUUID().toString() else null
                 if(runToken!=null)atomicText(root.resolve(id).resolve("remote-run"),runToken)
-                try { controller.start(i.copy(diagnosticSession=r.diagnosticSession,runToken=runToken)) } catch(e:Exception) { root.resolve(id).resolve("remote-lease").deleteIfExists();r.state="STOPPED";throw e }
+                try { controller.start(i.copy(diagnosticSession=r.diagnosticSession,runToken=runToken)) } catch(e:Exception) { root.resolve(id).resolve("remote-lease").deleteIfExists();root.resolve(id).resolve("remote-run").deleteIfExists();r.state="STOPPED";throw e }
                 r.event("system","실행기 ${i.runnerId}로 서버 데이터를 인계하고 있습니다")
                 return
             }
@@ -737,10 +741,19 @@ class ServerManager {
             r.state=state;if(state!="STOPPING")r.remoteStopProgress=null;if(state=="RUNNING")started(id,r);if(state=="SYNCING"){r.remotePid=null;r.resources=null;r.players=null};if(state=="RUNNING" && !backgroundPending(id)){r.fileTransfer=r.fileTransfer?.copy(phase="COMPLETE")};if(state=="SYNC_FAILED"){r.fileTransfer=(r.fileTransfer ?: FolderImportProgress("FAILED")).copy(phase="FAILED",message=detail?.take(500) ?: "실행기 연결과 파일 인계 상태를 확인하세요")};detail?.take(1000)?.let { r.event("system",it) }
         }
     }
+    private fun notifyRemoteExit(id:String,exit:ServerExit,detail:String,summary:DiscordErrorSummary?) {
+        val marker=root.resolve(id).resolve("remote-exit-notified")
+        // The marker remains until the next accepted start, also across manager restarts.
+        if(marker.exists())return
+        atomicText(marker,"notified")
+        runtime(id).event("system",exit.summary())
+        signal(id,"stop",exit.summary()+detail,exit,summary)
+    }
     fun remoteExited(id:String,runnerId:String,report:RunnerExitReport) {
         require(instance(id).runnerId==runnerId)
         require(report.crashReport==null || CrashReports.validName(report.crashReport))
         val r=runtime(id);synchronized(r) {
+            if(report.runToken!=null)check(root.resolve(id).resolve("remote-run").takeIf {it.exists()}?.readText()==report.runToken) {"현재 실행에 해당하는 종료 보고만 접수합니다"}
             check(root.resolve(id).resolve("remote-lease").exists() && !folderImportMarker(id).exists()) {"실행 중이던 서버의 종료만 보고할 수 있습니다"}
             require(report.reason==null||report.reason in setOf("STOP_TIMEOUT","IDLE"))
             atomicText(root.resolve(id).resolve("remote-exit.json"),mapper.writeValueAsString(report))
@@ -748,6 +761,11 @@ class ServerManager {
             if(report.reason=="STOP_TIMEOUT"){r.stopReason="STOP_TIMEOUT";r.remoteStopRequested=true;r.remoteRestartRequested=false}
             r.exitReport=report
             if(!r.exitErrorCaptured){r.exitError=r.discordError.recent();r.exitErrorCaptured=true}
+            val requested=r.remoteStopRequested
+            val exit=ServerExit(report.code,requested,if(requested)r.stopReason ?: "MANUAL" else "UNEXPECTED",report.crashReport)
+            r.lastExit=exit;r.remotePid=null;r.resources=null;r.players=null
+            if(r.state!="SYNC_FAILED")r.state="SYNCING"
+            notifyRemoteExit(id,exit," 종료는 확인됐으며 파일 동기화는 별도로 진행합니다.",if(!requested)r.exitError else null)
         }
     }
     fun remoteStartFailed(id:String,runnerId:String,detail:String?) {
@@ -756,6 +774,7 @@ class ServerManager {
         synchronized(r) {
             if(r.state!="TRANSFERRING" || r.remotePid!=null)return
             root.resolve(id).resolve("remote-lease").deleteIfExists()
+            root.resolve(id).resolve("remote-run").deleteIfExists()
             r.state="FAILED";r.remoteRestartRequested=false
             r.event("error",detail?.take(1000) ?: "실행기에서 서버를 시작하지 못했습니다")
             remoteController?.completed(i)
@@ -854,7 +873,7 @@ class ServerManager {
             ServerExit(r.exitReport?.code,value,if(value)r.stopReason ?: "MANUAL" else "UNEXPECTED",r.exitReport?.crashReport).also {r.lastExit=it} to (if(r.exitErrorCaptured)r.exitError else r.discordError.recent())
         }
         remoteController?.completed(i)
-        signal(id,"stop",exit.summary()+if(i.syncEnabled())" 변경 파일 인계를 완료했습니다." else " 파일 동기화 OFF · 실행기 원본을 보존합니다.",exit,if(!exit.requested)summary else null)
+        notifyRemoteExit(id,exit,if(i.syncEnabled())" 변경 파일 인계를 완료했습니다." else " 파일 동기화 OFF · 실행기 원본을 보존합니다.",if(!exit.requested)summary else null)
     }
     fun remoteQueryStatus(id:String,runner:String,unknown:Boolean){val r=runtime(id);if(instance(id).runnerId==runner)r.playerQueryMessage=if(unknown)"실행기의 플레이어 조회 응답이 없습니다. 인원은 불명이며 무인 자동 종료를 보류합니다." else null}
     fun events(id: String,after: Long): List<Event> { val r=runtime(id); return synchronized(r) { r.events.filter { it.seq>after }.take(2000) } }

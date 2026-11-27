@@ -65,6 +65,12 @@ class DiscordErrorBuffer(private val report:Boolean=false) {
         private fun clean(value:String,limit:Int):String=SECRET.replace(USERINFO.replace(value,"$1[redacted]@")){it.groupValues[1]+"[redacted]"}
             .replace('`','\u02bc').replace(Regex("[\\p{Cc}\\p{Cf}\\s]+")," ").trim().let {if(it.length>limit)it.take(limit-1)+"…" else it}
         fun fromReport(bytes:ByteArray):DiscordErrorSummary? {
+            val head=bytes.copyOfRange(0,minOf(bytes.size,65536)).toString(Charsets.UTF_8)
+            if(head.contains("A fatal error has been detected by the Java Runtime Environment")) {
+                val signal=head.lineSequence().firstOrNull {it.trimStart('#',' ').startsWith("SIG")}?.trimStart('#',' ')?.substringBefore(" at pc=")
+                val frame=head.substringAfter("# Problematic frame:", "").lineSequence().drop(1).firstOrNull()?.trimStart('#',' ')
+                return DiscordErrorSummary("JVM 네이티브 크래시",clean(listOfNotNull(signal,frame?.takeIf {it.isNotBlank()}).joinToString(" · "),900),emptyList())
+            }
             val buffer=DiscordErrorBuffer(report=true)
             // Bound notification extraction even when an attached raw report is many MiB.
             bytes.copyOfRange(0,minOf(bytes.size,CrashReports.MAX_BYTES)).toString(Charsets.UTF_8).lineSequence().take(100000).takeWhile {!it.contains("-- System Details --")}.forEach {buffer.offer(it)}

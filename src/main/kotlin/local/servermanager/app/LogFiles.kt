@@ -27,7 +27,7 @@ class LogFiles(private val directory: Path,private val serverDirectory:Path=dire
     data class Row(val no:Long,val kind:String,val text:String)
     data class Window(val lines:List<Row>,val total:Long,val first:Long,val last:Long,val next:Long?)
     data class Page(val events:List<Line>,val nextOffset:Long?,val revision:String,val bytesRead:Long)
-    private fun allowed(name:String)=name in setOf("console.log","live.log") || Regex("server/logs/[^/]+\\.log(?:\\.gz)?").matches(name) || Regex("server/crash-reports/[^/]+\\.txt").matches(name)
+    private fun allowed(name:String)=name in setOf("console.log","live.log") || (name.startsWith("server/") && CrashReports.nativeName(name.removePrefix("server/"))) || Regex("server/logs/[^/]+\\.log(?:\\.gz)?").matches(name) || Regex("server/crash-reports/[^/]+\\.txt").matches(name)
     private fun resolve(name:String):Path {
         require(allowed(name) && !name.contains('\\')) { "지원하지 않는 로그 파일입니다" }
         val base=(if(name.startsWith("server/"))serverDirectory else directory).toAbsolutePath().normalize();val p=base.resolve(name.removePrefix(if(name.startsWith("server/"))"server/" else "")).normalize()
@@ -40,6 +40,8 @@ class LogFiles(private val directory: Path,private val serverDirectory:Path=dire
     fun file(name:String):Path=resolve(name)
     fun list():List<Entry> {
         val names=mutableListOf("console.log","live.log")
+        if(!Files.isSymbolicLink(serverDirectory) && Files.isDirectory(serverDirectory,LinkOption.NOFOLLOW_LINKS))
+            Files.list(serverDirectory).use {paths->paths.filter {CrashReports.nativeName(it.fileName.toString())}.forEach {names.add("server/${it.fileName}")}}
         for(sub in listOf("server/logs","server/crash-reports")) {
             val folder=serverDirectory.resolve(sub.removePrefix("server/"))
             if(Files.isSymbolicLink(serverDirectory) || Files.isSymbolicLink(folder) || !Files.isDirectory(folder,LinkOption.NOFOLLOW_LINKS))continue
