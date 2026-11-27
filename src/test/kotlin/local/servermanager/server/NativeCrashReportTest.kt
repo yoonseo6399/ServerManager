@@ -8,6 +8,13 @@ import kotlin.test.*
 
 class NativeCrashReportTest {
     @TempDir lateinit var temp:Path
+    @Test fun `old manager receives legacy exit fields only`() {
+        val report=RunnerExitReport(134,"hs_err_pid123.log","IDLE","run")
+        assertEquals(RunnerExitReport(134),RunnerExitCompatibility.report(report,0,0))
+        assertEquals(report,RunnerExitCompatibility.report(report,2,1))
+        val json=com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().writeValueAsString(RunnerExitCompatibility.report(report,0,0))
+        assertFalse(json.contains("runToken"))
+    }
     @Test fun `native fatal log is detected attached listed and summarized without arbitrary root files`() {
         val base=temp.resolve("server").createDirectory();val before=CrashReports.snapshot(base)
         val text="""# A fatal error has been detected by the Java Runtime Environment:

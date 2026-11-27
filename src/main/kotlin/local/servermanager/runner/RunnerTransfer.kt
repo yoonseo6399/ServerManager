@@ -256,7 +256,7 @@ class RunnerTransferApi(private val transfer:RunnerTransfer,private val gateway:
     }
     @GetMapping("/{instanceId}/capabilities") fun capabilities(@PathVariable instanceId:String,
         @RequestHeader("X-SM-Runner-Id") runnerId:String,@RequestHeader("X-SM-Session",required=false) token:String?):Map<String,Int> {
-        check(runnerId,token,instanceId);return mapOf("resumeProtocol" to 1,"batchProtocol" to 1,"parallel" to TransferBatch.PARALLEL,"exitReasonProtocol" to 1,"asyncTransferProtocol" to 2,"stoppedSnapshotProtocol" to 1)
+        check(runnerId,token,instanceId);return mapOf("resumeProtocol" to 1,"batchProtocol" to 1,"parallel" to TransferBatch.PARALLEL,"exitReasonProtocol" to 1,"exitReportProtocol" to 2,"asyncTransferProtocol" to 2,"stoppedSnapshotProtocol" to 1)
     }
     @PutMapping("/{instanceId}/batch") fun batch(@PathVariable instanceId:String,@RequestParam transferId:String,req:jakarta.servlet.http.HttpServletRequest,
         @RequestHeader("X-SM-Runner-Id") runnerId:String,@RequestHeader("X-SM-Session",required=false) token:String?):Map<String,Boolean> {

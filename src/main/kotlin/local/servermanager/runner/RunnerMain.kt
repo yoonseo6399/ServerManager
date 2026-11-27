@@ -196,7 +196,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                     // A ready copy left by a prior failed announcement is re-announced, not duplicated.
                     val snapshot=snapshots(id).list().firstOrNull {it.ready.editOnly && it.ready.localRevision==revision}
                         ?: snapshots(id).capture(serverDir(id),null,null,revision,editOnly=true)
-                    val response=http("POST","/api/runners/transfer/$id/snapshot-ready",HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(snapshot.ready)),"application/json")
+                    val response=announceSnapshot(id,snapshot.ready)
                     // A rejected edit revision was never enqueued centrally. Do not let that private copy block newer edits.
                     if(response.statusCode()==409)snapshots(id).remove(snapshot)
                     transferResponse(response,"파일 변경 복사본 접수 대기")
@@ -672,7 +672,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     private fun transferResponse(response:HttpResponse<ByteArray>,message:String) {
         if(response.statusCode() in setOf(401,403,408,429) || response.statusCode()>=500)throw RetryTransfer("$message · 연결 복구 후 이어받습니다 (HTTP ${response.statusCode()})")
         check(response.statusCode()==200) {
-            val detail=runCatching {mapper.readTree(response.body()).path("error").asText("")}.getOrDefault("").take(300)
+            val detail=runCatching {mapper.readTree(response.body()).let {it.path("message").asText(it.path("error").asText(""))}}.getOrDefault("").take(300)
             "$message: HTTP ${response.statusCode()}"+(if(detail.isNotBlank())" · $detail" else "")
         }
     }
@@ -1012,12 +1012,18 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     }
     private fun sendExitReport(id:String,raw:String):HttpResponse<ByteArray> {
         val report=mapper.readValue<RunnerExitReport>(raw).copy(runToken=configs[id]?.runToken)
-        val compatible=if(report.reason=="IDLE") {
-            val response=http("GET","/api/runners/transfer/$id/capabilities")
-            if(response.statusCode()!=404)transferResponse(response,"종료 사유 지원 확인 대기")
-            if(response.statusCode()==200 && mapper.readTree(response.body()).path("exitReasonProtocol").asInt()>=1)report else report.copy(reason=null)
-        } else report
+        val compatible=compatibleExit(id,report)
         return http("POST","/api/runners/transfer/$id/exit",HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(compatible)),"application/json")
+    }
+    private fun compatibleExit(id:String,report:RunnerExitReport):RunnerExitReport {
+        val response=http("GET","/api/runners/transfer/$id/capabilities")
+        if(response.statusCode()!=404)transferResponse(response,"종료 보고 지원 확인 대기")
+        val caps=if(response.statusCode()==200)mapper.readTree(response.body()) else mapper.createObjectNode()
+        return RunnerExitCompatibility.report(report,caps.path("exitReportProtocol").asInt(),caps.path("exitReasonProtocol").asInt())
+    }
+    private fun announceSnapshot(id:String,ready:SnapshotReady):HttpResponse<ByteArray> {
+        val compatible=ready.copy(exit=ready.exit?.let {compatibleExit(id,it)})
+        return http("POST","/api/runners/transfer/$id/snapshot-ready",HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(compatible)),"application/json")
     }
     private fun snapshots(id:String)=StoppedSnapshots(instanceRoot(id).resolve("stopped-snapshots"))
     private fun backgroundEnabled(id:String):Boolean {
@@ -1039,7 +1045,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                     val token=configs[id]?.runToken
                     val previous=snapshots(id).list().lastOrNull {it.ready.runToken==token}
                     val captured=previous ?: snapshots(id).capture(serverDir(id),token,exit,settledEditRevision(id))
-                    transferResponse(http("POST","/api/runners/transfer/$id/snapshot-ready",HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(captured.ready)),"application/json"),"종료 복사본 접수 대기")
+                    transferResponse(announceSnapshot(id,captured.ready),"종료 복사본 접수 대기")
                     // Durable copy is ready before releasing the original folder for a new process.
                     dirty(id).deleteIfExists()
                 }
@@ -1048,7 +1054,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
             reserved=true
             while(true) {
                 val snapshot=snapshots(id).list().firstOrNull() ?: break
-                transferResponse(http("POST","/api/runners/transfer/$id/snapshot-ready",HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(snapshot.ready)),"application/json"),"종료 복사본 접수 대기")
+                transferResponse(announceSnapshot(id,snapshot.ready),"종료 복사본 접수 대기")
                 val receipt=snapshot.path.resolve("upload.pending")
                 val completed=if(receipt.exists()) {
                     val transfer=receipt.readText().trim();require(UUID.fromString(transfer).toString()==transfer)

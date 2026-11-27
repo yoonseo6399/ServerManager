@@ -8,7 +8,7 @@ import java.time.Instant
 import kotlin.io.path.*
 
 /** Exit metadata only; never a persisted parsed log or stack trace. */
-data class RunnerExitReport(val code:Int?=null,val crashReport:String?=null,@get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) val reason:String?=null,val runToken:String?=null)
+data class RunnerExitReport(val code:Int?=null,val crashReport:String?=null,@get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) val reason:String?=null,@get:com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) val runToken:String?=null)
 data class ServerExit(val code:Int?,val requested:Boolean,val reason:String,val crashReport:String?=null,val at:String=Instant.now().toString()) {
     fun summary():String=when(reason) {
         "IDLE"->"플레이어가 없는 상태가 이어져 절전 종료했습니다."

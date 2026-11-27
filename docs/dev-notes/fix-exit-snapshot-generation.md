@@ -15,3 +15,4 @@
 - hs_err: ThreadFilter::accept(int)+0x10 -> WallClock::threadEntry, x1=0xffffffff(-1). 11월20일 동일 스택 재발.
 - 공식 async-profiler issue1143: macOS task_threads의0/-1을 걸러내지 못한 native crash, 수정cc76f05. 증거가 일치하나 라이브러리 수정 후 장시간 재발 방지는 미검증.
 - https://github.com/async-profiler/async-profiler/issues/1143
+- 첫 범위 실행: 44개 중43통과/1실패. 실제 HTTP fixture가 새 즉시 exit endpoint를 구현하지 않아404, 복사본 미생성. fixture에 실제 manager.remoteExited 추가하고 old/new manager exitProtocol 호환 검증도 추가한 뒤 재검증한다.

@@ -187,7 +187,8 @@ class LiveRunnerOperationsTest {
             val query=exchange.requestURI.rawQuery.orEmpty().split('&').filter {it.isNotEmpty()}.associate {val pair=it.split('=',limit=2);pair[0] to java.net.URLDecoder.decode(pair.getOrElse(1){""},Charsets.UTF_8)}
             val op=exchange.requestURI.path.substringAfterLast('/')
             val result:Any=try {when(op) {
-                "capabilities" -> mapOf("stoppedSnapshotProtocol" to 1,"batchProtocol" to 0)
+                "capabilities" -> mapOf("stoppedSnapshotProtocol" to 1,"batchProtocol" to 0,"exitReportProtocol" to 2)
+                "exit" -> {manager.remoteExited(cfg.id,"runner",mapper.readValue(exchange.requestBody,RunnerExitReport::class.java));mapOf("ok" to true)}
                 "snapshot-ready" -> {manager.snapshotReady(cfg.id,"runner",mapper.readValue(exchange.requestBody,SnapshotReady::class.java));mapOf("ok" to true)}
                 "snapshot-progress" -> mapOf("ok" to true)
                 "transfer-state" -> mapOf("state" to transfer.transferState("runner",cfg.id,query.getValue("transferId")))
