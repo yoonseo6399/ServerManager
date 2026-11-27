@@ -106,6 +106,31 @@ class LiveRunnerOperationsTest {
         assertFails {manager.snapshotReady(cfg.id,"runner",SnapshotReady(generation(2),token,null,null))}
         assertFails {manager.snapshotCommitted(cfg.id,"other",ready.generation)}
     }
+    @Test fun `stale stopped runtime cannot replace an uncompleted durable run`()=managerFixture {manager,cfg->
+        manager.start(cfg.id)
+        val root=manager.root.resolve(cfg.id);val token=root.resolve("remote-run").readText()
+        manager.runtime(cfg.id).state="STOPPED"
+        assertFailsWith<IllegalStateException>{manager.start(cfg.id)}
+        assertEquals(token,root.resolve("remote-run").readText());assertTrue(root.resolve("remote-lease").exists())
+        manager.snapshotReady(cfg.id,"runner",SnapshotReady(generation(1),token,RunnerExitReport(134),null))
+        manager.start(cfg.id);assertNotEquals(token,root.resolve("remote-run").readText())
+    }
+    @Test fun `exit is reported before copy and duplicate copy does not repeat stop alert`()=managerFixture {manager,cfg->
+        manager.start(cfg.id);val root=manager.root.resolve(cfg.id);val token=root.resolve("remote-run").readText()
+        manager.remoteState(cfg.id,"runner","RUNNING")
+        assertFails {manager.remoteExited(cfg.id,"runner",RunnerExitReport(134,runToken="wrong"))}
+        assertNull(manager.runtime(cfg.id).lastExit)
+        val report=RunnerExitReport(134,"hs_err_pid123.log",runToken=token)
+        manager.remoteExited(cfg.id,"runner",report)
+        val exit=manager.runtime(cfg.id).lastExit!!
+        assertEquals(134,exit.code);assertContains(exit.summary(),"네이티브");assertEquals("SYNCING",manager.runtime(cfg.id).state)
+        assertTrue(root.resolve("remote-lease").exists());assertTrue(root.resolve("remote-exit-notified").exists())
+        val time=root.resolve("remote-exit-notified").getLastModifiedTime()
+        manager.remoteExited(cfg.id,"runner",report)
+        manager.snapshotReady(cfg.id,"runner",SnapshotReady(generation(1),token,report,null))
+        assertEquals(time,root.resolve("remote-exit-notified").getLastModifiedTime());assertEquals("STOPPED",manager.runtime(cfg.id).state)
+        manager.start(cfg.id);assertFalse(root.resolve("remote-exit-notified").exists())
+    }
     @Test fun `active legacy run gains a stable generation token without restarting its process`()=managerFixture {manager,cfg->
         manager.start(cfg.id);manager.root.resolve(cfg.id).resolve("remote-run").deleteExisting()
         manager.remoteState(cfg.id,"runner","RUNNING");manager.runtime(cfg.id).remotePid=1234

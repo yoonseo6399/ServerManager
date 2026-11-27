@@ -671,7 +671,10 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
     private class RetryTransfer(message:String):java.io.IOException(message)
     private fun transferResponse(response:HttpResponse<ByteArray>,message:String) {
         if(response.statusCode() in setOf(401,403,408,429) || response.statusCode()>=500)throw RetryTransfer("$message · 연결 복구 후 이어받습니다 (HTTP ${response.statusCode()})")
-        check(response.statusCode()==200) {"$message: HTTP ${response.statusCode()}"}
+        check(response.statusCode()==200) {
+            val detail=runCatching {mapper.readTree(response.body()).path("error").asText("")}.getOrDefault("").take(300)
+            "$message: HTTP ${response.statusCode()}"+(if(detail.isNotBlank())" · $detail" else "")
+        }
     }
     private fun http(method:String,path:String,body:HttpRequest.BodyPublisher=HttpRequest.BodyPublishers.noBody(),contentType:String?=null):HttpResponse<ByteArray> {
         val token=sessionToken ?: throw RetryTransfer("실행기 연결이 끊겼습니다. 연결 복구 후 이어받습니다")
@@ -1008,7 +1011,7 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
         }
     }
     private fun sendExitReport(id:String,raw:String):HttpResponse<ByteArray> {
-        val report=mapper.readValue<RunnerExitReport>(raw)
+        val report=mapper.readValue<RunnerExitReport>(raw).copy(runToken=configs[id]?.runToken)
         val compatible=if(report.reason=="IDLE") {
             val response=http("GET","/api/runners/transfer/$id/capabilities")
             if(response.statusCode()!=404)transferResponse(response,"종료 사유 지원 확인 대기")
@@ -1031,6 +1034,8 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                 if(dirty(id).exists() && processes[id]?.isAlive!=true && !orphanAlive(id)) {
                     val exit=instanceRoot(id).resolve("exit.json").takeIf {it.exists()}?.let {mapper.readValue<RunnerExitReport>(it.readText())}
                     send(RunnerMessage("file-progress",id,detail=mapper.writeValueAsString(FolderImportProgress("SCANNING",message="종료 복사본 준비 중 · 준비가 끝나면 바로 다시 시작할 수 있습니다"))))
+                    // Report a durable exit before a potentially slow/full stopped copy. Old managers remain compatible.
+                    instanceRoot(id).resolve("exit.json").takeIf {it.exists()}?.let {transferResponse(sendExitReport(id,it.readText()),"종료 보고 접수 대기")}
                     val token=configs[id]?.runToken
                     val previous=snapshots(id).list().lastOrNull {it.ready.runToken==token}
                     val captured=previous ?: snapshots(id).capture(serverDir(id),token,exit,settledEditRevision(id))

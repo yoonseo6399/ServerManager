@@ -198,7 +198,7 @@ class DiscordMinecraftModule(
             if(routes.isEmpty())return@forEach
             val report=signal.exit?.crashReport
             val reportBytes=report?.let {name->if(!remoteFiles.filesRemote(signal.instanceId))CrashReports.attachment(control.serverDir(signal.instanceId),name) else runCatching {
-                require(CrashReports.validName(name));val out=java.io.ByteArrayOutputStream();remoteFiles.download(signal.instanceId,"crash-reports/$name",out,CrashReports.MAX_BYTES.toLong());out.toByteArray().takeIf {it.isNotEmpty()}
+                require(CrashReports.validName(name));val out=java.io.ByteArrayOutputStream();remoteFiles.download(signal.instanceId,CrashReports.relativePath(name),out,CrashReports.MAX_BYTES.toLong());out.toByteArray().takeIf {it.isNotEmpty()}
             }.getOrNull()}
             val reportSummary=reportBytes?.let {DiscordErrorBuffer.fromReport(it)}
             val summary=reportSummary ?: signal.error
