@@ -22,7 +22,7 @@ class NativeCrashReportTest {
         val logs=LogFiles(temp,base);assertEquals(listOf("server/hs_err_pid123.log"),logs.list().map {it.path})
         assertContains(logs.page("server/hs_err_pid123.log").events.joinToString {it.text},"SIGSEGV")
         val summary=DiscordErrorBuffer.fromReport(text.toByteArray())!!
-        assertEquals("JVM 네이티브 크래시",summary.title);assertContains(summary.description,"ThreadFilter::accept")
+        assertEquals("JVM 네이티브 크래시",summary.errorName);assertContains(summary.description,"ThreadFilter::accept")
         Files.createSymbolicLink(base.resolve("hs_err_pid456.log"),file)
         assertNull(CrashReports.attachment(base,"hs_err_pid456.log"));assertEquals(1,CrashReports.snapshot(base).size)
     }
