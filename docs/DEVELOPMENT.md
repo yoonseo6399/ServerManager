@@ -828,3 +828,5 @@ Beta33 CI45003030697은 성공하고6fd910b/9개 자산으로 게시됐다. 별�
 Beta34 기반 fix/exit-snapshot-generation 통합(solo). 복사본 준비 전 독립 종료 보고·세대 확인·영속 알림 중복 방지, 미완료 lease 보호, native hs_err 로그 감지/조회/Discord 요약·첨부,409 상세 원인 및 ready 응답 유실 재시도 보완. 관련7클래스45개 실패0. 실제 운영의 토큰 변경까지의 최초 상태 전이 이력은 기존 로그에 없어 미확정이며 수동 상주 유지보수도 포함되어 단일 원인으로 단정하지 않는다. 정지 확인·상태 백업 후 기존 복사본 세대 복구로 관리 접수 성공, 게임/월드 변경·서비스 재시작 없음.
 
 Spark 설치 native3.0의 크래시 스택 및 x1=-1이 공식issue1143과 일치하며 설치본 Java background engine 지원 확인. 모드/사용자 설정 자동 변경 없음. 전체 suite/타OS실기/장시간운영/공개 자산 재다운로드 해시검사는 생략. 통합 검증 후 workflow_dispatch skip_full_tests=true로 기존 서명키·immutable prerelease 게시, stable latest 및 기존 태그/자산 유지. 완료 결과는 후속 기록.
+
+Beta35 CI45929789811 success. immutable tag556b570, 공개 자산9개 uploaded/베타 prerelease 확인. 서명·Mac/Windows 패키징·격리 bootstrap·보안 검사 성공, full suite skipped. stable latest v0.6.3 및 기존 자산 보존. 운영 상태 복구는 종료 복사본 접수와 백그라운드 전송 재개까지 확인(최종 확인222MiB 수신/대기1), 전체 반영 완료는 미확인. 운영 앱 자동 업데이트·게임 시작·Spark 설정 변경·게시파일 재다운로드 없음.

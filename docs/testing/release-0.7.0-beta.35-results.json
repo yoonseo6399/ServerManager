@@ -50,5 +50,15 @@
   "native_final_path_test": "2 passed after restricting misplaced native log",
   "runtime_deployment": "not performed",
   "public_assets_redownload_hash": "not performed",
-  "release_integration": "same 45 scoped tests and bootJar passed"
+  "release_integration": "same 45 scoped tests and bootJar passed",
+  "publication": {
+    "ci_run": 45929789811,
+    "conclusion": "success",
+    "tag": "v0.7.0-beta.35",
+    "commit": "556b570",
+    "assets_uploaded": 9,
+    "isPrerelease": true,
+    "stable_latest": "v0.6.3",
+    "metadata_only_verification": true
+  }
 }
