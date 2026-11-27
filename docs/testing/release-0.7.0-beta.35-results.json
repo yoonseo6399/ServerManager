@@ -1,0 +1,54 @@
+{
+  "version": "0.7.0-beta.35",
+  "scoped_tests": [
+    {
+      "class": "local.servermanager.LiveRunnerOperationsTest",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0
+    },
+    {
+      "class": "local.servermanager.DiscordErrorSummaryTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0
+    },
+    {
+      "class": "local.servermanager.RunnerReceiptRecoveryTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0
+    },
+    {
+      "class": "local.servermanager.AutoRestartTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0
+    },
+    {
+      "class": "local.servermanager.NativeCrashReportTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0
+    },
+    {
+      "class": "local.servermanager.LogFilesTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0
+    },
+    {
+      "class": "local.servermanager.RunnerTransferTest",
+      "tests": 13,
+      "failures": 0,
+      "errors": 0
+    }
+  ],
+  "frontend": "TypeScript/Vite passed",
+  "bootJar": "passed",
+  "full_suite": "not run per user instructions",
+  "native_final_path_test": "2 passed after restricting misplaced native log",
+  "runtime_deployment": "not performed",
+  "public_assets_redownload_hash": "not performed",
+  "release_integration": "same 45 scoped tests and bootJar passed"
+}

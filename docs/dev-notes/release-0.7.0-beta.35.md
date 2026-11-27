@@ -1,4 +1,4 @@
-상태: 통합 완료, 빌드·기능 검증 후 CI 게시 예정
+상태: 통합45개·추가native2개·bootJar·프런트 통과, CI 게시 준비
 # 0.7.0-beta.35
 - 포함: fix/exit-snapshot-generation (07127a4). 다른 미출시 브랜치 제외.
 - 게시 beta34 기반, 새 beta35 자산만 생성. stable latest/main 및 기존 릴리즈 보존.
