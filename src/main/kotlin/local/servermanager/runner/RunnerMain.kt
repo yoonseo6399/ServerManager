@@ -1041,7 +1041,12 @@ class RunnerAgent(private val home:Path,private val identity:RunnerIdentity,upda
                     val exit=instanceRoot(id).resolve("exit.json").takeIf {it.exists()}?.let {mapper.readValue<RunnerExitReport>(it.readText())}
                     send(RunnerMessage("file-progress",id,detail=mapper.writeValueAsString(FolderImportProgress("SCANNING",message="종료 복사본 준비 중 · 준비가 끝나면 바로 다시 시작할 수 있습니다"))))
                     // Report a durable exit before a potentially slow/full stopped copy. Old managers remain compatible.
-                    instanceRoot(id).resolve("exit.json").takeIf {it.exists()}?.let {transferResponse(sendExitReport(id,it.readText()),"종료 보고 접수 대기")}
+                    instanceRoot(id).resolve("exit.json").takeIf {it.exists()}?.let {file->
+                        // A lost ready response may leave dirty after the manager already completed the lease.
+                        // The idempotent ready announcement below must still be allowed to reconcile it.
+                        runCatching {transferResponse(sendExitReport(id,file.readText()),"종료 보고 접수 대기")}
+                            .onFailure {send(RunnerMessage("log",id,"warn",version(),"종료 보고 재확인: "+it.message.orEmpty().take(300)))}
+                    }
                     val token=configs[id]?.runToken
                     val previous=snapshots(id).list().lastOrNull {it.ready.runToken==token}
                     val captured=previous ?: snapshots(id).capture(serverDir(id),token,exit,settledEditRevision(id))

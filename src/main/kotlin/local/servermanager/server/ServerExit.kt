@@ -27,7 +27,7 @@ object CrashReports {
         val dir=base.resolve("crash-reports")
         return dir.takeIf {!Files.isSymbolicLink(base)&&!Files.isSymbolicLink(dir)&&Files.isDirectory(dir,NOFOLLOW_LINKS)}
     }
-    fun nativeName(name:String)=Regex("hs_err_pid[0-9]+\\.log").matches(name)
+    fun nativeName(name:String)=name.length<=240 && Regex("hs_err_pid[0-9]+\\.log").matches(name)
     fun relativePath(name:String):String {require(validName(name));return if(nativeName(name))name else "crash-reports/$name"}
     fun validName(name:String)=nativeName(name) || name.length<=240 && Regex("[A-Za-z0-9][A-Za-z0-9._ -]*\\.txt").matches(name)
     fun snapshot(base:Path):Map<String,String> = runCatching {

@@ -16,3 +16,4 @@
 - 공식 async-profiler issue1143: macOS task_threads의0/-1을 걸러내지 못한 native crash, 수정cc76f05. 증거가 일치하나 라이브러리 수정 후 장시간 재발 방지는 미검증.
 - https://github.com/async-profiler/async-profiler/issues/1143
 - 첫 범위 실행: 44개 중43통과/1실패. 실제 HTTP fixture가 새 즉시 exit endpoint를 구현하지 않아404, 복사본 미생성. fixture에 실제 manager.remoteExited 추가하고 old/new manager exitProtocol 호환 검증도 추가한 뒤 재검증한다.
+- 2차 범위45개 통과. 후속 코드 검토에서 ready 수락 후 응답 유실 시 lease가 이미 닫혀 즉시 exit 재보고409가 ready 재시도를 막을 수 있음을 발견: 즉시 보고 실패와 ready 복구를 분리하고 실제 HTTP 응답 유실+청크500+신규 실행 시나리오로 추가 검증한다.
